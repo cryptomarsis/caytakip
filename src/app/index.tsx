@@ -124,7 +124,7 @@ export default function App() {
     ]);
   };
 
-  // Hasat Kaydetme
+  // Hasat Kaydetme (Gelişmiş Hata Yakalama Eklendi)
   const handleSaveHarvest = async () => {
     if (!hForm.producer.trim() || !hForm.kg.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen üretici adı ve KG alanlarını doldurun.');
@@ -137,13 +137,13 @@ export default function App() {
         surum: hForm.surum,
         uretici: hForm.producer.trim(),
         producerName: hForm.producer.trim(),
-        kg: parseFloat(hForm.kg),
-        weight: parseFloat(hForm.kg),
-        firma: hForm.firma,
-        fiyat: parseFloat(hForm.fiyat || '0'),
-        tahsilat: parseFloat(hForm.tahsilat || '0'),
-        aciklama: hForm.aciklama,
-        bahce: hForm.garden.trim()
+        kg: parseFloat(hForm.kg) || 0,
+        weight: parseFloat(hForm.kg) || 0,
+        firma: hForm.firma || '',
+        fiyat: parseFloat(hForm.fiyat) || 0,
+        tahsilat: parseFloat(hForm.tahsilat) || 0,
+        aciklama: hForm.aciklama || '',
+        bahce: hForm.garden.trim() || ''
       };
 
       const res = await fetchWithTimeout(`${API_URL}/harvests`, {
@@ -157,7 +157,9 @@ export default function App() {
         setHForm({ ...hForm, producer: '', kg: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '' });
         fetchData();
       } else {
-        Alert.alert('Hata', 'Kayıt eklenemedi.');
+        const errData = await res.json().catch(() => null);
+        const errorMsg = errData?.message || errData?.error || `Sunucu Yanıt Kodu: ${res.status}`;
+        Alert.alert('Kayıt Başarısız', `Sunucu Hatası: ${errorMsg}`);
       }
     } catch (e: any) {
       Alert.alert('Bağlantı Hatası', e.message);
@@ -185,7 +187,8 @@ export default function App() {
         setGForm({ name: '', adaParsel: '', alan: '' });
         fetchData();
       } else {
-        Alert.alert('Hata', 'Bahçe eklenemedi.');
+        const errData = await res.json().catch(() => null);
+        Alert.alert('Hata', errData?.message || 'Bahçe eklenemedi.');
       }
     } catch (e: any) {
       Alert.alert('Bağlantı Hatası', e.message);
@@ -209,7 +212,7 @@ export default function App() {
           tarih: eForm.date,
           kategori: eForm.kategori,
           aciklama: eForm.aciklama,
-          tutar: parseFloat(eForm.tutar)
+          tutar: parseFloat(eForm.tutar) || 0
         })
       });
 
@@ -218,7 +221,8 @@ export default function App() {
         setEForm({ ...eForm, aciklama: '', tutar: '' });
         fetchData();
       } else {
-        Alert.alert('Hata', 'Gider eklenemedi.');
+        const errData = await res.json().catch(() => null);
+        Alert.alert('Hata', errData?.message || 'Gider eklenemedi.');
       }
     } catch (e: any) {
       Alert.alert('Bağlantı Hatası', e.message);

@@ -2,6 +2,7 @@
   "expo": {
     "name": "CayUreticisiV2",
     "slug": "CayUreticisiV2",
+    "scheme": "cayureticisi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

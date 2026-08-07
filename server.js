@@ -8,10 +8,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Bağlantısı (Render Environment Variable üzerinden veya varsayılan adres)
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
+// MongoDB Bağlantısı 
+// (Render'da tanımladığımız MONGODB_URI ve yedek olarak MONGO_URI kontrol edilir)
+const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
 
-mongoose.connect(MONGO_URI)
+mongoose.connect(MONGO_URI, {
+  serverSelectionTimeoutMS: 5000, // 5 saniyede bağlanamazsa zorla hata döndürür, kilitlenmeyi önler
+  socketTimeoutMS: 45000,
+})
   .then(() => console.log('✅ MongoDB bağlantısı başarılı.'))
   .catch((err) => console.error('❌ MongoDB bağlantı hatası:', err.message));
 
