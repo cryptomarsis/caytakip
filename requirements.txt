@@ -1,0 +1,4 @@
+fastapi>=0.100.0
+uvicorn>=0.20.0
+pydantic>=2.0
+pydrive2>=1.15.0

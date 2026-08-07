@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+build/
+dist/
+__pycache__/
+*.db
+client_secrets.json
+mycreds.txt
+.env

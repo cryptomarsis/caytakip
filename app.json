@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Çay Üreticisi",
+    "scheme": "cayureticisiv2",
+    "slug": "cay-ureticisi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cayureticisi.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.cayureticisi.app"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "988521d0-c07b-466f-ad90-05cb3be4e358"
+      }
+    }
+  }
+}
