@@ -1,25 +1,27 @@
 {
   "expo": {
-    "name": "Çay Üreticisi",
-    "scheme": "cayureticisiv2",
-    "slug": "cay-ureticisi",
+    "name": "CayUreticisiV2",
+    "slug": "CayUreticisiV2",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.cayureticisi.app",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+      "supportsTablet": true
     },
     "android": {
-      "package": "com.cayureticisi.app"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "988521d0-c07b-466f-ad90-05cb3be4e358"
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
       }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     }
   }
 }
