@@ -11,6 +11,7 @@ app.use(express.json());
 // Veritabanı adresi (.env yoksa varsayılan lokal adresi kullanır)
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'cryptomarsisadmin';
+const API_VERSION = '2026-08-10-v3';
 
 mongoose.connect(MONGO_URI, {
   serverSelectionTimeoutMS: 10000,
@@ -115,6 +116,28 @@ const getUserIdentifier = (req) => {
   return { userId, userPhone };
 };
 
+const normalizeVadeTarihi = (value) => {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  let m = s.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/);
+  if (m) {
+    const month = String(Number(m[2])).padStart(2, '0');
+    const day = m[3] ? String(Number(m[3])).padStart(2, '0') : '';
+    return `${m[1]}-${month}${day ? `-${day}` : ''}`;
+  }
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (m) return `${m[3]}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[1])).padStart(2, '0')}`;
+  return s;
+};
+
+const parseTRNumber = (value) => {
+  const raw = String(value ?? '').trim().replace(/\s/g, '');
+  if (!raw) return 0;
+  if (raw.includes(',') && raw.includes('.')) return Number(raw.replace(/\./g, '').replace(',', '.'));
+  if (raw.includes(',')) return Number(raw.replace(',', '.'));
+  return Number(raw);
+};
+
 const buildUserFilter = (req) => {
   if (req.headers['admin-secret'] === ADMIN_SECRET) {
     return {};
@@ -134,6 +157,14 @@ const buildUserFilter = (req) => {
 };
 
 // --- ROUTES ---
+
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, version: API_VERSION, service: 'cay-ureticisi-takip' });
+});
+
+app.get('/api/version', (req, res) => {
+  res.json({ version: API_VERSION, time: new Date().toISOString() });
+});
 
 app.get('/', (req, res) => {
   res.send('🌱 Çay Takip Sistemi API Çalışıyor!');
@@ -160,11 +191,19 @@ app.post('/api/harvests', async (req, res) => {
       return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
     }
 
-    const kgVal = Number(req.body.kg || req.body.weight) || 0;
-    const fiyatVal = Number(req.body.fiyat) || 0;
-    const tahsilatVal = Number(req.body.tahsilat) || 0;
+    const kgVal = parseTRNumber(req.body.kg ?? req.body.weight);
+    const fiyatVal = parseTRNumber(req.body.fiyat);
+    const tahsilatVal = parseTRNumber(req.body.tahsilat);
+    const vadeTarihi = normalizeVadeTarihi(req.body.vadeTarihi);
+    const isVadeli = Boolean(req.body.isVadeli || vadeTarihi);
+    if (!Number.isFinite(kgVal) || kgVal <= 0) return res.status(400).json({ error: 'Geçerli bir KG girin.' });
+    if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
+    if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0 || tahsilatVal > kgVal * fiyatVal + 0.01) {
+      return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
+    }
+    if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vadeli satış için vade tarihi zorunludur.' });
     const toplam = kgVal * fiyatVal;
-    const kalan = toplam - tahsilatVal;
+    const kalan = Math.max(0, toplam - tahsilatVal);
 
     let durum = 'Bekliyor';
     if (kalan <= 0 && toplam > 0) durum = 'Ödendi';
@@ -180,6 +219,8 @@ app.post('/api/harvests', async (req, res) => {
       tahsilat: tahsilatVal,
       toplamTutar: toplam,
       kalanBakiye: kalan,
+      isVadeli,
+      vadeTarihi: isVadeli ? vadeTarihi : '',
       odemeDurumu: durum
     };
 
@@ -252,7 +293,7 @@ app.post('/api/payments', async (req, res) => {
       return res.status(400).json({ error: 'Seçilen satış kaydının kimliği geçersiz.' });
     }
 
-    const ödemeTutar = Number(String(tutar ?? '').replace(',', '.'));
+    const ödemeTutar = parseTRNumber(tutar);
     if (!Number.isFinite(ödemeTutar) || ödemeTutar <= 0) {
       return res.status(400).json({ error: 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.' });
     }
@@ -278,12 +319,10 @@ app.post('/api/payments', async (req, res) => {
     }
 
     const yeniTahsilat = mevcutTahsilat + ödemeTutar;
-    const yeniKalan = Math.max(0, toplam - yeniTahsilat);
-
     harvest.tahsilat = yeniTahsilat;
     harvest.toplamTutar = toplam;
-    harvest.kalanBakiye = yeniKalan;
-    harvest.odemeDurumu = yeniKalan <= 0.01 ? 'Ödendi' : 'Kısmi Ödendi';
+    harvest.kalanBakiye = Math.max(0, toplam - yeniTahsilat);
+    harvest.odemeDurumu = harvest.kalanBakiye <= 0.01 ? 'Ödendi' : 'Kısmi Ödendi';
     await harvest.save();
 
     try {
@@ -404,7 +443,7 @@ app.post('/api/factory-prices', async (req, res) => {
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
 
     const firma = String(req.body.firma || '').trim();
-    const fiyat = Number(String(req.body.fiyat ?? '').replace(',', '.'));
+    const fiyat = parseTRNumber(req.body.fiyat);
     const tarih = String(req.body.tarih || '').trim();
 
     if (!firma) return res.status(400).json({ error: 'Fabrika adı zorunludur.' });
@@ -578,6 +617,10 @@ app.get('/api/admin/all-data', async (req, res) => {
     ]);
     res.json({ harvests, expenses, gardens, factoryPrices, ads });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint bulunamadı.', method: req.method, path: req.path, version: API_VERSION });
 });
 
 const PORT = process.env.PORT || 10000;
