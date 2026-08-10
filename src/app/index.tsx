@@ -35,6 +35,42 @@ interface UserSession {
   role: 'admin' | 'user';
 }
 
+interface HarvestItem {
+  _id?: string;
+  userId?: string;
+  userPhone?: string;
+  tarih?: string;
+  surum?: string;
+  uretici?: string;
+  producerName?: string;
+  kg?: number;
+  weight?: number;
+  firma?: string;
+  fiyat?: number;
+  tahsilat?: number;
+  aciklama?: string;
+  bahce?: string;
+}
+
+interface ExpenseItem {
+  _id?: string;
+  userId?: string;
+  userPhone?: string;
+  tarih?: string;
+  kategori?: string;
+  aciklama?: string;
+  tutar?: number;
+}
+
+interface GardenItem {
+  _id?: string;
+  userId?: string;
+  userPhone?: string;
+  name?: string;
+  adaParsel?: string;
+  alan?: string;
+}
+
 // ==========================================
 // HELPERS & STORAGE SERVICES
 // ==========================================
@@ -88,7 +124,7 @@ const formatTL = (val: number) =>
 // MAIN COMPONENT
 // ==========================================
 export default function App() {
-  // Kullanıcı Giriş / Kayıt State'leri
+  // Auth State'leri
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authPhone, setAuthPhone] = useState('');
@@ -100,9 +136,9 @@ export default function App() {
   const [initialCheckDone, setInitialCheckDone] = useState(false);
 
   // Veri Listeleri
-  const [harvests, setHarvests] = useState<any[]>([]);
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [gardens, setGardens] = useState<any[]>([]);
+  const [harvests, setHarvests] = useState<HarvestItem[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [gardens, setGardens] = useState<GardenItem[]>([]);
 
   // Form State'leri
   const [hForm, setHForm] = useState({
@@ -128,17 +164,17 @@ export default function App() {
 
   // Tahsilat Düzenleme Modal State'leri
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingHarvest, setEditingHarvest] = useState<any>(null);
+  const [editingHarvest, setEditingHarvest] = useState<HarvestItem | null>(null);
   const [editTahsilatVal, setEditTahsilatVal] = useState('');
 
-  // Toplu Tahsilat State'leri
+  // Toplu Tahsilat State'i
   const [bulkCollections, setBulkCollections] = useState<{ id: string; producer: string; tutar: string; aciklama: string }[]>([
     { id: '1', producer: '', tutar: '', aciklama: '' }
   ]);
 
   const isAdmin = currentUser?.role === 'admin';
 
-  // Uygulama Açılışında Oturumu Kontrol Et
+  // Oturum Kontrolü
   useEffect(() => {
     const checkSavedSession = async () => {
       try {
@@ -155,7 +191,7 @@ export default function App() {
     checkSavedSession();
   }, []);
 
-  // Verileri Sunucudan Çek ve userId / Telefon Filtrelemesi Yap
+  // Sunucudan Veri Çekme
   const fetchData = async () => {
     if (!currentUser) return;
     setLoading(true);
@@ -166,17 +202,16 @@ export default function App() {
         fetchWithTimeout(`${API_URL}/gardens`)
       ]);
 
-      let rawH = resH.ok ? await resH.json() : [];
-      let rawE = resE.ok ? await resE.json() : [];
-      let rawG = resG.ok ? await resG.json() : [];
+      let rawH: HarvestItem[] = resH.ok ? await resH.json() : [];
+      let rawE: ExpenseItem[] = resE.ok ? await resE.json() : [];
+      let rawG: GardenItem[] = resG.ok ? await resG.json() : [];
 
       if (!isAdmin) {
         const currentUserId = currentUser.userId;
         const uPhone = currentUser.phone;
         const uName = currentUser.name.toLowerCase().trim();
 
-        // userId öncelikli, geriye dönük uyumluluk için telefon/isim eşleşmesi desteği
-        rawH = (rawH || []).filter((h: any) => {
+        rawH = (rawH || []).filter((h) => {
           if (h.userId) return h.userId === currentUserId;
           if (!h.userPhone && !h.uretici && !h.producerName) return true;
           const matchPhone = h.userPhone === uPhone;
@@ -186,8 +221,8 @@ export default function App() {
           return matchPhone || matchName || !h.userPhone;
         });
 
-        rawE = (rawE || []).filter((e: any) => (e.userId ? e.userId === currentUserId : !e.userPhone || e.userPhone === uPhone));
-        rawG = (rawG || []).filter((g: any) => (g.userId ? g.userId === currentUserId : !g.userPhone || g.userPhone === uPhone));
+        rawE = (rawE || []).filter((e) => (e.userId ? e.userId === currentUserId : !e.userPhone || e.userPhone === uPhone));
+        rawG = (rawG || []).filter((g) => (g.userId ? g.userId === currentUserId : !g.userPhone || g.userPhone === uPhone));
       }
 
       setHarvests(rawH || []);
@@ -207,7 +242,7 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Giriş Yap / Kayıt Ol İşlemleri (userId Oluşturma Dahil)
+  // Auth İşlemleri
   const handleAuth = async () => {
     const cleanPhone = authPhone.trim();
     if (!cleanPhone || cleanPhone.length < 10) {
@@ -217,7 +252,6 @@ export default function App() {
 
     const isAdminUser = cleanPhone === ADMIN_PHONE || authName.toLowerCase().includes('admin');
     const userRole: 'admin' | 'user' = isAdminUser ? 'admin' : 'user';
-
     const generatedUserId = `usr_${cleanPhone}`;
 
     const userData: UserSession = {
@@ -227,22 +261,16 @@ export default function App() {
       role: userRole
     };
 
-    if (authMode === 'register') {
-      if (!authName.trim()) {
-        Alert.alert('Eksik Bilgi', 'Lütfen Adınız ve Soyadınızı girin.');
-        return;
-      }
-      setCurrentUser(userData);
-      await saveSession(userData);
-      Alert.alert('Kayıt Başarılı', `Hoş geldiniz, ${authName.trim()}! ${isAdminUser ? '(Admin Yetkisi Tanımlandı)' : ''}`);
-    } else {
-      setCurrentUser(userData);
-      await saveSession(userData);
-      Alert.alert('Giriş Başarılı', 'Uygulamaya giriş yapıldı.');
+    if (authMode === 'register' && !authName.trim()) {
+      Alert.alert('Eksik Bilgi', 'Lütfen Adınız ve Soyadınızı girin.');
+      return;
     }
+
+    setCurrentUser(userData);
+    await saveSession(userData);
+    Alert.alert('Başarılı', `Hoş geldiniz, ${userData.name}! ${isAdminUser ? '(Admin Yetkisi Tanımlandı)' : ''}`);
   };
 
-  // Çıkış Yap İşlemi
   const handleLogout = async () => {
     await clearSession();
     setCurrentUser(null);
@@ -256,7 +284,6 @@ export default function App() {
   const pendingCollection = totalSales - totalPay;
   const netProfit = totalSales - totalExp;
 
-  // Admin Paneli İçin Üretici Bazlı Gruplama
   const getAdminProducerSummary = () => {
     const summaryMap: { [key: string]: { name: string; totalKg: number; totalSales: number; totalPay: number; count: number } } = {};
 
@@ -280,7 +307,6 @@ export default function App() {
     return Object.values(summaryMap);
   };
 
-  // Silme Fonksiyonu
   const handleDelete = (endpoint: string, id: string, title: string) => {
     Alert.alert(`${title} Silinsin mi?`, 'Bu işlem geri alınamaz.', [
       { text: 'İptal', style: 'cancel' },
@@ -310,7 +336,7 @@ export default function App() {
   const handleSaveHarvest = async () => {
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
     if (!hForm.kg.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen KG alanını doldurun.');
+      Alert.alert('Eksik Bilgi', 'Lütfen KG (Miktar) alanını doldurun.');
       return;
     }
     setLoading(true);
@@ -324,10 +350,10 @@ export default function App() {
         producerName: producerName,
         kg: parseFloat(hForm.kg) || 0,
         weight: parseFloat(hForm.kg) || 0,
-        firma: hForm.firma || '',
+        firma: hForm.firma.trim() || '',
         fiyat: parseFloat(hForm.fiyat) || 0,
         tahsilat: parseFloat(hForm.tahsilat) || 0,
-        aciklama: hForm.aciklama || '',
+        aciklama: hForm.aciklama.trim() || '',
         bahce: hForm.garden.trim() || ''
       };
 
@@ -339,7 +365,17 @@ export default function App() {
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Hasat kaydı eklendi.');
-        setHForm({ ...hForm, producer: '', kg: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '' });
+        setHForm({
+          date: new Date().toISOString().split('T')[0],
+          surum: '1. Sürüm',
+          producer: '',
+          kg: '',
+          firma: '',
+          fiyat: '',
+          tahsilat: '0',
+          aciklama: '',
+          garden: ''
+        });
         await fetchData();
         setActiveTab('dashboard');
       } else {
@@ -353,7 +389,7 @@ export default function App() {
     }
   };
 
-  // Tahsilat Ekleme
+  // Tahsilat İşlemleri
   const processSingleCollection = async (selectedProdName: string, payAmount: number) => {
     const targetHarvests = harvests.filter(h => {
       const pName = (h.uretici || h.producerName || '').trim().toLowerCase();
@@ -370,7 +406,7 @@ export default function App() {
       const currentPay = Number(h.tahsilat) || 0;
       const remainingDebt = totalSale - currentPay;
 
-      if (remainingDebt > 0) {
+      if (remainingDebt > 0 && h._id) {
         const addPay = Math.min(remainingDebt, remainingPayment);
         const updatedPay = currentPay + addPay;
 
@@ -386,7 +422,6 @@ export default function App() {
     return true;
   };
 
-  // Toplu Tahsilat İşleme
   const handleSaveBulkCollections = async () => {
     const validItems = bulkCollections.filter(item => item.producer.trim() && !isNaN(parseFloat(item.tutar)) && parseFloat(item.tutar) > 0);
 
@@ -403,7 +438,7 @@ export default function App() {
         if (success) processedCount++;
       }
 
-      Alert.alert('Başarılı', `${processedCount} adet tahsilat işlemi başarıyla tamamlandı.`);
+      Alert.alert('Başarılı', `${processedCount} adet tahsilat işlemi tamamlandı.`);
       setBulkCollections([{ id: '1', producer: '', tutar: '', aciklama: '' }]);
       await fetchData();
     } catch (e: any) {
@@ -414,10 +449,7 @@ export default function App() {
   };
 
   const addBulkRow = () => {
-    setBulkCollections([
-      ...bulkCollections,
-      { id: Date.now().toString(), producer: '', tutar: '', aciklama: '' }
-    ]);
+    setBulkCollections([...bulkCollections, { id: Date.now().toString(), producer: '', tutar: '', aciklama: '' }]);
   };
 
   const removeBulkRow = (id: string) => {
@@ -429,7 +461,7 @@ export default function App() {
     setBulkCollections(bulkCollections.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
-  // CSV Dışa Aktarma
+  // CSV Aktarımı
   const exportToCSV = async () => {
     try {
       let csvContent = 'Tarih,Surum,Uretici,KG,Firma,Fiyat,Tahsilat,Bahce,Aciklama\n';
@@ -451,7 +483,6 @@ export default function App() {
     }
   };
 
-  // CSV İçe Aktarma
   const importFromCSV = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({ type: '*/*' });
@@ -462,7 +493,7 @@ export default function App() {
 
       const lines = fileContent.split('\n');
       if (lines.length <= 1) {
-        Alert.alert('Hata', 'Dosya boş veya geçersiz formatta.');
+        Alert.alert('Hata', 'Dosya boş veya geçersiz.');
         return;
       }
 
@@ -502,7 +533,7 @@ export default function App() {
         }
       }
 
-      Alert.alert('Başarılı', `${importedCount} adet kayıt içe aktarıldı.`);
+      Alert.alert('Başarılı', `${importedCount} kayıt içe aktarıldı.`);
       await fetchData();
     } catch (error: any) {
       Alert.alert('Hata', 'İçe aktarım başarısız: ' + error.message);
@@ -511,18 +542,17 @@ export default function App() {
     }
   };
 
-  // Tahsilat Düzenleme Modalı Aç
-  const openEditModal = (harvestItem: any) => {
+  const openEditModal = (harvestItem: HarvestItem) => {
     setEditingHarvest(harvestItem);
     setEditTahsilatVal(String(harvestItem.tahsilat || 0));
     setEditModalVisible(true);
   };
 
   const handleUpdateCollection = async () => {
-    if (!editingHarvest) return;
+    if (!editingHarvest || !editingHarvest._id) return;
     const newTahsilat = parseFloat(editTahsilatVal);
     if (isNaN(newTahsilat) || newTahsilat < 0) {
-      Alert.alert('Hata', 'Lütfen geçerli bir tutar girin.');
+      Alert.alert('Hata', 'Geçerli bir tutar girin.');
       return;
     }
 
@@ -549,7 +579,6 @@ export default function App() {
     }
   };
 
-  // Bahçe Kaydetme
   const handleSaveGarden = async () => {
     if (!gForm.name.trim() && !gForm.adaParsel.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen Bahçe Adı veya Ada/Parsel girin.');
@@ -584,7 +613,6 @@ export default function App() {
     }
   };
 
-  // Gider Kaydetme
   const handleSaveExpense = async () => {
     if (!eForm.tutar.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen tutar girin.');
@@ -620,7 +648,6 @@ export default function App() {
     }
   };
 
-  // Açılış Yükleniyor Kontrolü
   if (!initialCheckDone) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -629,7 +656,7 @@ export default function App() {
     );
   }
 
-  // GİRİŞ / KAYIT EKRANI
+  // LOGIN / REGISTER SCREEN
   if (!currentUser) {
     return (
       <SafeAreaProvider>
@@ -684,7 +711,7 @@ export default function App() {
     );
   }
 
-  // ANA UYGULAMA EKRANI
+  // MAIN APP SCREEN
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
@@ -703,7 +730,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* TAB MENÜSÜ */}
+        {/* TAB BAR */}
         <View style={styles.navBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <TouchableOpacity
@@ -741,7 +768,6 @@ export default function App() {
               <Text style={[styles.navText, activeTab === 'gardens' && styles.navTextActive]}>🏡 Bahçeler</Text>
             </TouchableOpacity>
 
-            {/* ADMIN SEKMESİ */}
             {isAdmin && (
               <TouchableOpacity
                 style={[styles.navItem, activeTab === 'admin' && styles.navItemActiveAdmin]}
@@ -753,12 +779,12 @@ export default function App() {
           </ScrollView>
         </View>
 
-        {/* İÇERİK ALANI */}
+        {/* CONTENT */}
         <ScrollView
           style={styles.content}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} colors={['#1b4332']} />}
         >
-          {/* DASHBOARD TABI */}
+          {/* DASHBOARD TAB */}
           {activeTab === 'dashboard' && (
             <View>
               <Text style={styles.sectionTitle}>GENEL ÖZET PANELİ</Text>
@@ -799,7 +825,6 @@ export default function App() {
                 </View>
               </View>
 
-              {/* CSV AKTARIM BUTONLARI */}
               <View style={styles.csvContainer}>
                 <TouchableOpacity style={styles.csvExportBtn} onPress={exportToCSV}>
                   <Text style={styles.csvBtnText}>📄 CSV İndir / Paylaş</Text>
@@ -809,7 +834,6 @@ export default function App() {
                 </TouchableOpacity>
               </View>
 
-              {/* RECENT HARVESTS LIST */}
               <Text style={[styles.sectionTitle, { marginTop: 20 }]}>SON HASAT KAYITLARI</Text>
               {harvests.length === 0 ? (
                 <Text style={styles.emptyText}>Henüz kaydedilmiş bir hasat yok.</Text>
@@ -840,7 +864,7 @@ export default function App() {
                         <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
                           <Text style={styles.actionBtnText}>✏️ Ödeme</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('harvests', item._id, 'Hasat')}>
+                        <TouchableOpacity style={styles.deleteBtn} onPress={() => item._id && handleDelete('harvests', item._id, 'Hasat')}>
                           <Text style={styles.actionBtnText}>🗑️ Sil</Text>
                         </TouchableOpacity>
                       </View>
@@ -851,7 +875,7 @@ export default function App() {
             </View>
           )}
 
-          {/* HASAT EKLE TABI */}
+          {/* HARVEST TAB */}
           {activeTab === 'harvest' && (
             <View style={styles.formCard}>
               <Text style={styles.formTitle}>🌱 YENİ HASAT / SATIŞ KAYDI</Text>
@@ -872,68 +896,85 @@ export default function App() {
                     style={[styles.groupBtn, hForm.surum === s && styles.groupBtnActive]}
                     onPress={() => setHForm({ ...hForm, surum: s })}
                   >
-                    <Text style={[styles.groupBtnText, hForm.surum === s && styles.groupBtnTextActive]}>{s}</Text>
+                    <Text style={[styles.groupBtnText, hForm.surum === s && styles.groupBtnTextActive]}>
+                      {s}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <Text style={styles.label}>Üretici Adı</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.producer}
-                onChangeText={(t) => setHForm({ ...hForm, producer: t })}
-                placeholder={currentUser.name}
-              />
+              {isAdmin && (
+                <View style={{ width: '100%' }}>
+                  <Text style={styles.label}>Üretici Adı / Telefonu</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={hForm.producer}
+                    onChangeText={(t) => setHForm({ ...hForm, producer: t })}
+                    placeholder="Ahmet Yılmaz (Boş bırakılırsa kendiniz kaydolur)"
+                  />
+                </View>
+              )}
 
-              <Text style={styles.label}>Miktar (KG)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={hForm.kg}
-                onChangeText={(t) => setHForm({ ...hForm, kg: t })}
-                placeholder="Örn: 250"
-              />
-
-              <Text style={styles.label}>Firma / Çay Fabrikası</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.firma}
-                onChangeText={(t) => setHForm({ ...hForm, firma: t })}
-                placeholder="Örn: ÇAYKUR / Özel Fabrika"
-              />
-
-              <Text style={styles.label}>Birim Fiyat (TL/KG)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={hForm.fiyat}
-                onChangeText={(t) => setHForm({ ...hForm, fiyat: t })}
-                placeholder="Örn: 19.00"
-              />
-
-              <Text style={styles.label}>Peşin Tahsil Edilen Tutar (TL)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={hForm.tahsilat}
-                onChangeText={(t) => setHForm({ ...hForm, tahsilat: t })}
-                placeholder="0"
-              />
-
-              <Text style={styles.label}>Bahçe Seçimi / Tanımı</Text>
+              <Text style={styles.label}>Bahçe Seçimi / Tanımı (İsteğe Bağlı)</Text>
               <TextInput
                 style={styles.input}
                 value={hForm.garden}
                 onChangeText={(t) => setHForm({ ...hForm, garden: t })}
-                placeholder="Örn: Derebaşı Bahçe"
+                placeholder="Örn: Ev Arkası Bahçe veya Ada/Parsel"
               />
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Miktar (KG) *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={hForm.kg}
+                    onChangeText={(t) => setHForm({ ...hForm, kg: t })}
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Birim Fiyat (TL)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={hForm.fiyat}
+                    onChangeText={(t) => setHForm({ ...hForm, fiyat: t })}
+                    placeholder="0.00"
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Teslim Edilen Firma</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={hForm.firma}
+                    onChangeText={(t) => setHForm({ ...hForm, firma: t })}
+                    placeholder="Örn: ÇAYKUR / Özel Fabrika"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Peşin Tahsilat (TL)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={hForm.tahsilat}
+                    onChangeText={(t) => setHForm({ ...hForm, tahsilat: t })}
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
 
               <Text style={styles.label}>Açıklama / Not</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { height: 70 }]}
                 value={hForm.aciklama}
                 onChangeText={(t) => setHForm({ ...hForm, aciklama: t })}
-                placeholder="İsteğe bağlı not..."
+                placeholder="Ek notlar veya açıklamalar..."
+                multiline
               />
 
               <TouchableOpacity style={styles.submitBtn} onPress={handleSaveHarvest}>
@@ -942,198 +983,196 @@ export default function App() {
             </View>
           )}
 
-          {/* TAHSİLAT TABI */}
+          {/* COLLECTIONS TAB */}
           {activeTab === 'collections' && (
             <View style={styles.formCard}>
               <Text style={styles.formTitle}>💵 TOPLU / TEKİL TAHSİLAT GİRİŞİ</Text>
-              <Text style={{ fontSize: 13, color: '#666', marginBottom: 15 }}>
-                Aşağıdaki alandan üreticilerin aldığı ödemeleri toplu olarak girebilirsiniz. Sistem otomatik olarak eski borçlardan düşecektir.
+              <Text style={{ marginBottom: 15, color: '#666', fontSize: 13 }}>
+                Üreticilerin biriken borçlarına karşılık yapılan ödemeleri buradan girebilirsiniz.
               </Text>
 
-              {bulkCollections.map((item, index) => (
-                <View key={item.id} style={styles.bulkRow}>
-                  <Text style={{ fontWeight: 'bold', marginBottom: 5 }}>Ödeme #{index + 1}</Text>
+              {bulkCollections.map((row, index) => (
+                <View key={row.id} style={{ marginBottom: 15, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: 'bold', color: '#1b4332' }}>Kayıt #{index + 1}</Text>
+                    {bulkCollections.length > 1 && (
+                      <TouchableOpacity onPress={() => removeBulkRow(row.id)}>
+                        <Text style={{ color: '#d62828', fontWeight: 'bold' }}>✕ Kaldır</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <Text style={styles.label}>Üretici Adı</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="Üretici Adı Soyadı"
-                    value={item.producer}
-                    onChangeText={(v) => updateBulkRow(item.id, 'producer', v)}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Tahsil Edilen Tutar (TL)"
-                    keyboardType="numeric"
-                    value={item.tutar}
-                    onChangeText={(v) => updateBulkRow(item.id, 'tutar', v)}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Açıklama (Opsiyonel)"
-                    value={item.aciklama}
-                    onChangeText={(v) => updateBulkRow(item.id, 'aciklama', v)}
+                    value={row.producer}
+                    onChangeText={(t) => updateBulkRow(row.id, 'producer', t)}
+                    placeholder="Üretici Adı"
                   />
 
-                  {bulkCollections.length > 1 && (
-                    <TouchableOpacity style={styles.removeRowBtn} onPress={() => removeBulkRow(item.id)}>
-                      <Text style={{ color: '#d62828', fontWeight: 'bold' }}>❌ Bu Satırı Sil</Text>
-                    </TouchableOpacity>
-                  )}
+                  <Text style={styles.label}>Tahsilat Tutarı (TL)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={row.tutar}
+                    onChangeText={(t) => updateBulkRow(row.id, 'tutar', t)}
+                    placeholder="0.00"
+                    keyboardType="numeric"
+                  />
                 </View>
               ))}
 
-              <TouchableOpacity style={styles.addRowBtn} onPress={addBulkRow}>
-                <Text style={styles.addRowBtnText}>➕ Yeni Satır Ekle</Text>
+              <TouchableOpacity style={[styles.csvExportBtn, { marginBottom: 15, backgroundColor: '#2a9d8f' }]} onPress={addBulkRow}>
+                <Text style={styles.csvBtnText}>➕ Yeni Tahsilat Satırı Ekle</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.submitBtn, { marginTop: 15 }]} onPress={handleSaveBulkCollections}>
-                <Text style={styles.submitBtnText}>💰 TAHSİLATLARI İŞLE</Text>
+              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveBulkCollections}>
+                <Text style={styles.submitBtnText}>💾 TAHSİLATLARI İŞLE</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          {/* GİDERLER TABI */}
+          {/* EXPENSE TAB */}
           {activeTab === 'expense' && (
-            <View>
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>📉 YENİ GİDER KAYDI</Text>
+            <View style={styles.formCard}>
+              <Text style={styles.formTitle}>📉 YENİ GİDER KAYDI</Text>
 
-                <Text style={styles.label}>Tarih</Text>
-                <TextInput
-                  style={styles.input}
-                  value={eForm.date}
-                  onChangeText={(t) => setEForm({ ...eForm, date: t })}
-                  placeholder="YYYY-MM-DD"
-                />
+              <Text style={styles.label}>Tarih</Text>
+              <TextInput
+                style={styles.input}
+                value={eForm.date}
+                onChangeText={(t) => setEForm({ ...eForm, date: t })}
+                placeholder="YYYY-MM-DD"
+              />
 
-                <Text style={styles.label}>Kategori</Text>
-                <View style={styles.rowBtnGroup}>
-                  {['İşçilik', 'Gübre', 'Ulaşım', 'Yemek', 'Diğer'].map((cat) => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[styles.groupBtn, eForm.kategori === cat && styles.groupBtnActive]}
-                      onPress={() => setEForm({ ...eForm, kategori: cat })}
-                    >
-                      <Text style={[styles.groupBtnText, eForm.kategori === cat && styles.groupBtnTextActive]}>{cat}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Tutar (TL)</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={eForm.tutar}
-                  onChangeText={(t) => setEForm({ ...eForm, tutar: t })}
-                  placeholder="0.00"
-                />
-
-                <Text style={styles.label}>Açıklama</Text>
-                <TextInput
-                  style={styles.input}
-                  value={eForm.aciklama}
-                  onChangeText={(t) => setEForm({ ...eForm, aciklama: t })}
-                  placeholder="Gider detayları..."
-                />
-
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveExpense}>
-                  <Text style={styles.submitBtnText}>💾 GİDERİ KAYDET</Text>
-                </TouchableOpacity>
+              <Text style={styles.label}>Kategori</Text>
+              <View style={styles.rowBtnGroup}>
+                {['İşçilik', 'Gübre', 'Ulaşım', 'Yemek', 'Diğer'].map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[styles.groupBtn, eForm.kategori === cat && styles.groupBtnActive]}
+                    onPress={() => setEForm({ ...eForm, kategori: cat })}
+                  >
+                    <Text style={[styles.groupBtnText, eForm.kategori === cat && styles.groupBtnTextActive]}>
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>KAYITLI GİDERLER</Text>
+              <Text style={styles.label}>Tutar (TL) *</Text>
+              <TextInput
+                style={styles.input}
+                value={eForm.tutar}
+                onChangeText={(t) => setEForm({ ...eForm, tutar: t })}
+                placeholder="0.00"
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.label}>Açıklama</Text>
+              <TextInput
+                style={styles.input}
+                value={eForm.aciklama}
+                onChangeText={(t) => setEForm({ ...eForm, aciklama: t })}
+                placeholder="Gider detayını yazın..."
+              />
+
+              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveExpense}>
+                <Text style={styles.submitBtnText}>💾 GİDERİ KAYDET</Text>
+              </TouchableOpacity>
+
+              <Text style={[styles.sectionTitle, { marginTop: 25 }]}>GİDER GEÇMİŞİ</Text>
               {expenses.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz kaydedilmiş bir gider bulunmuyor.</Text>
+                <Text style={styles.emptyText}>Henüz kaydedilmiş gider yok.</Text>
               ) : (
-                expenses.map((exp, idx) => (
-                  <View key={exp._id || idx} style={styles.listItem}>
+                expenses.map((item, idx) => (
+                  <View key={item._id || idx} style={styles.listItem}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏷️ {exp.kategori || 'Genel Gider'}</Text>
-                      <Text style={styles.listSubText}>📅 {exp.tarih || 'Tarih Yok'} | {exp.aciklama}</Text>
-                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#d62828', marginTop: 3 }}>
-                        {formatTL(exp.tutar)}
+                      <Text style={styles.listTitle}>{item.kategori} Gideri</Text>
+                      <Text style={styles.listSubText}>📅 {item.tarih || 'Tarih Yok'} | 📝 {item.aciklama || 'Açıklama Yok'}</Text>
+                      <Text style={{ color: '#d62828', fontWeight: 'bold', marginTop: 3 }}>-{formatTL(Number(item.tutar) || 0)}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.deleteBtn} onPress={() => item._id && handleDelete('expenses', item._id, 'Gider')}>
+                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+
+          {/* GARDENS TAB */}
+          {activeTab === 'gardens' && (
+            <View style={styles.formCard}>
+              <Text style={styles.formTitle}>🏡 BAHÇE / PARSEL TANIMI</Text>
+
+              <Text style={styles.label}>Bahçe Adı / Tanımı</Text>
+              <TextInput
+                style={styles.input}
+                value={gForm.name}
+                onChangeText={(t) => setGForm({ ...gForm, name: t })}
+                placeholder="Örn: Dere Boyu Bahçesi"
+              />
+
+              <Text style={styles.label}>Ada / Parsel No</Text>
+              <TextInput
+                style={styles.input}
+                value={gForm.adaParsel}
+                onChangeText={(t) => setGForm({ ...gForm, adaParsel: t })}
+                placeholder="Örn: 101 / 12"
+              />
+
+              <Text style={styles.label}>Alan (Dönüm / m²)</Text>
+              <TextInput
+                style={styles.input}
+                value={gForm.alan}
+                onChangeText={(t) => setGForm({ ...gForm, alan: t })}
+                placeholder="Örn: 5 Dönüm"
+              />
+
+              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveGarden}>
+                <Text style={styles.submitBtnText}>💾 BAHÇE EKLE</Text>
+              </TouchableOpacity>
+
+              <Text style={[styles.sectionTitle, { marginTop: 25 }]}>KAYITLI BAHÇELER</Text>
+              {gardens.length === 0 ? (
+                <Text style={styles.emptyText}>Henüz kaydedilmiş bahçe yok.</Text>
+              ) : (
+                gardens.map((item, idx) => (
+                  <View key={item._id || idx} style={styles.listItem}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle}>{item.name || 'İsimsiz Bahçe'}</Text>
+                      <Text style={styles.listSubText}>📍 Ada/Parsel: {item.adaParsel || '-'}</Text>
+                      <Text style={styles.listSubText}>📐 Alan: {item.alan || '-'}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.deleteBtn} onPress={() => item._id && handleDelete('gardens', item._id, 'Bahçe')}>
+                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+
+          {/* ADMIN TAB */}
+          {activeTab === 'admin' && isAdmin && (
+            <View style={{ gap: 15 }}>
+              <Text style={styles.sectionTitle}>👑 YÖNETİCİ GENEL ÖZETİ</Text>
+              {getAdminProducerSummary().map((prod, idx) => {
+                const rem = prod.totalSales - prod.totalPay;
+                return (
+                  <View key={idx} style={styles.listItem}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle}>👤 {prod.name}</Text>
+                      <Text style={styles.listSubText}>
+                        📊 {prod.count} Kayıt | ⚖️ {prod.totalKg.toLocaleString('tr-TR')} KG
+                      </Text>
+                      <Text style={styles.listSubText}>
+                        💰 Toplam Satış: {formatTL(prod.totalSales)} | 🟢 Ödenen: {formatTL(prod.totalPay)}
+                      </Text>
+                      <Text style={{ color: rem > 0 ? '#d62828' : '#2b9348', fontWeight: 'bold', marginTop: 2 }}>
+                        {rem > 0 ? `🔴 Kalan Bakiye: ${formatTL(rem)}` : '🟢 Borcu Yok'}
                       </Text>
                     </View>
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('expenses', exp._id, 'Gider')}>
-                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </View>
-          )}
-
-          {/* BAHÇELER TABI */}
-          {activeTab === 'gardens' && (
-            <View>
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>🏡 YENİ BAHÇE EKLE</Text>
-
-                <Text style={styles.label}>Bahçe Adı / Tanımı</Text>
-                <TextInput
-                  style={styles.input}
-                  value={gForm.name}
-                  onChangeText={(t) => setGForm({ ...gForm, name: t })}
-                  placeholder="Örn: Ev Arkası Çaylık"
-                />
-
-                <Text style={styles.label}>Ada / Parsel No</Text>
-                <TextInput
-                  style={styles.input}
-                  value={gForm.adaParsel}
-                  onChangeText={(t) => setGForm({ ...gForm, adaParsel: t })}
-                  placeholder="Örn: 102/4"
-                />
-
-                <Text style={styles.label}>Alan (Dönüm / m²)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={gForm.alan}
-                  onChangeText={(t) => setGForm({ ...gForm, alan: t })}
-                  placeholder="Örn: 3 Dönüm"
-                />
-
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveGarden}>
-                  <Text style={styles.submitBtnText}>💾 BAHÇEYİ KAYDET</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>KAYITLI BAHÇELERİM</Text>
-              {gardens.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz kaydedilmiş bir bahçe bulunmuyor.</Text>
-              ) : (
-                gardens.map((g, idx) => (
-                  <View key={g._id || idx} style={styles.listItem}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏡 {g.name || 'İsimsiz Bahçe'}</Text>
-                      <Text style={styles.listSubText}>📍 Ada/Parsel: {g.adaParsel || 'Girilmedi'}</Text>
-                      <Text style={styles.listSubText}>📐 Alan: {g.alan || 'Girilmedi'}</Text>
-                    </View>
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('gardens', g._id, 'Bahçe')}>
-                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </View>
-          )}
-
-          {/* ADMIN PANENİ TABI */}
-          {activeTab === 'admin' && isAdmin && (
-            <View>
-              <Text style={styles.sectionTitle}>👑 YÖNETİCİ ÖZETİ (TÜM ÜRETİCİLER)</Text>
-
-              {getAdminProducerSummary().map((p, idx) => {
-                const pRemaining = p.totalSales - p.totalPay;
-                return (
-                  <View key={idx} style={[styles.listItem, { flexDirection: 'column', alignItems: 'flex-start' }]}>
-                    <Text style={[styles.listTitle, { fontSize: 18, color: '#1b4332' }]}>👤 {p.name}</Text>
-                    <Text style={styles.listSubText}>📊 Toplam Kayıt Sayısı: {p.count}</Text>
-                    <Text style={styles.listSubText}>⚖️ Toplam Hasat: {p.totalKg.toLocaleString('tr-TR')} KG</Text>
-                    <Text style={styles.listSubText}>💰 Toplam Ciro: {formatTL(p.totalSales)}</Text>
-                    <Text style={styles.listSubText}>🟢 Toplam Ödenen: {formatTL(p.totalPay)}</Text>
-                    <Text style={{ fontWeight: 'bold', color: pRemaining > 0 ? '#d62828' : '#2b9348', marginTop: 4 }}>
-                      {pRemaining > 0 ? `🔴 Toplam Kalan Borç: ${formatTL(pRemaining)}` : '🟢 Borcu Yok / Ödendi'}
-                    </Text>
                   </View>
                 );
               })}
@@ -1141,42 +1180,35 @@ export default function App() {
           )}
         </ScrollView>
 
-        {/* TAHSİLAT DÜZENLEME MODALI */}
+        {/* TAHSİLAT MODAL */}
         <Modal visible={editModalVisible} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>✏️ Ödeme / Tahsilat Güncelle</Text>
+              <Text style={styles.formTitle}>✏️ Tahsilat Tutarını Güncelle</Text>
+              <Text style={{ marginBottom: 10, color: '#555' }}>
+                {editingHarvest?.uretici || editingHarvest?.producerName} - {editingHarvest?.surum}
+              </Text>
 
-              {editingHarvest && (
-                <View style={{ width: '100%', marginBottom: 15 }}>
-                  <Text style={styles.listSubText}>Üretici: {editingHarvest.uretici || editingHarvest.producerName}</Text>
-                  <Text style={styles.listSubText}>
-                    Toplam Tutarı: {formatTL((Number(editingHarvest.kg || editingHarvest.weight) || 0) * (Number(editingHarvest.fiyat) || 0))}
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.label}>Ödenen / Tahsil Edilen Yeni Tutar (TL)</Text>
+              <Text style={styles.label}>Yeni Toplam Tahsilat Tutarı (TL)</Text>
               <TextInput
                 style={styles.input}
-                keyboardType="numeric"
                 value={editTahsilatVal}
                 onChangeText={setEditTahsilatVal}
+                keyboardType="numeric"
               />
 
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 15, width: '100%' }}>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
                 <TouchableOpacity
                   style={[styles.submitBtn, { flex: 1, backgroundColor: '#6c757d' }]}
                   onPress={() => setEditModalVisible(false)}
                 >
                   <Text style={styles.submitBtnText}>İptal</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   style={[styles.submitBtn, { flex: 1 }]}
                   onPress={handleUpdateCollection}
                 >
-                  <Text style={styles.submitBtnText}>Kaydet</Text>
+                  <Text style={styles.submitBtnText}>Güncelle</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1191,308 +1223,84 @@ export default function App() {
 // STYLES
 // ==========================================
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f4f6f8'
-  },
-  authCard: {
-    backgroundColor: '#ffffff',
-    padding: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5
-  },
-  authTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 8
-  },
-  authSubTitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 20
-  },
+  container: { flex: 1, backgroundColor: '#f4f6f8' },
   header: {
     backgroundColor: '#1b4332',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    padding: 15,
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    alignItems: 'center'
   },
-  headerTitle: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold'
-  },
-  headerSubtitle: {
-    color: '#b7e4c7',
-    fontSize: 12,
-    marginTop: 2
-  },
-  logoutBtn: {
-    backgroundColor: '#d62828',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6
-  },
-  logoutBtnText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 12
-  },
-  navBar: {
-    backgroundColor: '#2d6a4f',
-    paddingVertical: 8
-  },
-  navItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginHorizontal: 4,
-    borderRadius: 20,
-    backgroundColor: 'transparent'
-  },
-  navItemActive: {
-    backgroundColor: '#ffffff'
-  },
-  navItemActiveAdmin: {
-    backgroundColor: '#ffb703'
-  },
-  navText: {
-    color: '#d8f3dc',
-    fontWeight: '600',
-    fontSize: 13
-  },
-  navTextActive: {
-    color: '#1b4332',
-    fontWeight: 'bold'
-  },
-  navTextActiveAdmin: {
-    color: '#000000',
-    fontWeight: 'bold'
-  },
-  content: {
-    flex: 1,
-    padding: 16
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 12
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'space-between'
-  },
+  headerTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  headerSubtitle: { color: '#b7e4c7', fontSize: 12, marginTop: 2 },
+  logoutBtn: { backgroundColor: '#d62828', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  logoutBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  navBar: { backgroundColor: '#2d6a4f', paddingVertical: 8, paddingHorizontal: 5 },
+  navItem: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginRight: 6 },
+  navItemActive: { backgroundColor: '#b7e4c7' },
+  navItemActiveAdmin: { backgroundColor: '#e76f51' },
+  navText: { color: '#d8f3dc', fontSize: 13, fontWeight: '600' },
+  navTextActive: { color: '#1b4332', fontWeight: 'bold' },
+  navTextActiveAdmin: { color: '#fff', fontWeight: 'bold' },
+  content: { flex: 1, padding: 15 },
+  sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#1b4332', marginBottom: 10 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 15 },
   statCard: {
-    backgroundColor: '#ffffff',
     width: '48%',
+    backgroundColor: '#fff',
     padding: 12,
-    borderRadius: 10,
-    borderLeftWidth: 5,
+    borderRadius: 8,
+    borderLeftWidth: 4,
     elevation: 2,
     shadowColor: '#000',
     shadowOpacity: 0.05,
-    shadowRadius: 5
-  },
-  statTitle: {
-    fontSize: 12,
-    color: '#666'
-  },
-  statValue: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#212529',
-    marginTop: 4
-  },
-  csvContainer: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 15
-  },
-  csvExportBtn: {
-    flex: 1,
-    backgroundColor: '#2a9d8f',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center'
-  },
-  csvImportBtn: {
-    flex: 1,
-    backgroundColor: '#e76f51',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center'
-  },
-  csvBtnText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 12
-  },
-  listItem: {
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
     shadowRadius: 3
   },
-  listTitle: {
-    fontWeight: 'bold',
-    fontSize: 15,
-    color: '#212529'
-  },
-  listSubText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2
-  },
-  actionBtnText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: 'bold'
-  },
-  editBtn: {
-    backgroundColor: '#3a86ff',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center'
-  },
-  deleteBtn: {
-    backgroundColor: '#d62828',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center'
-  },
-  formCard: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 12,
-    elevation: 2
-  },
-  formTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 15
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#495057',
-    marginTop: 10,
-    marginBottom: 4,
-    width: '100%'
-  },
+  statTitle: { fontSize: 11, color: '#666', fontWeight: '600' },
+  statValue: { fontSize: 14, fontWeight: 'bold', color: '#2b2d42', marginTop: 4 },
+  csvContainer: { flexDirection: 'row', gap: 10, marginBottom: 15 },
+  csvExportBtn: { flex: 1, backgroundColor: '#1d3557', padding: 10, borderRadius: 6, alignItems: 'center' },
+  csvImportBtn: { flex: 1, backgroundColor: '#457b9d', padding: 10, borderRadius: 6, alignItems: 'center' },
+  csvBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  formCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, elevation: 2, marginBottom: 20 },
+  formTitle: { fontSize: 16, fontWeight: 'bold', color: '#1b4332', marginBottom: 12 },
+  label: { fontSize: 12, fontWeight: 'bold', color: '#495057', marginTop: 8, marginBottom: 4 },
   input: {
     backgroundColor: '#f8f9fa',
     borderWidth: 1,
     borderColor: '#ced4da',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#212529',
-    width: '100%'
-  },
-  rowBtnGroup: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginVertical: 4
-  },
-  groupBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     borderRadius: 6,
-    backgroundColor: '#e9ecef'
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#212529'
   },
-  groupBtnActive: {
-    backgroundColor: '#1b4332'
-  },
-  groupBtnText: {
-    fontSize: 12,
-    color: '#495057'
-  },
-  groupBtnTextActive: {
-    color: '#ffffff',
-    fontWeight: 'bold'
-  },
-  submitBtn: {
-    backgroundColor: '#1b4332',
-    padding: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 20
-  },
-  submitBtnText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 14
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#8d99ae',
-    marginVertical: 20,
-    fontStyle: 'italic'
-  },
-  bulkRow: {
-    backgroundColor: '#f8f9fa',
+  rowBtnGroup: { flexDirection: 'row', gap: 5, marginVertical: 5, flexWrap: 'wrap' },
+  groupBtn: { flex: 1, minWidth: '22%', backgroundColor: '#e9ecef', paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
+  groupBtnActive: { backgroundColor: '#1b4332' },
+  groupBtnText: { fontSize: 11, color: '#495057', fontWeight: 'bold' },
+  groupBtnTextActive: { color: '#fff' },
+  submitBtn: { backgroundColor: '#1b4332', padding: 12, borderRadius: 6, alignItems: 'center', marginTop: 15 },
+  submitBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  listItem: {
+    backgroundColor: '#fff',
     padding: 12,
     borderRadius: 8,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    gap: 8
-  },
-  removeRowBtn: {
-    alignSelf: 'flex-end',
-    marginTop: 4
-  },
-  addRowBtn: {
-    backgroundColor: '#e9ecef',
-    padding: 12,
-    borderRadius: 8,
+    marginBottom: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 5
+    justifyContent: 'space-between',
+    elevation: 1
   },
-  addRowBtnText: {
-    color: '#1b4332',
-    fontWeight: 'bold',
-    fontSize: 13
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
-  },
-  modalContent: {
-    backgroundColor: '#ffffff',
-    width: '100%',
-    padding: 20,
-    borderRadius: 12,
-    alignItems: 'center'
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 15
-  }
+  listTitle: { fontSize: 14, fontWeight: 'bold', color: '#1b4332' },
+  listSubText: { fontSize: 12, color: '#6c757d', marginTop: 2 },
+  editBtn: { backgroundColor: '#e76f51', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 4 },
+  deleteBtn: { backgroundColor: '#d62828', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 4 },
+  actionBtnText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+  emptyText: { textAlign: 'center', color: '#8d99ae', marginVertical: 15, fontStyle: 'italic' },
+  authCard: { backgroundColor: '#fff', padding: 20, borderRadius: 12, elevation: 3, alignItems: 'center' },
+  authTitle: { fontSize: 20, fontWeight: 'bold', color: '#1b4332', marginBottom: 5 },
+  authSubTitle: { fontSize: 13, color: '#6c757d', marginBottom: 20 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 10, padding: 20 }
 });
