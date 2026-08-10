@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const ExcelJS = require('exceljs');
 
 const app = express();
 
@@ -20,9 +21,10 @@ mongoose.connect(MONGO_URI, {
 
 // --- MODELLER (SCHEMAS) ---
 
-// Hasat Modeli (userPhone eklendi)
+// Hasat Modeli (userId ve userPhone eklendi/esnetildi)
 const HarvestSchema = new mongoose.Schema({
-  userPhone: { type: String, required: true },
+  userId: { type: String, required: false },
+  userPhone: { type: String, required: false },
   tarih: String,
   surum: String,
   uretici: String,
@@ -36,18 +38,20 @@ const HarvestSchema = new mongoose.Schema({
   bahce: String
 }, { timestamps: true });
 
-// Gider Modeli (userPhone eklendi)
+// Gider Modeli
 const ExpenseSchema = new mongoose.Schema({
-  userPhone: { type: String, required: true },
+  userId: { type: String, required: false },
+  userPhone: { type: String, required: false },
   tarih: String,
   kategori: String,
   aciklama: String,
   tutar: Number
 }, { timestamps: true });
 
-// Bahçe Modeli (userPhone eklendi)
+// Bahçe Modeli
 const GardenSchema = new mongoose.Schema({
-  userPhone: { type: String, required: true },
+  userId: { type: String, required: false },
+  userPhone: { type: String, required: false },
   name: String,
   adaParsel: String,
   alan: String
@@ -56,6 +60,13 @@ const GardenSchema = new mongoose.Schema({
 const Harvest = mongoose.model('Harvest', HarvestSchema);
 const Expense = mongoose.model('Expense', ExpenseSchema);
 const Garden = mongoose.model('Garden', GardenSchema);
+
+// Yardımcı Fonksiyon: İstekten Kullanıcı Kimliği veya Telefonunu Alır
+const getUserIdentifier = (req) => {
+  const userId = req.body?.userId || req.headers['user-id'];
+  const userPhone = req.body?.userPhone || req.headers['user-phone'];
+  return { userId, userPhone };
+};
 
 // --- API ROTALARI ---
 
@@ -69,10 +80,17 @@ app.get('/', (req, res) => {
 // ------------------------------------
 app.get('/api/harvests', async (req, res) => {
   try {
+    const userId = req.headers['user-id'];
     const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
 
-    const data = await Harvest.find({ userPhone }).sort({ createdAt: -1 });
+    let filter = {};
+    if (userId) {
+      filter = { $or: [{ userId }, { userPhone }] };
+    } else if (userPhone) {
+      filter = { userPhone };
+    }
+
+    const data = await Harvest.find(filter).sort({ createdAt: -1 });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -81,30 +99,40 @@ app.get('/api/harvests', async (req, res) => {
 
 app.post('/api/harvests', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
+    const { userId, userPhone } = getUserIdentifier(req);
+    
+    // En az bir kimlik bilgisi (userId veya userPhone) bulunmalı
+    if (!userId && !userPhone) {
+      return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi (userId veya userPhone) bulunamadı.' });
+    }
 
-    const newHarvest = new Harvest({ ...req.body, userPhone });
+    const payload = {
+      ...req.body,
+      userId: userId || req.body.userId,
+      userPhone: userPhone || req.body.userPhone,
+      kg: Number(req.body.kg) || 0,
+      fiyat: Number(req.body.fiyat) || 0,
+      tahsilat: Number(req.body.tahsilat) || 0
+    };
+
+    const newHarvest = new Harvest(payload);
     await newHarvest.save();
     res.status(201).json(newHarvest);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Hasat Ekleme Hatası:', err);
+    res.status(400).json({ error: err.message });
   }
 });
 
 app.put('/api/harvests/:id', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
-
-    // Sadece kaydın sahibi güncelleyebilir
-    const updated = await Harvest.findOneAndUpdate(
-      { _id: req.params.id, userPhone },
+    const updated = await Harvest.findByIdAndUpdate(
+      req.params.id,
       req.body,
       { new: true }
     );
 
-    if (!updated) return res.status(404).json({ error: 'Kayıt bulunamadı veya yetkiniz yok.' });
+    if (!updated) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -113,12 +141,8 @@ app.put('/api/harvests/:id', async (req, res) => {
 
 app.delete('/api/harvests/:id', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
-
-    // Sadece kaydın sahibi silebilir
-    const deleted = await Harvest.findOneAndDelete({ _id: req.params.id, userPhone });
-    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı veya yetkiniz yok.' });
+    const deleted = await Harvest.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
 
     res.json({ message: 'Hasat kaydı silindi.' });
   } catch (err) {
@@ -131,10 +155,17 @@ app.delete('/api/harvests/:id', async (req, res) => {
 // ------------------------------------
 app.get('/api/expenses', async (req, res) => {
   try {
+    const userId = req.headers['user-id'];
     const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
 
-    const data = await Expense.find({ userPhone }).sort({ createdAt: -1 });
+    let filter = {};
+    if (userId) {
+      filter = { $or: [{ userId }, { userPhone }] };
+    } else if (userPhone) {
+      filter = { userPhone };
+    }
+
+    const data = await Expense.find(filter).sort({ createdAt: -1 });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -143,24 +174,27 @@ app.get('/api/expenses', async (req, res) => {
 
 app.post('/api/expenses', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
+    const { userId, userPhone } = getUserIdentifier(req);
 
-    const newExpense = new Expense({ ...req.body, userPhone });
+    const payload = {
+      ...req.body,
+      userId: userId || req.body.userId,
+      userPhone: userPhone || req.body.userPhone,
+      tutar: Number(req.body.tutar) || 0
+    };
+
+    const newExpense = new Expense(payload);
     await newExpense.save();
     res.status(201).json(newExpense);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
 app.delete('/api/expenses/:id', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
-
-    const deleted = await Expense.findOneAndDelete({ _id: req.params.id, userPhone });
-    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı veya yetkiniz yok.' });
+    const deleted = await Expense.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
 
     res.json({ message: 'Gider kaydı silindi.' });
   } catch (err) {
@@ -173,10 +207,17 @@ app.delete('/api/expenses/:id', async (req, res) => {
 // ------------------------------------
 app.get('/api/gardens', async (req, res) => {
   try {
+    const userId = req.headers['user-id'];
     const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
 
-    const data = await Garden.find({ userPhone }).sort({ createdAt: -1 });
+    let filter = {};
+    if (userId) {
+      filter = { $or: [{ userId }, { userPhone }] };
+    } else if (userPhone) {
+      filter = { userPhone };
+    }
+
+    const data = await Garden.find(filter).sort({ createdAt: -1 });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -185,24 +226,26 @@ app.get('/api/gardens', async (req, res) => {
 
 app.post('/api/gardens', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
+    const { userId, userPhone } = getUserIdentifier(req);
 
-    const newGarden = new Garden({ ...req.body, userPhone });
+    const payload = {
+      ...req.body,
+      userId: userId || req.body.userId,
+      userPhone: userPhone || req.body.userPhone
+    };
+
+    const newGarden = new Garden(payload);
     await newGarden.save();
     res.status(201).json(newGarden);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
 app.delete('/api/gardens/:id', async (req, res) => {
   try {
-    const userPhone = req.headers['user-phone'];
-    if (!userPhone) return res.status(400).json({ error: 'user-phone header bilgisi gerekli.' });
-
-    const deleted = await Garden.findOneAndDelete({ _id: req.params.id, userPhone });
-    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı veya yetkiniz yok.' });
+    const deleted = await Garden.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
 
     res.json({ message: 'Bahçe kaydı silindi.' });
   } catch (err) {
@@ -211,13 +254,12 @@ app.delete('/api/gardens/:id', async (req, res) => {
 });
 
 // ------------------------------------
-// 👑 ADMIN ROTASI (TÜM MÜŞTERİLERİN BİLGİSİNİ GÖRMEK İÇİN)
+// 👑 ADMIN ROTALARI
 // ------------------------------------
 app.get('/api/admin/all-data', async (req, res) => {
   try {
     const adminSecret = req.headers['admin-secret'];
     
-    // Güvenlik kontrolü (Sadece doğru admin anahtarı ile veri döner)
     if (adminSecret !== 'ADMIN_OZEL_SIFRESI_123') {
       return res.status(403).json({ error: 'Bu alana erişim yetkiniz yok.' });
     }
@@ -236,18 +278,11 @@ app.get('/api/admin/all-data', async (req, res) => {
   }
 });
 
-// Port Tanımlaması
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda dinleniyor...`));
-const ExcelJS = require('exceljs');
-
 // ADMIN EXCEL DIŞA AKTARMA ENDPOINT'I
 app.get('/api/admin/export-excel', async (req, res) => {
   try {
-    // Tüm verileri çek
     const harvests = await Harvest.find().lean();
     const expenses = await Expense.find().lean();
-    const gardens = await Garden.find().lean();
 
     const workbook = new ExcelJS.Workbook();
     
@@ -307,7 +342,7 @@ app.get('/api/admin/export-excel', async (req, res) => {
       });
     });
 
-    // Başlık Stilini Güzelleştirme
+    // Başlık Stili
     [harvestSheet, expenseSheet].forEach(sheet => {
       sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
       sheet.getRow(1).fill = {
@@ -333,3 +368,7 @@ app.get('/api/admin/export-excel', async (req, res) => {
     res.status(500).json({ error: 'Excel raporu oluşturulamadı.' });
   }
 });
+
+// Port Tanımlaması ve Sunucunun Başlatılması (En Alt Kısımda Olmalı)
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda dinleniyor...`));
