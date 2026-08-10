@@ -5,11 +5,9 @@ const ExcelJS = require('exceljs');
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Bağlantısı 
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
 
 mongoose.connect(MONGO_URI, {
@@ -19,9 +17,8 @@ mongoose.connect(MONGO_URI, {
   .then(() => console.log('✅ MongoDB bağlantısı başarılı.'))
   .catch((err) => console.error('❌ MongoDB bağlantı hatası:', err.message));
 
-// --- MODELLER (SCHEMAS) ---
+// --- SCHEMAS ---
 
-// Hasat Modeli
 const HarvestSchema = new mongoose.Schema({
   userId: { type: String, required: false },
   userPhone: { type: String, required: false },
@@ -38,7 +35,6 @@ const HarvestSchema = new mongoose.Schema({
   bahce: String
 }, { timestamps: true });
 
-// Gider Modeli
 const ExpenseSchema = new mongoose.Schema({
   userId: { type: String, required: false },
   userPhone: { type: String, required: false },
@@ -48,7 +44,6 @@ const ExpenseSchema = new mongoose.Schema({
   tutar: Number
 }, { timestamps: true });
 
-// Bahçe Modeli
 const GardenSchema = new mongoose.Schema({
   userId: { type: String, required: false },
   userPhone: { type: String, required: false },
@@ -61,50 +56,41 @@ const Harvest = mongoose.model('Harvest', HarvestSchema);
 const Expense = mongoose.model('Expense', ExpenseSchema);
 const Garden = mongoose.model('Garden', GardenSchema);
 
-// Yardımcı Fonksiyon: İstekten Kullanıcı Kimliği veya Telefonunu Alır (Header, Query veya Body)
 const getUserIdentifier = (req) => {
   const userId = req.headers['user-id'] || req.query.userId || req.body?.userId;
   const userPhone = req.headers['user-phone'] || req.query.userPhone || req.body?.userPhone;
   return { userId, userPhone };
 };
 
-// Yardımcı Fonksiyon: Güvenli Filtre Oluşturucu (Başkasının verisini görmeyi engeller)
 const buildUserFilter = (req) => {
+  if (req.headers['admin-secret'] === 'ADMIN_OZEL_SIFRESI_123') {
+    return {};
+  }
+
   const { userId, userPhone } = getUserIdentifier(req);
 
-  // Eğer hiçbir kullanıcı bilgisi gelmemişse, güvenlik için eşleşmeyen dummy filtre verilir
   if (!userId && !userPhone) {
-    return { _id: null }; 
+    return { _id: null };
   }
 
   const conditions = [];
-  if (userId) {
-    conditions.push({ userId });
-  }
-  if (userPhone) {
-    conditions.push({ userPhone });
-  }
+  if (userId) conditions.push({ userId });
+  if (userPhone) conditions.push({ userPhone });
 
   return conditions.length > 1 ? { $or: conditions } : conditions[0];
 };
 
-// --- API ROTALARI ---
+// --- ROUTES ---
 
-// Test/Ana Sayfa Rotası
 app.get('/', (req, res) => {
   res.send('🌱 Çay Takip Sistemi API Çalışıyor!');
 });
 
-// ------------------------------------
-// 🍃 HASAT ROTALARI (KULLANICI BAZLI)
-// ------------------------------------
+// HARVEST ROUTES
 app.get('/api/harvests', async (req, res) => {
   try {
     const filter = buildUserFilter(req);
-    // Filtre _id: null ise kullanıcı bilgisi yok demektir, direkt boş dizi dön
-    if (filter._id === null) {
-      return res.json([]);
-    }
+    if (filter._id === null) return res.json([]);
 
     const data = await Harvest.find(filter).sort({ createdAt: -1 });
     res.json(data);
@@ -118,7 +104,7 @@ app.post('/api/harvests', async (req, res) => {
     const { userId, userPhone } = getUserIdentifier(req);
 
     if (!userId && !userPhone) {
-      return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi (userId veya userPhone) bulunamadı.' });
+      return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
     }
 
     const payload = {
@@ -126,6 +112,7 @@ app.post('/api/harvests', async (req, res) => {
       userId: userId || req.body.userId,
       userPhone: userPhone || req.body.userPhone,
       kg: Number(req.body.kg || req.body.weight) || 0,
+      weight: Number(req.body.kg || req.body.weight) || 0,
       fiyat: Number(req.body.fiyat) || 0,
       tahsilat: Number(req.body.tahsilat) || 0
     };
@@ -141,12 +128,7 @@ app.post('/api/harvests', async (req, res) => {
 
 app.put('/api/harvests/:id', async (req, res) => {
   try {
-    const updated = await Harvest.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    );
-
+    const updated = await Harvest.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!updated) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     res.json(updated);
   } catch (err) {
@@ -158,22 +140,17 @@ app.delete('/api/harvests/:id', async (req, res) => {
   try {
     const deleted = await Harvest.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-
     res.json({ message: 'Hasat kaydı silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ------------------------------------
-// 💸 GİDER ROTALARI (KULLANICI BAZLI)
-// ------------------------------------
+// EXPENSE ROUTES
 app.get('/api/expenses', async (req, res) => {
   try {
     const filter = buildUserFilter(req);
-    if (filter._id === null) {
-      return res.json([]);
-    }
+    if (filter._id === null) return res.json([]);
 
     const data = await Expense.find(filter).sort({ createdAt: -1 });
     res.json(data);
@@ -209,22 +186,17 @@ app.delete('/api/expenses/:id', async (req, res) => {
   try {
     const deleted = await Expense.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-
     res.json({ message: 'Gider kaydı silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ------------------------------------
-// 🏡 BAHÇE ROTALARI (KULLANICI BAZLI)
-// ------------------------------------
+// GARDEN ROUTES
 app.get('/api/gardens', async (req, res) => {
   try {
     const filter = buildUserFilter(req);
-    if (filter._id === null) {
-      return res.json([]);
-    }
+    if (filter._id === null) return res.json([]);
 
     const data = await Garden.find(filter).sort({ createdAt: -1 });
     res.json(data);
@@ -259,20 +231,16 @@ app.delete('/api/gardens/:id', async (req, res) => {
   try {
     const deleted = await Garden.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-
     res.json({ message: 'Bahçe kaydı silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ------------------------------------
-// 👑 ADMIN ROTALARI
-// ------------------------------------
+// ADMIN ROUTES & EXCEL EXPORT
 app.get('/api/admin/all-data', async (req, res) => {
   try {
     const adminSecret = req.headers['admin-secret'];
-    
     if (adminSecret !== 'ADMIN_OZEL_SIFRESI_123') {
       return res.status(403).json({ error: 'Bu alana erişim yetkiniz yok.' });
     }
@@ -291,7 +259,6 @@ app.get('/api/admin/all-data', async (req, res) => {
   }
 });
 
-// ADMIN EXCEL DIŞA AKTARMA ENDPOINT'I
 app.get('/api/admin/export-excel', async (req, res) => {
   try {
     const harvests = await Harvest.find().lean();
@@ -299,7 +266,6 @@ app.get('/api/admin/export-excel', async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
     
-    // 1. Sayfa: Hasat ve Satış Kayıtları
     const harvestSheet = workbook.addWorksheet('Hasat ve Satışlar');
     harvestSheet.columns = [
       { header: 'Tarih', key: 'tarih', width: 15 },
@@ -337,7 +303,6 @@ app.get('/api/admin/export-excel', async (req, res) => {
       });
     });
 
-    // 2. Sayfa: Giderler
     const expenseSheet = workbook.addWorksheet('Giderler');
     expenseSheet.columns = [
       { header: 'Tarih', key: 'tarih', width: 15 },
@@ -355,7 +320,6 @@ app.get('/api/admin/export-excel', async (req, res) => {
       });
     });
 
-    // Başlık Stili
     [harvestSheet, expenseSheet].forEach(sheet => {
       sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
       sheet.getRow(1).fill = {
@@ -365,14 +329,8 @@ app.get('/api/admin/export-excel', async (req, res) => {
       };
     });
 
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename=' + `Cay_Uretim_Raporu_${Date.now()}.xlsx`
-    );
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=' + `Cay_Uretim_Raporu_${Date.now()}.xlsx`);
 
     await workbook.xlsx.write(res);
     res.end();
@@ -382,6 +340,5 @@ app.get('/api/admin/export-excel', async (req, res) => {
   }
 });
 
-// Port Tanımlaması ve Sunucunun Başlatılması
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda dinleniyor...`));

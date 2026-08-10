@@ -100,12 +100,26 @@ const clearSession = async () => {
   }
 };
 
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 60000) => {
+// DÜZELTME: User headers ekleme yeteneği ile güncellendi
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, userSession?: UserSession | null, timeout = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
 
+  const customHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (userSession) {
+    customHeaders['user-id'] = userSession.userId;
+    customHeaders['user-phone'] = userSession.phone;
+    if (userSession.role === 'admin') {
+      customHeaders['admin-secret'] = 'ADMIN_OZEL_SIFRESI_123';
+    }
+  }
+
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...options, headers: customHeaders, signal: controller.signal });
     clearTimeout(id);
     return response;
   } catch (error: any) {
@@ -124,23 +138,19 @@ const formatTL = (val: number) =>
 // MAIN COMPONENT
 // ==========================================
 export default function App() {
-  // Auth State'leri
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authPhone, setAuthPhone] = useState('');
   const [authName, setAuthName] = useState('');
 
-  // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'expense' | 'gardens' | 'admin'>('dashboard');
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
 
-  // Veri Listeleri
   const [harvests, setHarvests] = useState<HarvestItem[]>([]);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
   const [gardens, setGardens] = useState<GardenItem[]>([]);
 
-  // Form State'leri
   const [hForm, setHForm] = useState({
     date: new Date().toISOString().split('T')[0],
     surum: '1. Sürüm',
@@ -162,19 +172,16 @@ export default function App() {
 
   const [gForm, setGForm] = useState({ name: '', adaParsel: '', alan: '' });
 
-  // Tahsilat Düzenleme Modal State'leri
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingHarvest, setEditingHarvest] = useState<HarvestItem | null>(null);
   const [editTahsilatVal, setEditTahsilatVal] = useState('');
 
-  // Toplu Tahsilat State'i
   const [bulkCollections, setBulkCollections] = useState<{ id: string; producer: string; tutar: string; aciklama: string }[]>([
     { id: '1', producer: '', tutar: '', aciklama: '' }
   ]);
 
   const isAdmin = currentUser?.role === 'admin';
 
-  // Oturum Kontrolü
   useEffect(() => {
     const checkSavedSession = async () => {
       try {
@@ -191,55 +198,25 @@ export default function App() {
     checkSavedSession();
   }, []);
 
-  // Sunucudan Veri Çekme (Filtreleme Mantığı Düzeltildi)
+  useEffect(() => {
+    if (currentUser) {
+      fetchData();
+    }
+  }, [currentUser]);
+
   const fetchData = async () => {
     if (!currentUser) return;
     setLoading(true);
     try {
-      // Mümkünse API'ye query parametresi gönderin: ${API_URL}/harvests?userId=${currentUser.userId}
       const [resH, resE, resG] = await Promise.all([
-        fetchWithTimeout(`${API_URL}/harvests`),
-        fetchWithTimeout(`${API_URL}/expenses`),
-        fetchWithTimeout(`${API_URL}/gardens`)
+        fetchWithTimeout(`${API_URL}/harvests`, {}, currentUser),
+        fetchWithTimeout(`${API_URL}/expenses`, {}, currentUser),
+        fetchWithTimeout(`${API_URL}/gardens`, {}, currentUser)
       ]);
 
-      let rawH: HarvestItem[] = resH.ok ? await resH.json() : [];
-      let rawE: ExpenseItem[] = resE.ok ? await resE.json() : [];
-      let rawG: GardenItem[] = resG.ok ? await resG.json() : [];
-
-      if (!isAdmin) {
-        const currentUserId = currentUser.userId;
-        const uPhone = currentUser.phone;
-        const uName = currentUser.name.toLowerCase().trim();
-
-        // HASAT FİLTRESİ: Sadece bu kullanıcıya AİT olanları getir
-        rawH = (rawH || []).filter((h) => {
-          // 1. userId tam eşleşiyorsa göster
-          if (h.userId && h.userId === currentUserId) return true;
-          // 2. userPhone tam eşleşiyorsa göster
-          if (h.userPhone && h.userPhone === uPhone) return true;
-          // 3. Üretici ismi tam/içeren eşleşme yapıyorsa göster
-          const prodName = (h.uretici || h.producerName || '').toLowerCase().trim();
-          if (prodName && prodName === uName) return true;
-
-          // Yukarıdakilerin hiçbiri uymuyorsa BAŞKASININ verisidir, GÖSTERME
-          return false;
-        });
-
-        // GİDER FİLTRESİ
-        rawE = (rawE || []).filter((e) => {
-          if (e.userId) return e.userId === currentUserId;
-          if (e.userPhone) return e.userPhone === uPhone;
-          return false;
-        });
-
-        // BAHÇE FİLTRESİ
-        rawG = (rawG || []).filter((g) => {
-          if (g.userId) return g.userId === currentUserId;
-          if (g.userPhone) return g.userPhone === uPhone;
-          return false;
-        });
-      }
+      const rawH: HarvestItem[] = resH.ok ? await resH.json() : [];
+      const rawE: ExpenseItem[] = resE.ok ? await resE.json() : [];
+      const rawG: GardenItem[] = resG.ok ? await resG.json() : [];
 
       setHarvests(rawH || []);
       setExpenses(rawE || []);
@@ -252,7 +229,6 @@ export default function App() {
     }
   };
 
-  // Auth İşlemleri
   const handleAuth = async () => {
     const cleanPhone = authPhone.trim();
     if (!cleanPhone || cleanPhone.length < 10) {
@@ -286,7 +262,6 @@ export default function App() {
     setCurrentUser(null);
   };
 
-  // Hesaplamalar
   const totalKg = (harvests || []).reduce((acc, c) => acc + (Number(c.kg || c.weight) || 0), 0);
   const totalSales = (harvests || []).reduce((acc, c) => acc + ((Number(c.kg || c.weight) || 0) * (Number(c.fiyat) || 0)), 0);
   const totalPay = (harvests || []).reduce((acc, c) => acc + (Number(c.tahsilat) || 0), 0);
@@ -326,7 +301,7 @@ export default function App() {
         onPress: async () => {
           setLoading(true);
           try {
-            const res = await fetchWithTimeout(`${API_URL}/${endpoint}/${id}`, { method: 'DELETE' });
+            const res = await fetchWithTimeout(`${API_URL}/${endpoint}/${id}`, { method: 'DELETE' }, currentUser);
             if (res.ok) {
               await fetchData();
             } else {
@@ -342,7 +317,6 @@ export default function App() {
     ]);
   };
 
-  // Hasat Kaydetme
   const handleSaveHarvest = async () => {
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
     if (!hForm.kg.trim()) {
@@ -369,9 +343,8 @@ export default function App() {
 
       const res = await fetchWithTimeout(`${API_URL}/harvests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
+      }, currentUser);
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Hasat kaydı eklendi.');
@@ -399,7 +372,6 @@ export default function App() {
     }
   };
 
-  // Tahsilat İşlemleri
   const processSingleCollection = async (selectedProdName: string, payAmount: number) => {
     const targetHarvests = harvests.filter(h => {
       const pName = (h.uretici || h.producerName || '').trim().toLowerCase();
@@ -422,9 +394,8 @@ export default function App() {
 
         await fetchWithTimeout(`${API_URL}/harvests/${h._id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tahsilat: updatedPay })
-        });
+        }, currentUser);
 
         remainingPayment -= addPay;
       }
@@ -471,7 +442,6 @@ export default function App() {
     setBulkCollections(bulkCollections.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
-  // CSV Aktarımı
   const exportToCSV = async () => {
     try {
       let csvContent = 'Tarih,Surum,Uretici,KG,Firma,Fiyat,Tahsilat,Bahce,Aciklama\n';
@@ -536,9 +506,8 @@ export default function App() {
         if (payload.uretici) {
           await fetchWithTimeout(`${API_URL}/harvests`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-          });
+          }, currentUser);
           importedCount++;
         }
       }
@@ -570,9 +539,8 @@ export default function App() {
     try {
       const res = await fetchWithTimeout(`${API_URL}/harvests/${editingHarvest._id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tahsilat: newTahsilat })
-      });
+      }, currentUser);
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Tahsilat tutarı güncellendi.');
@@ -598,7 +566,6 @@ export default function App() {
     try {
       const res = await fetchWithTimeout(`${API_URL}/gardens`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUser?.userId,
           userPhone: currentUser?.phone,
@@ -606,7 +573,7 @@ export default function App() {
           adaParsel: gForm.adaParsel.trim(),
           alan: gForm.alan.trim()
         })
-      });
+      }, currentUser);
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Bahçe eklendi.');
@@ -632,7 +599,6 @@ export default function App() {
     try {
       const res = await fetchWithTimeout(`${API_URL}/expenses`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUser?.userId,
           userPhone: currentUser?.phone,
@@ -641,7 +607,7 @@ export default function App() {
           aciklama: eForm.aciklama,
           tutar: parseFloat(eForm.tutar) || 0
         })
-      });
+      }, currentUser);
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Gider eklendi.');
@@ -666,7 +632,6 @@ export default function App() {
     );
   }
 
-  // LOGIN / REGISTER SCREEN
   if (!currentUser) {
     return (
       <SafeAreaProvider>
@@ -721,13 +686,11 @@ export default function App() {
     );
   }
 
-  // MAIN APP SCREEN
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
 
-        {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>🍃 ÇAY ÜRETİCİSİ YÖNETİM SİSTEMİ</Text>
@@ -740,7 +703,6 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* TAB BAR */}
         <View style={styles.navBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <TouchableOpacity
@@ -789,12 +751,10 @@ export default function App() {
           </ScrollView>
         </View>
 
-        {/* CONTENT */}
         <ScrollView
           style={styles.content}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} colors={['#1b4332']} />}
         >
-          {/* DASHBOARD TAB */}
           {activeTab === 'dashboard' && (
             <View>
               <Text style={styles.sectionTitle}>GENEL ÖZET PANELİ</Text>
@@ -885,7 +845,6 @@ export default function App() {
             </View>
           )}
 
-          {/* HARVEST TAB */}
           {activeTab === 'harvest' && (
             <View style={styles.formCard}>
               <Text style={styles.formTitle}>🌱 YENİ HASAT / SATIŞ KAYDI</Text>
@@ -977,7 +936,6 @@ export default function App() {
             </View>
           )}
 
-          {/* COLLECTIONS TAB */}
           {activeTab === 'collections' && (
             <View style={styles.formCard}>
               <Text style={styles.formTitle}>💵 TOPLU TAHSİLAT / ÖDEME GİRİŞİ</Text>
@@ -1019,7 +977,6 @@ export default function App() {
             </View>
           )}
 
-          {/* EXPENSE TAB */}
           {activeTab === 'expense' && (
             <View>
               <View style={styles.formCard}>
@@ -1093,7 +1050,6 @@ export default function App() {
             </View>
           )}
 
-          {/* GARDENS TAB */}
           {activeTab === 'gardens' && (
             <View>
               <View style={styles.formCard}>
@@ -1151,10 +1107,9 @@ export default function App() {
             </View>
           )}
 
-          {/* ADMIN TAB */}
           {activeTab === 'admin' && isAdmin && (
             <View>
-              <Text style={styles.sectionTitle}>👑 ÜRETİCİ BAZLI GENEL ROPOR</Text>
+              <Text style={styles.sectionTitle}>👑 ÜRETİCİ BAZLI GENEL RAPOR</Text>
               {getAdminProducerSummary().map((prod, idx) => {
                 const rem = prod.totalSales - prod.totalPay;
                 return (
@@ -1175,7 +1130,6 @@ export default function App() {
           <View style={{ height: 40 }} />
         </ScrollView>
 
-        {/* EDIT TAHSILAT MODAL */}
         <Modal visible={editModalVisible} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
@@ -1215,9 +1169,6 @@ export default function App() {
   );
 }
 
-// ==========================================
-// STYLES
-// ==========================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
