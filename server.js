@@ -1,17 +1,19 @@
+require('dotenv').config(); // .env dosyasındaki değişkenleri yükler
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const ExcelJS = require('exceljs');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+// Veritabanı adresi (.env yoksa varsayılan lokal adresi kullanır)
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'cryptomarsisadmin';
 
 mongoose.connect(MONGO_URI, {
-  serverSelectionTimeoutMS: 5000,
+  serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
 })
   .then(() => console.log('✅ MongoDB bağlantısı başarılı.'))
@@ -30,9 +32,26 @@ const HarvestSchema = new mongoose.Schema({
   weight: Number,
   firma: String,
   fiyat: Number,
-  tahsilat: Number,
+  toplamTutar: Number,     // kg * fiyat
+  tahsilat: Number,        // Toplam yapılan tahsilat
+  kalanBakiye: Number,     // toplamTutar - tahsilat
   aciklama: String,
-  bahce: String
+  bahce: String,
+  
+  // Vadeli Takip İçin Alanlar
+  isVadeli: { type: Boolean, default: false },
+  vadeTarihi: String,      // YYYY-AA veya YYYY-AA-GG (Örn: "2026-08")
+  odemeDurumu: { type: String, enum: ['Ödendi', 'Kısmi Ödendi', 'Bekliyor'], default: 'Bekliyor' }
+}, { timestamps: true });
+
+// Tahsilat Geçmişi Kaydı (Hangi hasada ne kadar ödeme yapıldı?)
+const PaymentSchema = new mongoose.Schema({
+  userId: String,
+  userPhone: String,
+  harvestId: { type: mongoose.Schema.Types.ObjectId, ref: 'Harvest', required: true },
+  tarih: String,
+  tutar: Number,
+  aciklama: String
 }, { timestamps: true });
 
 const ExpenseSchema = new mongoose.Schema({
@@ -52,10 +71,44 @@ const GardenSchema = new mongoose.Schema({
   alan: String
 }, { timestamps: true });
 
+
+// Fabrika fiyat/politika takip kayıtları
+const FactoryPriceSchema = new mongoose.Schema({
+  firma: { type: String, required: true },
+  fiyat: { type: Number, required: true },
+  tarih: { type: String, required: true },
+  politika: String,
+  kaynak: String,
+  aciklama: String,
+  userId: String,
+  userPhone: String
+}, { timestamps: true });
+
+// Uygulama reklam alanları
+const AdSchema = new mongoose.Schema({
+  slot: { type: String, enum: ['dashboard_top', 'dashboard_middle', 'prices_top'], default: 'dashboard_middle' },
+  firma: { type: String, required: true },
+  kategori: String,
+  baslik: String,
+  aciklama: String,
+  telefon: String,
+  link: String,
+  gorselUrl: String,
+  aktif: { type: Boolean, default: true },
+  baslangic: String,
+  bitis: String,
+  userId: String,
+  userPhone: String
+}, { timestamps: true });
+
 const Harvest = mongoose.model('Harvest', HarvestSchema);
+const Payment = mongoose.model('Payment', PaymentSchema);
 const Expense = mongoose.model('Expense', ExpenseSchema);
 const Garden = mongoose.model('Garden', GardenSchema);
+const FactoryPrice = mongoose.model('FactoryPrice', FactoryPriceSchema);
+const Ad = mongoose.model('Ad', AdSchema);
 
+// HELPER FUNCTIONS
 const getUserIdentifier = (req) => {
   const userId = req.headers['user-id'] || req.query.userId || req.body?.userId;
   const userPhone = req.headers['user-phone'] || req.query.userPhone || req.body?.userPhone;
@@ -63,7 +116,7 @@ const getUserIdentifier = (req) => {
 };
 
 const buildUserFilter = (req) => {
-  if (req.headers['admin-secret'] === 'ADMIN_OZEL_SIFRESI_123') {
+  if (req.headers['admin-secret'] === ADMIN_SECRET) {
     return {};
   }
 
@@ -107,14 +160,27 @@ app.post('/api/harvests', async (req, res) => {
       return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
     }
 
+    const kgVal = Number(req.body.kg || req.body.weight) || 0;
+    const fiyatVal = Number(req.body.fiyat) || 0;
+    const tahsilatVal = Number(req.body.tahsilat) || 0;
+    const toplam = kgVal * fiyatVal;
+    const kalan = toplam - tahsilatVal;
+
+    let durum = 'Bekliyor';
+    if (kalan <= 0 && toplam > 0) durum = 'Ödendi';
+    else if (tahsilatVal > 0) durum = 'Kısmi Ödendi';
+
     const payload = {
       ...req.body,
       userId: userId || req.body.userId,
       userPhone: userPhone || req.body.userPhone,
-      kg: Number(req.body.kg || req.body.weight) || 0,
-      weight: Number(req.body.kg || req.body.weight) || 0,
-      fiyat: Number(req.body.fiyat) || 0,
-      tahsilat: Number(req.body.tahsilat) || 0
+      kg: kgVal,
+      weight: kgVal,
+      fiyat: fiyatVal,
+      tahsilat: tahsilatVal,
+      toplamTutar: toplam,
+      kalanBakiye: kalan,
+      odemeDurumu: durum
     };
 
     const newHarvest = new Harvest(payload);
@@ -128,8 +194,31 @@ app.post('/api/harvests', async (req, res) => {
 
 app.put('/api/harvests/:id', async (req, res) => {
   try {
-    const updated = await Harvest.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!updated) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    const existing = await Harvest.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+
+    const kgVal = Number(req.body.kg ?? req.body.weight ?? existing.kg) || 0;
+    const fiyatVal = Number(req.body.fiyat ?? existing.fiyat) || 0;
+    const tahsilatVal = Number(req.body.tahsilat ?? existing.tahsilat) || 0;
+    const toplam = kgVal * fiyatVal;
+    const kalan = toplam - tahsilatVal;
+
+    let durum = 'Bekliyor';
+    if (kalan <= 0 && toplam > 0) durum = 'Ödendi';
+    else if (tahsilatVal > 0) durum = 'Kısmi Ödendi';
+
+    const updatePayload = {
+      ...req.body,
+      kg: kgVal,
+      weight: kgVal,
+      fiyat: fiyatVal,
+      tahsilat: tahsilatVal,
+      toplamTutar: toplam,
+      kalanBakiye: kalan,
+      odemeDurumu: durum
+    };
+
+    const updated = await Harvest.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -140,7 +229,245 @@ app.delete('/api/harvests/:id', async (req, res) => {
   try {
     const deleted = await Harvest.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    // İlişkili ödemeleri de temizle
+    await Payment.deleteMany({ harvestId: req.params.id });
     res.json({ message: 'Hasat kaydı silindi.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- YENİ EKLENEN ÖZEL ROTALAR ---
+
+// --- YENİ RAPOR VE TAKİP ROTALARI ---
+
+// 1. Belirli satışa tahsilat ekle
+app.post('/api/payments', async (req, res) => {
+  try {
+    const { userId, userPhone } = getUserIdentifier(req);
+    const { harvestId, tutar, tarih, aciklama } = req.body;
+
+    if (!harvestId) return res.status(400).json({ error: 'Tahsilat yapılacak satış seçilmedi.' });
+    if (!mongoose.Types.ObjectId.isValid(harvestId)) {
+      return res.status(400).json({ error: 'Seçilen satış kaydının kimliği geçersiz.' });
+    }
+
+    const ödemeTutar = Number(String(tutar ?? '').replace(',', '.'));
+    if (!Number.isFinite(ödemeTutar) || ödemeTutar <= 0) {
+      return res.status(400).json({ error: 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.' });
+    }
+
+    const harvest = await Harvest.findById(harvestId);
+    if (!harvest) return res.status(404).json({ error: 'Seçilen satış kaydı bulunamadı.' });
+
+    // Kullanıcının başka bir kaydına ödeme yazılmasını engelle
+    if (userId && harvest.userId && harvest.userId !== userId) {
+      return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
+    }
+    if (userPhone && harvest.userPhone && harvest.userPhone !== userPhone) {
+      return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
+    }
+
+    const toplam = (Number(harvest.kg || harvest.weight) || 0) * (Number(harvest.fiyat) || 0);
+    const mevcutTahsilat = Number(harvest.tahsilat) || 0;
+    const kalan = toplam - mevcutTahsilat;
+
+    if (kalan <= 0) return res.status(400).json({ error: 'Bu satışın borcu zaten kapanmış.' });
+    if (ödemeTutar > kalan + 0.01) {
+      return res.status(400).json({ error: `Tahsilat kalan borçtan fazla olamaz. Kalan: ${kalan.toFixed(2)} TL` });
+    }
+
+    const yeniTahsilat = mevcutTahsilat + ödemeTutar;
+    const yeniKalan = Math.max(0, toplam - yeniTahsilat);
+
+    harvest.tahsilat = yeniTahsilat;
+    harvest.toplamTutar = toplam;
+    harvest.kalanBakiye = yeniKalan;
+    harvest.odemeDurumu = yeniKalan <= 0.01 ? 'Ödendi' : 'Kısmi Ödendi';
+    await harvest.save();
+
+    try {
+      const newPayment = await Payment.create({
+        userId: userId || harvest.userId,
+        userPhone: userPhone || harvest.userPhone,
+        harvestId,
+        tarih: tarih || new Date().toISOString().split('T')[0],
+        tutar: ödemeTutar,
+        aciklama: aciklama || ''
+      });
+      return res.status(201).json({ message: 'Tahsilat başarıyla kaydedildi.', harvest, payment: newPayment });
+    } catch (paymentError) {
+      // Tahsilat geçmişi yazılamazsa satış bakiyesini geri al
+      harvest.tahsilat = mevcutTahsilat;
+      harvest.kalanBakiye = kalan;
+      harvest.odemeDurumu = mevcutTahsilat > 0 ? 'Kısmi Ödendi' : 'Bekliyor';
+      await harvest.save();
+      throw paymentError;
+    }
+  } catch (err) {
+    console.error('Tahsilat Kaydetme Hatası:', err);
+    const status = err?.name === 'ValidationError' ? 400 : 500;
+    res.status(status).json({ error: `Tahsilat kaydedilemedi: ${err.message}` });
+  }
+});
+
+// 2. BAHÇELERE GÖRE TOPLAM KG VE KAZANÇ ÖZETİ
+app.get('/api/gardens/summary', async (req, res) => {
+  try {
+    const filter = buildUserFilter(req);
+    if (filter._id === null) return res.json([]);
+
+    const summary = await Harvest.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: "$bahce",
+          toplamKg: { $sum: { $ifNull: ["$kg", "$weight"] } },
+          toplamKazanc: { $sum: { $multiply: [{ $ifNull: ["$kg", "$weight"] }, { $ifNull: ["$fiyat", 0] }] } },
+          toplamTahsilat: { $sum: { $ifNull: ["$tahsilat", 0] } },
+          toplamKayıt: { $sum: 1 }
+        }
+      },
+      { $sort: { toplamKg: -1 } }
+    ]);
+
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. VADELİ SATIŞLAR VE BEKLENEN ALACAK RAPORU
+app.get('/api/reports/receivables', async (req, res) => {
+  try {
+    const filter = buildUserFilter(req);
+    if (filter._id === null) return res.json({ toplamAlacak: 0, detaylar: [] });
+
+    // Bakiyesi kalan tüm satışlar
+    const query = {
+      ...filter,
+      $expr: {
+        $gt: [
+          { $subtract: [{ $multiply: [{ $ifNull: ["$kg", "$weight"] }, { $ifNull: ["$fiyat", 0] }] }, { $ifNull: ["$tahsilat", 0] }] },
+          0
+        ]
+      }
+    };
+
+    const pendingHarvests = await Harvest.find(query).sort({ vadeTarihi: 1, tarih: 1 });
+
+    const detaylar = pendingHarvests.map(h => {
+      const toplam = (h.kg || h.weight || 0) * (h.fiyat || 0);
+      const kalan = toplam - (h.tahsilat || 0);
+      return {
+        _id: h._id,
+        tarih: h.tarih,
+        surum: h.surum,
+        firma: h.firma,
+        bahce: h.bahce,
+        kg: h.kg || h.weight,
+        fiyat: h.fiyat,
+        toplamTutar: toplam,
+        tahsilat: h.tahsilat || 0,
+        kalanAlacak: kalan,
+        isVadeli: h.isVadeli,
+        vadeTarihi: h.vadeTarihi || 'Belirtilmedi',
+        odemeDurumu: h.odemeDurumu
+      };
+    });
+
+    const toplamAlacak = detaylar.reduce((acc, curr) => acc + curr.kalanAlacak, 0);
+
+    res.json({
+      toplamAlacak,
+      toplamKayıt: detaylar.length,
+      detaylar
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. FABRİKA ÇAY FİYATLARI / FİYAT POLİTİKASI
+app.get('/api/factory-prices', async (req, res) => {
+  try {
+    const data = await FactoryPrice.find().sort({ tarih: -1, createdAt: -1 });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/factory-prices', async (req, res) => {
+  try {
+    const { userId, userPhone } = getUserIdentifier(req);
+    if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
+
+    const firma = String(req.body.firma || '').trim();
+    const fiyat = Number(String(req.body.fiyat ?? '').replace(',', '.'));
+    const tarih = String(req.body.tarih || '').trim();
+
+    if (!firma) return res.status(400).json({ error: 'Fabrika adı zorunludur.' });
+    if (!Number.isFinite(fiyat) || fiyat < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
+    if (!tarih) return res.status(400).json({ error: 'Fiyat tarihi zorunludur.' });
+
+    const item = await FactoryPrice.create({
+      ...req.body,
+      firma, fiyat, tarih,
+      userId: userId || req.body.userId,
+      userPhone: userPhone || req.body.userPhone
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/factory-prices/:id', async (req, res) => {
+  try {
+    const deleted = await FactoryPrice.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Fiyat kaydı bulunamadı.' });
+    res.json({ message: 'Fiyat kaydı silindi.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. REKLAM ALANLARI
+app.get('/api/ads', async (req, res) => {
+  try {
+    const data = await Ad.find({ aktif: true }).sort({ createdAt: -1 });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ads', async (req, res) => {
+  try {
+    const { userId, userPhone } = getUserIdentifier(req);
+    if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
+
+    const firma = String(req.body.firma || '').trim();
+    if (!firma) return res.status(400).json({ error: 'Reklam veren firma adı zorunludur.' });
+
+    const item = await Ad.create({
+      ...req.body,
+      firma,
+      userId: userId || req.body.userId,
+      userPhone: userPhone || req.body.userPhone
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/ads/:id', async (req, res) => {
+  try {
+    const deleted = await Ad.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Reklam bulunamadı.' });
+    res.json({ message: 'Reklam silindi.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -237,107 +564,20 @@ app.delete('/api/gardens/:id', async (req, res) => {
   }
 });
 
-// ADMIN ROUTES & EXCEL EXPORT
+// ADMIN ROUTES
 app.get('/api/admin/all-data', async (req, res) => {
   try {
     const adminSecret = req.headers['admin-secret'];
-    if (adminSecret !== 'ADMIN_OZEL_SIFRESI_123') {
-      return res.status(403).json({ error: 'Bu alana erişim yetkiniz yok.' });
-    }
-
-    const allHarvests = await Harvest.find().sort({ createdAt: -1 });
-    const allExpenses = await Expense.find().sort({ createdAt: -1 });
-    const allGardens = await Garden.find().sort({ createdAt: -1 });
-
-    res.json({
-      harvests: allHarvests,
-      expenses: allExpenses,
-      gardens: allGardens
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/export-excel', async (req, res) => {
-  try {
-    const harvests = await Harvest.find().lean();
-    const expenses = await Expense.find().lean();
-
-    const workbook = new ExcelJS.Workbook();
-    
-    const harvestSheet = workbook.addWorksheet('Hasat ve Satışlar');
-    harvestSheet.columns = [
-      { header: 'Tarih', key: 'tarih', width: 15 },
-      { header: 'Üretici Adı', key: 'uretici', width: 25 },
-      { header: 'Sürüm', key: 'surum', width: 12 },
-      { header: 'Bahçe', key: 'bahce', width: 20 },
-      { header: 'KG', key: 'kg', width: 12 },
-      { header: 'Firma', key: 'firma', width: 15 },
-      { header: 'Fiyat (TL)', key: 'fiyat', width: 12 },
-      { header: 'Toplam Tutar (TL)', key: 'toplam', width: 18 },
-      { header: 'Tahsilat (TL)', key: 'tahsilat', width: 15 },
-      { header: 'Kalan Bakiye (TL)', key: 'kalan', width: 18 },
-      { header: 'Açıklama', key: 'aciklama', width: 25 },
-    ];
-
-    harvests.forEach(h => {
-      const kg = Number(h.kg || h.weight) || 0;
-      const fiyat = Number(h.fiyat) || 0;
-      const tahsilat = Number(h.tahsilat) || 0;
-      const toplam = kg * fiyat;
-      const kalan = toplam - tahsilat;
-
-      harvestSheet.addRow({
-        tarih: h.tarih || '',
-        uretici: h.uretici || h.producerName || 'Belirtilmedi',
-        surum: h.surum || '',
-        bahce: h.bahce || '-',
-        kg: kg,
-        firma: h.firma || '-',
-        fiyat: fiyat,
-        toplam: toplam,
-        tahsilat: tahsilat,
-        kalan: kalan,
-        aciklama: h.aciklama || ''
-      });
-    });
-
-    const expenseSheet = workbook.addWorksheet('Giderler');
-    expenseSheet.columns = [
-      { header: 'Tarih', key: 'tarih', width: 15 },
-      { header: 'Kategori', key: 'kategori', width: 20 },
-      { header: 'Tutar (TL)', key: 'tutar', width: 15 },
-      { header: 'Açıklama', key: 'aciklama', width: 30 },
-    ];
-
-    expenses.forEach(e => {
-      expenseSheet.addRow({
-        tarih: e.tarih || '',
-        kategori: e.kategori || '-',
-        tutar: Number(e.tutar) || 0,
-        aciklama: e.aciklama || ''
-      });
-    });
-
-    [harvestSheet, expenseSheet].forEach(sheet => {
-      sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
-      sheet.getRow(1).fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: '1B4332' }
-      };
-    });
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=' + `Cay_Uretim_Raporu_${Date.now()}.xlsx`);
-
-    await workbook.xlsx.write(res);
-    res.end();
-  } catch (error) {
-    console.error('Excel Oluşturma Hatası:', error);
-    res.status(500).json({ error: 'Excel raporu oluşturulamadı.' });
-  }
+    if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: 'Bu alana erişim yetkiniz yok.' });
+    const [harvests, expenses, gardens, factoryPrices, ads] = await Promise.all([
+      Harvest.find().sort({ createdAt: -1 }),
+      Expense.find().sort({ createdAt: -1 }),
+      Garden.find().sort({ createdAt: -1 }),
+      FactoryPrice.find().sort({ tarih: -1 }),
+      Ad.find().sort({ createdAt: -1 })
+    ]);
+    res.json({ harvests, expenses, gardens, factoryPrices, ads });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 const PORT = process.env.PORT || 10000;
