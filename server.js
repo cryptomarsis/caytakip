@@ -21,7 +21,7 @@ mongoose.connect(MONGO_URI, {
 
 // --- MODELLER (SCHEMAS) ---
 
-// Hasat Modeli (userId ve userPhone eklendi/esnetildi)
+// Hasat Modeli
 const HarvestSchema = new mongoose.Schema({
   userId: { type: String, required: false },
   userPhone: { type: String, required: false },
@@ -61,11 +61,31 @@ const Harvest = mongoose.model('Harvest', HarvestSchema);
 const Expense = mongoose.model('Expense', ExpenseSchema);
 const Garden = mongoose.model('Garden', GardenSchema);
 
-// Yardımcı Fonksiyon: İstekten Kullanıcı Kimliği veya Telefonunu Alır
+// Yardımcı Fonksiyon: İstekten Kullanıcı Kimliği veya Telefonunu Alır (Header, Query veya Body)
 const getUserIdentifier = (req) => {
-  const userId = req.body?.userId || req.headers['user-id'];
-  const userPhone = req.body?.userPhone || req.headers['user-phone'];
+  const userId = req.headers['user-id'] || req.query.userId || req.body?.userId;
+  const userPhone = req.headers['user-phone'] || req.query.userPhone || req.body?.userPhone;
   return { userId, userPhone };
+};
+
+// Yardımcı Fonksiyon: Güvenli Filtre Oluşturucu (Başkasının verisini görmeyi engeller)
+const buildUserFilter = (req) => {
+  const { userId, userPhone } = getUserIdentifier(req);
+
+  // Eğer hiçbir kullanıcı bilgisi gelmemişse, güvenlik için eşleşmeyen dummy filtre verilir
+  if (!userId && !userPhone) {
+    return { _id: null }; 
+  }
+
+  const conditions = [];
+  if (userId) {
+    conditions.push({ userId });
+  }
+  if (userPhone) {
+    conditions.push({ userPhone });
+  }
+
+  return conditions.length > 1 ? { $or: conditions } : conditions[0];
 };
 
 // --- API ROTALARI ---
@@ -80,14 +100,10 @@ app.get('/', (req, res) => {
 // ------------------------------------
 app.get('/api/harvests', async (req, res) => {
   try {
-    const userId = req.headers['user-id'];
-    const userPhone = req.headers['user-phone'];
-
-    let filter = {};
-    if (userId) {
-      filter = { $or: [{ userId }, { userPhone }] };
-    } else if (userPhone) {
-      filter = { userPhone };
+    const filter = buildUserFilter(req);
+    // Filtre _id: null ise kullanıcı bilgisi yok demektir, direkt boş dizi dön
+    if (filter._id === null) {
+      return res.json([]);
     }
 
     const data = await Harvest.find(filter).sort({ createdAt: -1 });
@@ -100,8 +116,7 @@ app.get('/api/harvests', async (req, res) => {
 app.post('/api/harvests', async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
-    
-    // En az bir kimlik bilgisi (userId veya userPhone) bulunmalı
+
     if (!userId && !userPhone) {
       return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi (userId veya userPhone) bulunamadı.' });
     }
@@ -110,7 +125,7 @@ app.post('/api/harvests', async (req, res) => {
       ...req.body,
       userId: userId || req.body.userId,
       userPhone: userPhone || req.body.userPhone,
-      kg: Number(req.body.kg) || 0,
+      kg: Number(req.body.kg || req.body.weight) || 0,
       fiyat: Number(req.body.fiyat) || 0,
       tahsilat: Number(req.body.tahsilat) || 0
     };
@@ -155,14 +170,9 @@ app.delete('/api/harvests/:id', async (req, res) => {
 // ------------------------------------
 app.get('/api/expenses', async (req, res) => {
   try {
-    const userId = req.headers['user-id'];
-    const userPhone = req.headers['user-phone'];
-
-    let filter = {};
-    if (userId) {
-      filter = { $or: [{ userId }, { userPhone }] };
-    } else if (userPhone) {
-      filter = { userPhone };
+    const filter = buildUserFilter(req);
+    if (filter._id === null) {
+      return res.json([]);
     }
 
     const data = await Expense.find(filter).sort({ createdAt: -1 });
@@ -175,6 +185,10 @@ app.get('/api/expenses', async (req, res) => {
 app.post('/api/expenses', async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
+
+    if (!userId && !userPhone) {
+      return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
+    }
 
     const payload = {
       ...req.body,
@@ -207,14 +221,9 @@ app.delete('/api/expenses/:id', async (req, res) => {
 // ------------------------------------
 app.get('/api/gardens', async (req, res) => {
   try {
-    const userId = req.headers['user-id'];
-    const userPhone = req.headers['user-phone'];
-
-    let filter = {};
-    if (userId) {
-      filter = { $or: [{ userId }, { userPhone }] };
-    } else if (userPhone) {
-      filter = { userPhone };
+    const filter = buildUserFilter(req);
+    if (filter._id === null) {
+      return res.json([]);
     }
 
     const data = await Garden.find(filter).sort({ createdAt: -1 });
@@ -227,6 +236,10 @@ app.get('/api/gardens', async (req, res) => {
 app.post('/api/gardens', async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
+
+    if (!userId && !userPhone) {
+      return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
+    }
 
     const payload = {
       ...req.body,
@@ -369,6 +382,6 @@ app.get('/api/admin/export-excel', async (req, res) => {
   }
 });
 
-// Port Tanımlaması ve Sunucunun Başlatılması (En Alt Kısımda Olmalı)
+// Port Tanımlaması ve Sunucunun Başlatılması
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda dinleniyor...`));

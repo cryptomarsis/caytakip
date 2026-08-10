@@ -191,11 +191,12 @@ export default function App() {
     checkSavedSession();
   }, []);
 
-  // Sunucudan Veri Çekme
+  // Sunucudan Veri Çekme (Filtreleme Mantığı Düzeltildi)
   const fetchData = async () => {
     if (!currentUser) return;
     setLoading(true);
     try {
+      // Mümkünse API'ye query parametresi gönderin: ${API_URL}/harvests?userId=${currentUser.userId}
       const [resH, resE, resG] = await Promise.all([
         fetchWithTimeout(`${API_URL}/harvests`),
         fetchWithTimeout(`${API_URL}/expenses`),
@@ -211,18 +212,33 @@ export default function App() {
         const uPhone = currentUser.phone;
         const uName = currentUser.name.toLowerCase().trim();
 
+        // HASAT FİLTRESİ: Sadece bu kullanıcıya AİT olanları getir
         rawH = (rawH || []).filter((h) => {
-          if (h.userId) return h.userId === currentUserId;
-          if (!h.userPhone && !h.uretici && !h.producerName) return true;
-          const matchPhone = h.userPhone === uPhone;
-          const matchName =
-            (h.uretici && h.uretici.toLowerCase().trim().includes(uName)) ||
-            (h.producerName && h.producerName.toLowerCase().trim().includes(uName));
-          return matchPhone || matchName || !h.userPhone;
+          // 1. userId tam eşleşiyorsa göster
+          if (h.userId && h.userId === currentUserId) return true;
+          // 2. userPhone tam eşleşiyorsa göster
+          if (h.userPhone && h.userPhone === uPhone) return true;
+          // 3. Üretici ismi tam/içeren eşleşme yapıyorsa göster
+          const prodName = (h.uretici || h.producerName || '').toLowerCase().trim();
+          if (prodName && prodName === uName) return true;
+
+          // Yukarıdakilerin hiçbiri uymuyorsa BAŞKASININ verisidir, GÖSTERME
+          return false;
         });
 
-        rawE = (rawE || []).filter((e) => (e.userId ? e.userId === currentUserId : !e.userPhone || e.userPhone === uPhone));
-        rawG = (rawG || []).filter((g) => (g.userId ? g.userId === currentUserId : !g.userPhone || g.userPhone === uPhone));
+        // GİDER FİLTRESİ
+        rawE = (rawE || []).filter((e) => {
+          if (e.userId) return e.userId === currentUserId;
+          if (e.userPhone) return e.userPhone === uPhone;
+          return false;
+        });
+
+        // BAHÇE FİLTRESİ
+        rawG = (rawG || []).filter((g) => {
+          if (g.userId) return g.userId === currentUserId;
+          if (g.userPhone) return g.userPhone === uPhone;
+          return false;
+        });
       }
 
       setHarvests(rawH || []);
@@ -235,12 +251,6 @@ export default function App() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (currentUser) {
-      fetchData();
-    }
-  }, [currentUser]);
 
   // Auth İşlemleri
   const handleAuth = async () => {
