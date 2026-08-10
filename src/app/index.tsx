@@ -5,17 +5,65 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  Alert,
-  StatusBar,
   ScrollView,
+  Alert,
+  ActivityIndicator,
   RefreshControl,
-  ActivityIndicator
+  Modal,
+  StatusBar
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://cay-ureticisi-takip.onrender.com/api';
+// ==========================================
+// CONFIGURATION & CONSTANTS
+// ==========================================
+const API_URL = "https://cay-ureticisi-takip.onrender.com/api";
+const ADMIN_PHONE = "05432037007";
+const SESSION_KEY = '@cay_takip_user_session';
 
-// Sunucunun uyanma ve yanıt verme süresi için 60 saniye zaman aşımı
+// ==========================================
+// TYPES
+// ==========================================
+interface UserSession {
+  userId: string;
+  name: string;
+  phone: string;
+  role: 'admin' | 'user';
+}
+
+// ==========================================
+// HELPERS & STORAGE SERVICES
+// ==========================================
+const saveSession = async (user: UserSession) => {
+  try {
+    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  } catch (e) {
+    console.error('Session save error:', e);
+  }
+};
+
+const getSession = async (): Promise<UserSession | null> => {
+  try {
+    const jsonValue = await AsyncStorage.getItem(SESSION_KEY);
+    return jsonValue != null ? JSON.parse(jsonValue) : null;
+  } catch (e) {
+    console.error('Session read error:', e);
+    return null;
+  }
+};
+
+const clearSession = async () => {
+  try {
+    await AsyncStorage.removeItem(SESSION_KEY);
+  } catch (e) {
+    console.error('Session clear error:', e);
+  }
+};
+
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
@@ -36,9 +84,20 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout 
 const formatTL = (val: number) =>
   `${(val || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
 
+// ==========================================
+// MAIN COMPONENT
+// ==========================================
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'expense' | 'producers' | 'gardens'>('dashboard');
+  // Kullanıcı Giriş / Kayıt State'leri
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authPhone, setAuthPhone] = useState('');
+  const [authName, setAuthName] = useState('');
+
+  // Navigasyon ve Yüklenme State'leri
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'expense' | 'gardens' | 'admin'>('dashboard');
   const [loading, setLoading] = useState(false);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
 
   // Veri Listeleri
   const [harvests, setHarvests] = useState<any[]>([]);
@@ -66,10 +125,39 @@ export default function App() {
   });
 
   const [gForm, setGForm] = useState({ name: '', adaParsel: '', alan: '' });
-  const [selectedProducer, setSelectedProducer] = useState('');
 
-  // Verileri Sunucudan Çek
+  // Tahsilat Düzenleme Modal State'leri
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingHarvest, setEditingHarvest] = useState<any>(null);
+  const [editTahsilatVal, setEditTahsilatVal] = useState('');
+
+  // Toplu Tahsilat State'leri
+  const [bulkCollections, setBulkCollections] = useState<{ id: string; producer: string; tutar: string; aciklama: string }[]>([
+    { id: '1', producer: '', tutar: '', aciklama: '' }
+  ]);
+
+  const isAdmin = currentUser?.role === 'admin';
+
+  // Uygulama Açılışında Oturumu Kontrol Et
+  useEffect(() => {
+    const checkSavedSession = async () => {
+      try {
+        const savedUser = await getSession();
+        if (savedUser) {
+          setCurrentUser(savedUser);
+        }
+      } catch (error) {
+        console.log('Oturum okuma hatası:', error);
+      } finally {
+        setInitialCheckDone(true);
+      }
+    };
+    checkSavedSession();
+  }, []);
+
+  // Verileri Sunucudan Çek ve userId / Telefon Filtrelemesi Yap
   const fetchData = async () => {
+    if (!currentUser) return;
     setLoading(true);
     try {
       const [resH, resE, resG] = await Promise.all([
@@ -78,9 +166,33 @@ export default function App() {
         fetchWithTimeout(`${API_URL}/gardens`)
       ]);
 
-      if (resH.ok) setHarvests(await resH.json());
-      if (resE.ok) setExpenses(await resE.json());
-      if (resG.ok) setGardens(await resG.json());
+      let rawH = resH.ok ? await resH.json() : [];
+      let rawE = resE.ok ? await resE.json() : [];
+      let rawG = resG.ok ? await resG.json() : [];
+
+      if (!isAdmin) {
+        const currentUserId = currentUser.userId;
+        const uPhone = currentUser.phone;
+        const uName = currentUser.name.toLowerCase().trim();
+
+        // userId öncelikli, geriye dönük uyumluluk için telefon/isim eşleşmesi desteği
+        rawH = (rawH || []).filter((h: any) => {
+          if (h.userId) return h.userId === currentUserId;
+          if (!h.userPhone && !h.uretici && !h.producerName) return true;
+          const matchPhone = h.userPhone === uPhone;
+          const matchName =
+            (h.uretici && h.uretici.toLowerCase().trim().includes(uName)) ||
+            (h.producerName && h.producerName.toLowerCase().trim().includes(uName));
+          return matchPhone || matchName || !h.userPhone;
+        });
+
+        rawE = (rawE || []).filter((e: any) => (e.userId ? e.userId === currentUserId : !e.userPhone || e.userPhone === uPhone));
+        rawG = (rawG || []).filter((g: any) => (g.userId ? g.userId === currentUserId : !g.userPhone || g.userPhone === uPhone));
+      }
+
+      setHarvests(rawH || []);
+      setExpenses(rawE || []);
+      setGardens(rawG || []);
     } catch (err: any) {
       console.log('Veri çekme hatası:', err.message);
       Alert.alert('Bağlantı Kurulamadı', err.message);
@@ -90,20 +202,85 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentUser) {
+      fetchData();
+    }
+  }, [currentUser]);
+
+  // Giriş Yap / Kayıt Ol İşlemleri (userId Oluşturma Dahil)
+  const handleAuth = async () => {
+    const cleanPhone = authPhone.trim();
+    if (!cleanPhone || cleanPhone.length < 10) {
+      Alert.alert('Eksik Bilgi', 'Lütfen en az 10 haneli geçerli bir telefon numarası girin.');
+      return;
+    }
+
+    const isAdminUser = cleanPhone === ADMIN_PHONE || authName.toLowerCase().includes('admin');
+    const userRole: 'admin' | 'user' = isAdminUser ? 'admin' : 'user';
+
+    const generatedUserId = `usr_${cleanPhone}`;
+
+    const userData: UserSession = {
+      userId: generatedUserId,
+      name: authName.trim() || (isAdminUser ? 'Yönetici' : 'Üretici'),
+      phone: cleanPhone,
+      role: userRole
+    };
+
+    if (authMode === 'register') {
+      if (!authName.trim()) {
+        Alert.alert('Eksik Bilgi', 'Lütfen Adınız ve Soyadınızı girin.');
+        return;
+      }
+      setCurrentUser(userData);
+      await saveSession(userData);
+      Alert.alert('Kayıt Başarılı', `Hoş geldiniz, ${authName.trim()}! ${isAdminUser ? '(Admin Yetkisi Tanımlandı)' : ''}`);
+    } else {
+      setCurrentUser(userData);
+      await saveSession(userData);
+      Alert.alert('Giriş Başarılı', 'Uygulamaya giriş yapıldı.');
+    }
+  };
+
+  // Çıkış Yap İşlemi
+  const handleLogout = async () => {
+    await clearSession();
+    setCurrentUser(null);
+  };
 
   // Hesaplamalar
-  const totalKg = harvests.reduce((acc, c) => acc + (Number(c.kg || c.weight) || 0), 0);
-  const totalSales = harvests.reduce((acc, c) => acc + ((Number(c.kg || c.weight) || 0) * (Number(c.fiyat) || 0)), 0);
-  const totalPay = harvests.reduce((acc, c) => acc + (Number(c.tahsilat) || 0), 0);
-  const totalExp = expenses.reduce((acc, c) => acc + (Number(c.tutar) || 0), 0);
+  const totalKg = (harvests || []).reduce((acc, c) => acc + (Number(c.kg || c.weight) || 0), 0);
+  const totalSales = (harvests || []).reduce((acc, c) => acc + ((Number(c.kg || c.weight) || 0) * (Number(c.fiyat) || 0)), 0);
+  const totalPay = (harvests || []).reduce((acc, c) => acc + (Number(c.tahsilat) || 0), 0);
+  const totalExp = (expenses || []).reduce((acc, c) => acc + (Number(c.tutar) || 0), 0);
   const pendingCollection = totalSales - totalPay;
   const netProfit = totalSales - totalExp;
 
-  const producers = Array.from(new Set(harvests.map(h => h.uretici || h.producerName).filter(Boolean)));
+  // Admin Paneli İçin Üretici Bazlı Gruplama
+  const getAdminProducerSummary = () => {
+    const summaryMap: { [key: string]: { name: string; totalKg: number; totalSales: number; totalPay: number; count: number } } = {};
 
-  // Genel Silme Fonksiyonu
+    harvests.forEach(h => {
+      const key = h.userId || (h.uretici || h.producerName || 'Bilinmeyen Üretici').trim();
+      const pName = (h.uretici || h.producerName || 'Bilinmeyen Üretici').trim();
+
+      if (!summaryMap[key]) {
+        summaryMap[key] = { name: pName, totalKg: 0, totalSales: 0, totalPay: 0, count: 0 };
+      }
+      const kg = Number(h.kg || h.weight) || 0;
+      const fiyat = Number(h.fiyat) || 0;
+      const pay = Number(h.tahsilat) || 0;
+
+      summaryMap[key].totalKg += kg;
+      summaryMap[key].totalSales += kg * fiyat;
+      summaryMap[key].totalPay += pay;
+      summaryMap[key].count += 1;
+    });
+
+    return Object.values(summaryMap);
+  };
+
+  // Silme Fonksiyonu
   const handleDelete = (endpoint: string, id: string, title: string) => {
     Alert.alert(`${title} Silinsin mi?`, 'Bu işlem geri alınamaz.', [
       { text: 'İptal', style: 'cancel' },
@@ -113,8 +290,13 @@ export default function App() {
         onPress: async () => {
           setLoading(true);
           try {
-            await fetchWithTimeout(`${API_URL}/${endpoint}/${id}`, { method: 'DELETE' });
-            fetchData();
+            const res = await fetchWithTimeout(`${API_URL}/${endpoint}/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+              await fetchData();
+            } else {
+              Alert.alert('Hata', 'Silme işlemi gerçekleşmedi.');
+              setLoading(false);
+            }
           } catch (e: any) {
             Alert.alert('Hata', e.message);
             setLoading(false);
@@ -124,19 +306,22 @@ export default function App() {
     ]);
   };
 
-  // Hasat Kaydetme (Gelişmiş Hata Yakalama Eklendi)
+  // Hasat Kaydetme
   const handleSaveHarvest = async () => {
-    if (!hForm.producer.trim() || !hForm.kg.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen üretici adı ve KG alanlarını doldurun.');
+    const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
+    if (!hForm.kg.trim()) {
+      Alert.alert('Eksik Bilgi', 'Lütfen KG alanını doldurun.');
       return;
     }
     setLoading(true);
     try {
       const payload = {
+        userId: currentUser?.userId,
+        userPhone: currentUser?.phone,
         tarih: hForm.date,
         surum: hForm.surum,
-        uretici: hForm.producer.trim(),
-        producerName: hForm.producer.trim(),
+        uretici: producerName,
+        producerName: producerName,
         kg: parseFloat(hForm.kg) || 0,
         weight: parseFloat(hForm.kg) || 0,
         firma: hForm.firma || '',
@@ -155,11 +340,207 @@ export default function App() {
       if (res.ok) {
         Alert.alert('Başarılı', 'Hasat kaydı eklendi.');
         setHForm({ ...hForm, producer: '', kg: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '' });
-        fetchData();
+        await fetchData();
+        setActiveTab('dashboard');
       } else {
         const errData = await res.json().catch(() => null);
-        const errorMsg = errData?.message || errData?.error || `Sunucu Yanıt Kodu: ${res.status}`;
-        Alert.alert('Kayıt Başarısız', `Sunucu Hatası: ${errorMsg}`);
+        Alert.alert('Kayıt Başarısız', errData?.message || `Sunucu Hatası: ${res.status}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Bağlantı Hatası', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Tahsilat Ekleme
+  const processSingleCollection = async (selectedProdName: string, payAmount: number) => {
+    const targetHarvests = harvests.filter(h => {
+      const pName = (h.uretici || h.producerName || '').trim().toLowerCase();
+      return pName === selectedProdName.trim().toLowerCase();
+    });
+
+    if (targetHarvests.length === 0) return false;
+
+    let remainingPayment = payAmount;
+    for (const h of targetHarvests) {
+      if (remainingPayment <= 0) break;
+
+      const totalSale = (Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0);
+      const currentPay = Number(h.tahsilat) || 0;
+      const remainingDebt = totalSale - currentPay;
+
+      if (remainingDebt > 0) {
+        const addPay = Math.min(remainingDebt, remainingPayment);
+        const updatedPay = currentPay + addPay;
+
+        await fetchWithTimeout(`${API_URL}/harvests/${h._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tahsilat: updatedPay })
+        });
+
+        remainingPayment -= addPay;
+      }
+    }
+    return true;
+  };
+
+  // Toplu Tahsilat İşleme
+  const handleSaveBulkCollections = async () => {
+    const validItems = bulkCollections.filter(item => item.producer.trim() && !isNaN(parseFloat(item.tutar)) && parseFloat(item.tutar) > 0);
+
+    if (validItems.length === 0) {
+      Alert.alert('Eksik Bilgi', 'Lütfen en az bir geçerli üretici ve tutar girin.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let processedCount = 0;
+      for (const item of validItems) {
+        const success = await processSingleCollection(item.producer, parseFloat(item.tutar));
+        if (success) processedCount++;
+      }
+
+      Alert.alert('Başarılı', `${processedCount} adet tahsilat işlemi başarıyla tamamlandı.`);
+      setBulkCollections([{ id: '1', producer: '', tutar: '', aciklama: '' }]);
+      await fetchData();
+    } catch (e: any) {
+      Alert.alert('İşlem Başarısız', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addBulkRow = () => {
+    setBulkCollections([
+      ...bulkCollections,
+      { id: Date.now().toString(), producer: '', tutar: '', aciklama: '' }
+    ]);
+  };
+
+  const removeBulkRow = (id: string) => {
+    if (bulkCollections.length === 1) return;
+    setBulkCollections(bulkCollections.filter(item => item.id !== id));
+  };
+
+  const updateBulkRow = (id: string, field: string, value: string) => {
+    setBulkCollections(bulkCollections.map(item => item.id === id ? { ...item, [field]: value } : item));
+  };
+
+  // CSV Dışa Aktarma
+  const exportToCSV = async () => {
+    try {
+      let csvContent = 'Tarih,Surum,Uretici,KG,Firma,Fiyat,Tahsilat,Bahce,Aciklama\n';
+      harvests.forEach(h => {
+        csvContent += `"${h.tarih || ''}","${h.surum || ''}","${h.uretici || h.producerName || ''}",${h.kg || h.weight || 0},"${h.firma || ''}",${h.fiyat || 0},${h.tahsilat || 0},"${h.bahce || ''}","${h.aciklama || ''}"\n`;
+      });
+
+      const baseDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
+      const fileUri = baseDir + `hasat_listesi_${Date.now()}.csv`;
+      await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri);
+      } else {
+        Alert.alert('Başarılı', `Dosya oluşturuldu: ${fileUri}`);
+      }
+    } catch (error: any) {
+      Alert.alert('Hata', 'CSV aktarımı başarısız: ' + error.message);
+    }
+  };
+
+  // CSV İçe Aktarma
+  const importFromCSV = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*' });
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      const fileUri = result.assets[0].uri;
+      const fileContent = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.UTF8 });
+
+      const lines = fileContent.split('\n');
+      if (lines.length <= 1) {
+        Alert.alert('Hata', 'Dosya boş veya geçersiz formatta.');
+        return;
+      }
+
+      setLoading(true);
+      let importedCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
+        if (cols.length < 4) continue;
+
+        const payload = {
+          userId: currentUser?.userId,
+          userPhone: currentUser?.phone,
+          tarih: cols[0] || new Date().toISOString().split('T')[0],
+          surum: cols[1] || '1. Sürüm',
+          uretici: cols[2],
+          producerName: cols[2],
+          kg: parseFloat(cols[3]) || 0,
+          weight: parseFloat(cols[3]) || 0,
+          firma: cols[4] || '',
+          fiyat: parseFloat(cols[5]) || 0,
+          tahsilat: parseFloat(cols[6]) || 0,
+          bahce: cols[7] || '',
+          aciklama: cols[8] || ''
+        };
+
+        if (payload.uretici) {
+          await fetchWithTimeout(`${API_URL}/harvests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          importedCount++;
+        }
+      }
+
+      Alert.alert('Başarılı', `${importedCount} adet kayıt içe aktarıldı.`);
+      await fetchData();
+    } catch (error: any) {
+      Alert.alert('Hata', 'İçe aktarım başarısız: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Tahsilat Düzenleme Modalı Aç
+  const openEditModal = (harvestItem: any) => {
+    setEditingHarvest(harvestItem);
+    setEditTahsilatVal(String(harvestItem.tahsilat || 0));
+    setEditModalVisible(true);
+  };
+
+  const handleUpdateCollection = async () => {
+    if (!editingHarvest) return;
+    const newTahsilat = parseFloat(editTahsilatVal);
+    if (isNaN(newTahsilat) || newTahsilat < 0) {
+      Alert.alert('Hata', 'Lütfen geçerli bir tutar girin.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetchWithTimeout(`${API_URL}/harvests/${editingHarvest._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tahsilat: newTahsilat })
+      });
+
+      if (res.ok) {
+        Alert.alert('Başarılı', 'Tahsilat tutarı güncellendi.');
+        setEditModalVisible(false);
+        setEditingHarvest(null);
+        await fetchData();
+      } else {
+        Alert.alert('Hata', 'Tahsilat güncellenemedi.');
       }
     } catch (e: any) {
       Alert.alert('Bağlantı Hatası', e.message);
@@ -179,13 +560,19 @@ export default function App() {
       const res = await fetchWithTimeout(`${API_URL}/gardens`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: gForm.name.trim(), adaParsel: gForm.adaParsel.trim(), alan: gForm.alan.trim() })
+        body: JSON.stringify({
+          userId: currentUser?.userId,
+          userPhone: currentUser?.phone,
+          name: gForm.name.trim(),
+          adaParsel: gForm.adaParsel.trim(),
+          alan: gForm.alan.trim()
+        })
       });
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Bahçe eklendi.');
         setGForm({ name: '', adaParsel: '', alan: '' });
-        fetchData();
+        await fetchData();
       } else {
         const errData = await res.json().catch(() => null);
         Alert.alert('Hata', errData?.message || 'Bahçe eklenemedi.');
@@ -209,6 +596,8 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: currentUser?.userId,
+          userPhone: currentUser?.phone,
           tarih: eForm.date,
           kategori: eForm.kategori,
           aciklama: eForm.aciklama,
@@ -219,7 +608,7 @@ export default function App() {
       if (res.ok) {
         Alert.alert('Başarılı', 'Gider eklendi.');
         setEForm({ ...eForm, aciklama: '', tutar: '' });
-        fetchData();
+        await fetchData();
       } else {
         const errData = await res.json().catch(() => null);
         Alert.alert('Hata', errData?.message || 'Gider eklenemedi.');
@@ -231,316 +620,879 @@ export default function App() {
     }
   };
 
+  // Açılış Yükleniyor Kontrolü
+  if (!initialCheckDone) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#1b4332" />
+      </View>
+    );
+  }
+
+  // GİRİŞ / KAYIT EKRANI
+  if (!currentUser) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 20 }]}>
+          <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
+          <View style={styles.authCard}>
+            <Text style={styles.authTitle}>🍃 ÇAY ÜRETİCİ SİSTEMİ</Text>
+            <Text style={styles.authSubTitle}>
+              {authMode === 'login' ? 'Telefon Numarası ile Giriş Yap' : 'Yeni Üretici Kaydı Oluştur'}
+            </Text>
+
+            {authMode === 'register' && (
+              <View style={{ width: '100%' }}>
+                <Text style={styles.label}>Ad Soyad</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ahmet Yılmaz"
+                  value={authName}
+                  onChangeText={setAuthName}
+                />
+              </View>
+            )}
+
+            <Text style={styles.label}>Telefon Numarası</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="05XXXXXXXXX"
+              keyboardType="phone-pad"
+              value={authPhone}
+              onChangeText={setAuthPhone}
+            />
+
+            <TouchableOpacity style={styles.submitBtn} onPress={handleAuth}>
+              <Text style={styles.submitBtnText}>
+                {authMode === 'login' ? '📱 GİRİŞ YAP' : '📝 KAYIT OL VE GİRİŞ YAP'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ marginTop: 15 }}
+              onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+            >
+              <Text style={{ color: '#1b4332', fontWeight: 'bold', textDecorationLine: 'underline' }}>
+                {authMode === 'login'
+                  ? 'Hesabınız yok mu? Telefonla Kayıt Olun'
+                  : 'Zaten hesabınız var mı? Giriş Yapın'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
+  // ANA UYGULAMA EKRANI
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
 
+        {/* HEADER */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>🍃 ÇAY ÜRETİCİSİ YÖNETİM SİSTEMİ</Text>
-          <Text style={styles.headerSub}>MOBİL SEZON TAKİP</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>🍃 ÇAY ÜRETİCİSİ YÖNETİM SİSTEMİ</Text>
+            <Text style={styles.headerSubtitle}>
+              Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+            <Text style={styles.logoutBtnText}>Çıkış</Text>
+          </TouchableOpacity>
         </View>
 
+        {/* TAB MENÜSÜ */}
+        <View style={styles.navBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'dashboard' && styles.navItemActive]}
+              onPress={() => setActiveTab('dashboard')}
+            >
+              <Text style={[styles.navText, activeTab === 'dashboard' && styles.navTextActive]}>📊 Özet</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'harvest' && styles.navItemActive]}
+              onPress={() => setActiveTab('harvest')}
+            >
+              <Text style={[styles.navText, activeTab === 'harvest' && styles.navTextActive]}>🌱 Hasat Ekle</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'collections' && styles.navItemActive]}
+              onPress={() => setActiveTab('collections')}
+            >
+              <Text style={[styles.navText, activeTab === 'collections' && styles.navTextActive]}>💵 Tahsilat</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'expense' && styles.navItemActive]}
+              onPress={() => setActiveTab('expense')}
+            >
+              <Text style={[styles.navText, activeTab === 'expense' && styles.navTextActive]}>📉 Giderler</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'gardens' && styles.navItemActive]}
+              onPress={() => setActiveTab('gardens')}
+            >
+              <Text style={[styles.navText, activeTab === 'gardens' && styles.navTextActive]}>🏡 Bahçeler</Text>
+            </TouchableOpacity>
+
+            {/* ADMIN SEKMESİ */}
+            {isAdmin && (
+              <TouchableOpacity
+                style={[styles.navItem, activeTab === 'admin' && styles.navItemActiveAdmin]}
+                onPress={() => setActiveTab('admin')}
+              >
+                <Text style={[styles.navText, activeTab === 'admin' && styles.navTextActiveAdmin]}>👑 Admin Paneli</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+        </View>
+
+        {/* İÇERİK ALANI */}
         <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} />}
+          style={styles.content}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} colors={['#1b4332']} />}
         >
-          {/* ÖZET SEKMESİ */}
+          {/* DASHBOARD TABI */}
           {activeTab === 'dashboard' && (
             <View>
-              <Text style={styles.sectionTitle}>📊 Sezon Özeti</Text>
-              <View style={styles.grid}>
-                <View style={[styles.card, { backgroundColor: '#2d6a4f' }]}>
-                  <Text style={styles.cardLabel}>TOPLAM ÜRETİM</Text>
-                  <Text style={styles.cardValue}>{totalKg.toLocaleString('tr-TR')} KG</Text>
+              <Text style={styles.sectionTitle}>GENEL ÖZET PANELİ</Text>
+
+              <View style={styles.statsGrid}>
+                <View style={[styles.statCard, { borderLeftColor: '#2a9d8f' }]}>
+                  <Text style={styles.statTitle}>Toplam Hasat</Text>
+                  <Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR')} KG</Text>
                 </View>
-                <View style={[styles.card, { backgroundColor: '#1b4332' }]}>
-                  <Text style={styles.cardLabel}>SATIŞ GELİRİ</Text>
-                  <Text style={styles.cardValue}>{formatTL(totalSales)}</Text>
+
+                <View style={[styles.statCard, { borderLeftColor: '#e76f51' }]}>
+                  <Text style={styles.statTitle}>Toplam Satış Tutarı</Text>
+                  <Text style={styles.statValue}>{formatTL(totalSales)}</Text>
                 </View>
-                <View style={[styles.card, { backgroundColor: '#2a9d8f' }]}>
-                  <Text style={styles.cardLabel}>TAHSİLAT</Text>
-                  <Text style={styles.cardValue}>{formatTL(totalPay)}</Text>
+
+                <View style={[styles.statCard, { borderLeftColor: '#38b000' }]}>
+                  <Text style={styles.statTitle}>Yapılan Tahsilat</Text>
+                  <Text style={styles.statValue}>{formatTL(totalPay)}</Text>
                 </View>
-                <View style={[styles.card, { backgroundColor: '#e76f51' }]}>
-                  <Text style={styles.cardLabel}>BEKLEYEN ALACAK</Text>
-                  <Text style={styles.cardValue}>{formatTL(pendingCollection)}</Text>
+
+                <View style={[styles.statCard, { borderLeftColor: '#d62828' }]}>
+                  <Text style={styles.statTitle}>Kalan Alacak / Bekleyen</Text>
+                  <Text style={[styles.statValue, { color: pendingCollection > 0 ? '#d62828' : '#2b9348' }]}>
+                    {formatTL(pendingCollection)}
+                  </Text>
                 </View>
-                <View style={[styles.card, { backgroundColor: '#e63946' }]}>
-                  <Text style={styles.cardLabel}>TOPLAM GİDER</Text>
-                  <Text style={styles.cardValue}>{formatTL(totalExp)}</Text>
+
+                <View style={[styles.statCard, { borderLeftColor: '#f4a261' }]}>
+                  <Text style={styles.statTitle}>Toplam Gider</Text>
+                  <Text style={styles.statValue}>{formatTL(totalExp)}</Text>
                 </View>
-                <View style={[styles.card, { backgroundColor: '#52b788' }]}>
-                  <Text style={styles.cardLabel}>NET KAZANÇ</Text>
-                  <Text style={styles.cardValue}>{formatTL(netProfit)}</Text>
+
+                <View style={[styles.statCard, { borderLeftColor: '#1d3557' }]}>
+                  <Text style={styles.statTitle}>Net Kar / Bakiye</Text>
+                  <Text style={[styles.statValue, { color: netProfit >= 0 ? '#2b9348' : '#d62828' }]}>
+                    {formatTL(netProfit)}
+                  </Text>
                 </View>
               </View>
-            </View>
-          )}
 
-          {/* HASAT SEKMESİ */}
-          {activeTab === 'harvest' && (
-            <View>
-              <View style={styles.formContainer}>
-                <Text style={styles.sectionTitle}>🍃 Yeni Hasat Girişi</Text>
+              {/* CSV AKTARIM BUTONLARI */}
+              <View style={styles.csvContainer}>
+                <TouchableOpacity style={styles.csvExportBtn} onPress={exportToCSV}>
+                  <Text style={styles.csvBtnText}>📄 CSV İndir / Paylaş</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.csvImportBtn} onPress={importFromCSV}>
+                  <Text style={styles.csvBtnText}>📥 CSV İçe Aktar</Text>
+                </TouchableOpacity>
+              </View>
 
-                <Text style={styles.label}>Tarih</Text>
-                <TextInput style={styles.input} value={hForm.date} onChangeText={t => setHForm({ ...hForm, date: t })} />
+              {/* RECENT HARVESTS LIST */}
+              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>SON HASAT KAYITLARI</Text>
+              {harvests.length === 0 ? (
+                <Text style={styles.emptyText}>Henüz kaydedilmiş bir hasat yok.</Text>
+              ) : (
+                harvests.slice(0, 10).map((item, index) => {
+                  const saleVal = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
+                  const payVal = Number(item.tahsilat) || 0;
+                  const remaining = saleVal - payVal;
 
-                <Text style={styles.label}>Sürüm</Text>
-                <TextInput style={styles.input} value={hForm.surum} onChangeText={t => setHForm({ ...hForm, surum: t })} placeholder="1. Sürüm" />
-
-                <Text style={styles.label}>Üretici Adı</Text>
-                <TextInput style={styles.input} value={hForm.producer} onChangeText={t => setHForm({ ...hForm, producer: t })} placeholder="Ahmet Yılmaz" />
-
-                <Text style={styles.label}>Bahçe İsmi / Seçimi</Text>
-                {gardens.length > 0 && (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                    {gardens.map((g, idx) => {
-                      const gLabel = g.name || g.adaParsel;
-                      const isSelected = hForm.garden === gLabel;
-                      return (
-                        <TouchableOpacity
-                          key={idx}
-                          style={[styles.chip, isSelected && styles.activeChip]}
-                          onPress={() => setHForm({ ...hForm, garden: isSelected ? '' : gLabel })}
-                        >
-                          <Text style={[styles.chipText, isSelected && styles.activeChipText]}>🏡 {gLabel}</Text>
+                  return (
+                    <View key={item._id || index} style={styles.listItem}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.listTitle}>
+                          {item.uretici || item.producerName || 'Bilinmeyen Üretici'} ({item.surum || '1. Sürüm'})
+                        </Text>
+                        <Text style={styles.listSubText}>
+                          📅 {item.tarih || 'Tarih Yok'} | ⚖️ {item.kg || item.weight || 0} KG | 💵 Fiyat: {item.fiyat || 0} TL
+                        </Text>
+                        {item.bahce ? <Text style={styles.listSubText}>🏡 Bahçe: {item.bahce}</Text> : null}
+                        <Text style={styles.listSubText}>
+                          💰 Toplam: {formatTL(saleVal)} | 🟢 Ödenen: {formatTL(payVal)}
+                        </Text>
+                        <Text style={{ color: remaining > 0 ? '#d62828' : '#2b9348', fontWeight: 'bold', marginTop: 2 }}>
+                          {remaining > 0 ? `🔴 Kalan Borç: ${formatTL(remaining)}` : '🟢 Tamamı Ödendi'}
+                        </Text>
+                      </View>
+                      <View style={{ gap: 5 }}>
+                        <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
+                          <Text style={styles.actionBtnText}>✏️ Ödeme</Text>
                         </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                )}
-                <TextInput
-                  style={styles.input}
-                  value={hForm.garden}
-                  onChangeText={t => setHForm({ ...hForm, garden: t })}
-                  placeholder="Örn: A Bahçesi, Dere İçi..."
-                />
-
-                <Text style={styles.label}>Toplanan KG</Text>
-                <TextInput style={styles.input} value={hForm.kg} onChangeText={t => setHForm({ ...hForm, kg: t })} keyboardType="numeric" placeholder="0.00" />
-
-                <Text style={styles.label}>Satış Firması</Text>
-                <TextInput style={styles.input} value={hForm.firma} onChangeText={t => setHForm({ ...hForm, firma: t })} placeholder="ÇAYKUR / Özel" />
-
-                <Text style={styles.label}>Satış Fiyatı (TL/KG)</Text>
-                <TextInput style={styles.input} value={hForm.fiyat} onChangeText={t => setHForm({ ...hForm, fiyat: t })} keyboardType="numeric" placeholder="0.00" />
-
-                <Text style={styles.label}>Tahsilat (TL)</Text>
-                <TextInput style={styles.input} value={hForm.tahsilat} onChangeText={t => setHForm({ ...hForm, tahsilat: t })} keyboardType="numeric" placeholder="0.00" />
-
-                <TouchableOpacity style={[styles.submitBtn, loading && styles.disabledBtn]} onPress={handleSaveHarvest} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.submitBtnText}>💾 HASADI KAYDET</Text>}
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 25 }]}>📋 Hasat Kayıtları</Text>
-              {harvests.map((h, i) => (
-                <View key={h._id || i} style={styles.listItem}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemTitle}>{h.uretici || h.producerName}</Text>
-                    <Text style={styles.itemSub}>{h.tarih} | {h.surum} {h.bahce ? `| 🏡 ${h.bahce}` : ''}</Text>
-                    <Text style={styles.itemDetail}>{h.kg || h.weight} KG - {formatTL((h.kg || h.weight) * (h.fiyat || 0))}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => handleDelete('harvests', h._id, 'Hasat')}>
-                    <Text style={styles.deleteText}>🗑️ Sil</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* BAHÇE SEKMESİ */}
-          {activeTab === 'gardens' && (
-            <View>
-              <Text style={styles.sectionTitle}>🏡 Yeni Bahçe Tanımla</Text>
-              <View style={styles.formContainer}>
-                <Text style={styles.label}>Bahçe Adı / Özel İsim</Text>
-                <TextInput style={styles.input} value={gForm.name} onChangeText={t => setGForm({ ...gForm, name: t })} placeholder="Örn: A Bahçesi" />
-
-                <Text style={styles.label}>Ada / Parsel Bilgisi</Text>
-                <TextInput style={styles.input} value={gForm.adaParsel} onChangeText={t => setGForm({ ...gForm, adaParsel: t })} placeholder="Örn: Ada 102 / Parsel 4" />
-
-                <Text style={styles.label}>Alan (Dönüm / m²)</Text>
-                <TextInput style={styles.input} value={gForm.alan} onChangeText={t => setGForm({ ...gForm, alan: t })} placeholder="Örn: 4 Dönüm" />
-
-                <TouchableOpacity style={[styles.submitBtn, loading && styles.disabledBtn]} onPress={handleSaveGarden} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.submitBtnText}>➕ BAHÇEYİ EKLE</Text>}
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 25 }]}>📊 Bahçelere Göre Toplam Çay Rekoltesi</Text>
-              {gardens.map((g, i) => {
-                const gardenName = g.name || g.adaParsel;
-                const gardenHarvests = harvests.filter(h => h.bahce && h.bahce.toLowerCase().trim() === gardenName.toLowerCase().trim());
-                const totalGardenKg = gardenHarvests.reduce((acc, c) => acc + (Number(c.kg || c.weight) || 0), 0);
-
-                return (
-                  <View key={g._id || i} style={styles.listItem}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemTitle}>🏡 {g.name ? g.name : 'İsimsiz Bahçe'}</Text>
-                      {g.adaParsel ? <Text style={styles.itemSub}>📍 {g.adaParsel}</Text> : null}
-                      <Text style={{ fontSize: 11, color: '#2d6a4f', marginTop: 4 }}>{gardenHarvests.length} ayrı kayıt bulundu</Text>
+                        <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('harvests', item._id, 'Hasat')}>
+                          <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    <View style={{ alignItems: 'flex-end', marginRight: 10 }}>
-                      <Text style={[styles.cardValue, { color: '#1b4332', fontSize: 18, fontWeight: 'bold' }]}>
-                        {totalGardenKg.toLocaleString('tr-TR')} KG
-                      </Text>
-                      <Text style={{ fontSize: 10, color: '#666' }}>Toplam Çay</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => handleDelete('gardens', g._id, 'Bahçe')}>
-                      <Text style={styles.deleteText}>🗑️ Sil</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
+                  );
+                })
+              )}
             </View>
           )}
 
-          {/* TAHSİLAT SEKMESİ */}
-          {activeTab === 'collections' && (
-            <View>
-              <Text style={styles.sectionTitle}>💰 Tahsilat Yönetimi</Text>
-              {harvests.map((h, i) => {
-                const sale = (Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0);
-                const currentTahsilat = Number(h.tahsilat) || 0;
-                const rem = sale - currentTahsilat;
+          {/* HASAT EKLE TABI */}
+          {activeTab === 'harvest' && (
+            <View style={styles.formCard}>
+              <Text style={styles.formTitle}>🌱 YENİ HASAT / SATIŞ KAYDI</Text>
 
-                return (
-                  <View key={h._id || i} style={styles.listItem}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemTitle}>{h.uretici || h.producerName}</Text>
-                      <Text style={styles.itemSub}>{h.tarih} | {h.surum}</Text>
-                      <Text style={styles.itemDetail}>Satış: {formatTL(sale)} | Tahsilat: {formatTL(currentTahsilat)}</Text>
-                    </View>
-                    <Text style={styles.kalanBadge}>Kalan: {formatTL(rem)}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
+              <Text style={styles.label}>Tarih</Text>
+              <TextInput
+                style={styles.input}
+                value={hForm.date}
+                onChangeText={(t) => setHForm({ ...hForm, date: t })}
+                placeholder="YYYY-MM-DD"
+              />
 
-          {/* GİDER SEKMESİ */}
-          {activeTab === 'expense' && (
-            <View>
-              <Text style={styles.sectionTitle}>💸 Gider Yönetimi</Text>
-              <View style={styles.formContainer}>
-                <Text style={styles.label}>Kategori</Text>
-                <TextInput style={styles.input} value={eForm.kategori} onChangeText={t => setEForm({ ...eForm, kategori: t })} placeholder="İşçilik, Gübre..." />
-
-                <Text style={styles.label}>Açıklama</Text>
-                <TextInput style={styles.input} value={eForm.aciklama} onChangeText={t => setEForm({ ...eForm, aciklama: t })} placeholder="Detaylar..." />
-
-                <Text style={styles.label}>Tutar (TL)</Text>
-                <TextInput style={styles.input} value={eForm.tutar} onChangeText={t => setEForm({ ...eForm, tutar: t })} keyboardType="numeric" placeholder="0.00" />
-
-                <TouchableOpacity style={[styles.submitBtn, loading && styles.disabledBtn]} onPress={handleSaveExpense} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.submitBtnText}>💾 GİDERİ KAYDET</Text>}
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 25 }]}>Geçmiş Giderler</Text>
-              {expenses.map((e, i) => (
-                <View key={e._id || i} style={styles.listItem}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemTitle}>{e.kategori}</Text>
-                    <Text style={styles.itemSub}>{e.tarih} | {e.aciklama}</Text>
-                  </View>
-                  <Text style={styles.expensePrice}>-{formatTL(e.tutar)}</Text>
-                  <TouchableOpacity onPress={() => handleDelete('expenses', e._id, 'Gider')} style={{ marginLeft: 10 }}>
-                    <Text style={styles.deleteText}>🗑️ Sil</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* ÜRETİCİ SEKMESİ */}
-          {activeTab === 'producers' && (
-            <View>
-              <Text style={styles.sectionTitle}>👥 Üretici Kartları</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-                {producers.map((p, i) => (
+              <Text style={styles.label}>Sürüm Seçimi</Text>
+              <View style={styles.rowBtnGroup}>
+                {['1. Sürüm', '2. Sürüm', '3. Sürüm', '4. Sürüm'].map((s) => (
                   <TouchableOpacity
-                    key={i}
-                    style={[styles.chip, selectedProducer === p && styles.activeChip]}
-                    onPress={() => setSelectedProducer(p)}
+                    key={s}
+                    style={[styles.groupBtn, hForm.surum === s && styles.groupBtnActive]}
+                    onPress={() => setHForm({ ...hForm, surum: s })}
                   >
-                    <Text style={[styles.chipText, selectedProducer === p && styles.activeChipText]}>{p}</Text>
+                    <Text style={[styles.groupBtnText, hForm.surum === s && styles.groupBtnTextActive]}>{s}</Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
 
-              {selectedProducer !== '' && (
-                <View>
-                  <Text style={styles.itemTitle}>{selectedProducer} - İşlem Geçmişi</Text>
-                  {harvests.filter(h => (h.uretici || h.producerName) === selectedProducer).map((h, i) => (
-                    <View key={i} style={styles.listItem}>
-                      <Text style={styles.itemSub}>{h.tarih} | {h.kg || h.weight} KG {h.bahce ? `| 🏡 ${h.bahce}` : ''}</Text>
-                      <Text style={styles.itemTitle}>{formatTL((h.kg || h.weight) * (h.fiyat || 0))}</Text>
-                    </View>
+              <Text style={styles.label}>Üretici Adı</Text>
+              <TextInput
+                style={styles.input}
+                value={hForm.producer}
+                onChangeText={(t) => setHForm({ ...hForm, producer: t })}
+                placeholder={currentUser.name}
+              />
+
+              <Text style={styles.label}>Miktar (KG)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={hForm.kg}
+                onChangeText={(t) => setHForm({ ...hForm, kg: t })}
+                placeholder="Örn: 250"
+              />
+
+              <Text style={styles.label}>Firma / Çay Fabrikası</Text>
+              <TextInput
+                style={styles.input}
+                value={hForm.firma}
+                onChangeText={(t) => setHForm({ ...hForm, firma: t })}
+                placeholder="Örn: ÇAYKUR / Özel Fabrika"
+              />
+
+              <Text style={styles.label}>Birim Fiyat (TL/KG)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={hForm.fiyat}
+                onChangeText={(t) => setHForm({ ...hForm, fiyat: t })}
+                placeholder="Örn: 19.00"
+              />
+
+              <Text style={styles.label}>Peşin Tahsil Edilen Tutar (TL)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={hForm.tahsilat}
+                onChangeText={(t) => setHForm({ ...hForm, tahsilat: t })}
+                placeholder="0"
+              />
+
+              <Text style={styles.label}>Bahçe Seçimi / Tanımı</Text>
+              <TextInput
+                style={styles.input}
+                value={hForm.garden}
+                onChangeText={(t) => setHForm({ ...hForm, garden: t })}
+                placeholder="Örn: Derebaşı Bahçe"
+              />
+
+              <Text style={styles.label}>Açıklama / Not</Text>
+              <TextInput
+                style={styles.input}
+                value={hForm.aciklama}
+                onChangeText={(t) => setHForm({ ...hForm, aciklama: t })}
+                placeholder="İsteğe bağlı not..."
+              />
+
+              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveHarvest}>
+                <Text style={styles.submitBtnText}>💾 HASAT KAYDINI KAYDET</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* TAHSİLAT TABI */}
+          {activeTab === 'collections' && (
+            <View style={styles.formCard}>
+              <Text style={styles.formTitle}>💵 TOPLU / TEKİL TAHSİLAT GİRİŞİ</Text>
+              <Text style={{ fontSize: 13, color: '#666', marginBottom: 15 }}>
+                Aşağıdaki alandan üreticilerin aldığı ödemeleri toplu olarak girebilirsiniz. Sistem otomatik olarak eski borçlardan düşecektir.
+              </Text>
+
+              {bulkCollections.map((item, index) => (
+                <View key={item.id} style={styles.bulkRow}>
+                  <Text style={{ fontWeight: 'bold', marginBottom: 5 }}>Ödeme #{index + 1}</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Üretici Adı Soyadı"
+                    value={item.producer}
+                    onChangeText={(v) => updateBulkRow(item.id, 'producer', v)}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Tahsil Edilen Tutar (TL)"
+                    keyboardType="numeric"
+                    value={item.tutar}
+                    onChangeText={(v) => updateBulkRow(item.id, 'tutar', v)}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Açıklama (Opsiyonel)"
+                    value={item.aciklama}
+                    onChangeText={(v) => updateBulkRow(item.id, 'aciklama', v)}
+                  />
+
+                  {bulkCollections.length > 1 && (
+                    <TouchableOpacity style={styles.removeRowBtn} onPress={() => removeBulkRow(item.id)}>
+                      <Text style={{ color: '#d62828', fontWeight: 'bold' }}>❌ Bu Satırı Sil</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+
+              <TouchableOpacity style={styles.addRowBtn} onPress={addBulkRow}>
+                <Text style={styles.addRowBtnText}>➕ Yeni Satır Ekle</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.submitBtn, { marginTop: 15 }]} onPress={handleSaveBulkCollections}>
+                <Text style={styles.submitBtnText}>💰 TAHSİLATLARI İŞLE</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* GİDERLER TABI */}
+          {activeTab === 'expense' && (
+            <View>
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>📉 YENİ GİDER KAYDI</Text>
+
+                <Text style={styles.label}>Tarih</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eForm.date}
+                  onChangeText={(t) => setEForm({ ...eForm, date: t })}
+                  placeholder="YYYY-MM-DD"
+                />
+
+                <Text style={styles.label}>Kategori</Text>
+                <View style={styles.rowBtnGroup}>
+                  {['İşçilik', 'Gübre', 'Ulaşım', 'Yemek', 'Diğer'].map((cat) => (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[styles.groupBtn, eForm.kategori === cat && styles.groupBtnActive]}
+                      onPress={() => setEForm({ ...eForm, kategori: cat })}
+                    >
+                      <Text style={[styles.groupBtnText, eForm.kategori === cat && styles.groupBtnTextActive]}>{cat}</Text>
+                    </TouchableOpacity>
                   ))}
                 </View>
+
+                <Text style={styles.label}>Tutar (TL)</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={eForm.tutar}
+                  onChangeText={(t) => setEForm({ ...eForm, tutar: t })}
+                  placeholder="0.00"
+                />
+
+                <Text style={styles.label}>Açıklama</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eForm.aciklama}
+                  onChangeText={(t) => setEForm({ ...eForm, aciklama: t })}
+                  placeholder="Gider detayları..."
+                />
+
+                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveExpense}>
+                  <Text style={styles.submitBtnText}>💾 GİDERİ KAYDET</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>KAYITLI GİDERLER</Text>
+              {expenses.length === 0 ? (
+                <Text style={styles.emptyText}>Henüz kaydedilmiş bir gider bulunmuyor.</Text>
+              ) : (
+                expenses.map((exp, idx) => (
+                  <View key={exp._id || idx} style={styles.listItem}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle}>🏷️ {exp.kategori || 'Genel Gider'}</Text>
+                      <Text style={styles.listSubText}>📅 {exp.tarih || 'Tarih Yok'} | {exp.aciklama}</Text>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#d62828', marginTop: 3 }}>
+                        {formatTL(exp.tutar)}
+                      </Text>
+                    </View>
+                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('expenses', exp._id, 'Gider')}>
+                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
               )}
+            </View>
+          )}
+
+          {/* BAHÇELER TABI */}
+          {activeTab === 'gardens' && (
+            <View>
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>🏡 YENİ BAHÇE EKLE</Text>
+
+                <Text style={styles.label}>Bahçe Adı / Tanımı</Text>
+                <TextInput
+                  style={styles.input}
+                  value={gForm.name}
+                  onChangeText={(t) => setGForm({ ...gForm, name: t })}
+                  placeholder="Örn: Ev Arkası Çaylık"
+                />
+
+                <Text style={styles.label}>Ada / Parsel No</Text>
+                <TextInput
+                  style={styles.input}
+                  value={gForm.adaParsel}
+                  onChangeText={(t) => setGForm({ ...gForm, adaParsel: t })}
+                  placeholder="Örn: 102/4"
+                />
+
+                <Text style={styles.label}>Alan (Dönüm / m²)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={gForm.alan}
+                  onChangeText={(t) => setGForm({ ...gForm, alan: t })}
+                  placeholder="Örn: 3 Dönüm"
+                />
+
+                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveGarden}>
+                  <Text style={styles.submitBtnText}>💾 BAHÇEYİ KAYDET</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>KAYITLI BAHÇELERİM</Text>
+              {gardens.length === 0 ? (
+                <Text style={styles.emptyText}>Henüz kaydedilmiş bir bahçe bulunmuyor.</Text>
+              ) : (
+                gardens.map((g, idx) => (
+                  <View key={g._id || idx} style={styles.listItem}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle}>🏡 {g.name || 'İsimsiz Bahçe'}</Text>
+                      <Text style={styles.listSubText}>📍 Ada/Parsel: {g.adaParsel || 'Girilmedi'}</Text>
+                      <Text style={styles.listSubText}>📐 Alan: {g.alan || 'Girilmedi'}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('gardens', g._id, 'Bahçe')}>
+                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+
+          {/* ADMIN PANENİ TABI */}
+          {activeTab === 'admin' && isAdmin && (
+            <View>
+              <Text style={styles.sectionTitle}>👑 YÖNETİCİ ÖZETİ (TÜM ÜRETİCİLER)</Text>
+
+              {getAdminProducerSummary().map((p, idx) => {
+                const pRemaining = p.totalSales - p.totalPay;
+                return (
+                  <View key={idx} style={[styles.listItem, { flexDirection: 'column', alignItems: 'flex-start' }]}>
+                    <Text style={[styles.listTitle, { fontSize: 18, color: '#1b4332' }]}>👤 {p.name}</Text>
+                    <Text style={styles.listSubText}>📊 Toplam Kayıt Sayısı: {p.count}</Text>
+                    <Text style={styles.listSubText}>⚖️ Toplam Hasat: {p.totalKg.toLocaleString('tr-TR')} KG</Text>
+                    <Text style={styles.listSubText}>💰 Toplam Ciro: {formatTL(p.totalSales)}</Text>
+                    <Text style={styles.listSubText}>🟢 Toplam Ödenen: {formatTL(p.totalPay)}</Text>
+                    <Text style={{ fontWeight: 'bold', color: pRemaining > 0 ? '#d62828' : '#2b9348', marginTop: 4 }}>
+                      {pRemaining > 0 ? `🔴 Toplam Kalan Borç: ${formatTL(pRemaining)}` : '🟢 Borcu Yok / Ödendi'}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           )}
         </ScrollView>
 
-        {/* NAVİGASYON BARI */}
-        <View style={styles.navBar}>
-          {[
-            { id: 'dashboard', icon: '📊', label: 'Özet' },
-            { id: 'harvest', icon: '🍃', label: 'Hasat' },
-            { id: 'gardens', icon: '🏡', label: 'Bahçe' },
-            { id: 'collections', icon: '💰', label: 'Tahsilat' },
-            { id: 'expense', icon: '💸', label: 'Gider' },
-            { id: 'producers', icon: '👥', label: 'Üretici' }
-          ].map(tab => (
-            <TouchableOpacity key={tab.id} style={styles.navItem} onPress={() => setActiveTab(tab.id as any)}>
-              <Text style={[styles.navIcon, activeTab === tab.id && styles.activeNav]}>{tab.icon}</Text>
-              <Text style={[styles.navText, activeTab === tab.id && styles.activeNav]}>{tab.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* TAHSİLAT DÜZENLEME MODALI */}
+        <Modal visible={editModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>✏️ Ödeme / Tahsilat Güncelle</Text>
+
+              {editingHarvest && (
+                <View style={{ width: '100%', marginBottom: 15 }}>
+                  <Text style={styles.listSubText}>Üretici: {editingHarvest.uretici || editingHarvest.producerName}</Text>
+                  <Text style={styles.listSubText}>
+                    Toplam Tutarı: {formatTL((Number(editingHarvest.kg || editingHarvest.weight) || 0) * (Number(editingHarvest.fiyat) || 0))}
+                  </Text>
+                </View>
+              )}
+
+              <Text style={styles.label}>Ödenen / Tahsil Edilen Yeni Tutar (TL)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={editTahsilatVal}
+                onChangeText={setEditTahsilatVal}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 15, width: '100%' }}>
+                <TouchableOpacity
+                  style={[styles.submitBtn, { flex: 1, backgroundColor: '#6c757d' }]}
+                  onPress={() => setEditModalVisible(false)}
+                >
+                  <Text style={styles.submitBtnText}>İptal</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.submitBtn, { flex: 1 }]}
+                  onPress={handleUpdateCollection}
+                >
+                  <Text style={styles.submitBtnText}>Kaydet</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
+// ==========================================
+// STYLES
+// ==========================================
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6f8' },
-  header: { backgroundColor: '#1b4332', padding: 14, alignItems: 'center' },
-  headerTitle: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
-  headerSub: { color: '#d8f3dc', fontSize: 10, fontWeight: '600', marginTop: 2 },
-  scrollView: { flex: 1 },
-  scrollContent: { padding: 14, paddingBottom: 30 },
-  sectionTitle: { fontSize: 17, fontWeight: 'bold', color: '#081c15', marginBottom: 12 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  card: { width: '48%', padding: 14, borderRadius: 10, marginBottom: 10 },
-  cardLabel: { color: '#ffffff', fontSize: 10, fontWeight: 'bold', opacity: 0.9 },
-  cardValue: { color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 4 },
-  formContainer: { backgroundColor: '#ffffff', padding: 14, borderRadius: 10, borderBottomWidth: 1, borderColor: '#e0e0e0', marginBottom: 10 },
-  label: { fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 4, marginTop: 8 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 10, fontSize: 14, backgroundColor: '#fff', marginBottom: 6 },
-  submitBtn: { backgroundColor: '#2d6a4f', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 12 },
-  disabledBtn: { backgroundColor: '#a5d6a7' },
-  submitBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
-  listItem: { backgroundColor: '#fff', padding: 12, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#eee' },
-  itemTitle: { fontSize: 14, fontWeight: 'bold', color: '#1b4332' },
-  itemSub: { fontSize: 11, color: '#666', marginTop: 2 },
-  itemDetail: { fontSize: 12, color: '#333', marginTop: 4 },
-  kalanBadge: { fontSize: 11, fontWeight: 'bold', color: '#e63946', backgroundColor: '#ffe3e3', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  expensePrice: { fontSize: 14, fontWeight: 'bold', color: '#e63946' },
-  chip: { backgroundColor: '#e0e0e0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 6 },
-  activeChip: { backgroundColor: '#1b4332' },
-  chipText: { fontSize: 11, color: '#333' },
-  activeChipText: { color: '#fff', fontWeight: 'bold' },
-  navBar: { flexDirection: 'row', backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#e0e0e0', paddingVertical: 6 },
-  navItem: { flex: 1, alignItems: 'center' },
-  navIcon: { fontSize: 16, opacity: 0.5 },
-  navText: { fontSize: 9, color: '#666', marginTop: 2 },
-  activeNav: { color: '#1b4332', opacity: 1, fontWeight: 'bold' },
-  deleteText: { color: '#e63946', fontSize: 12, fontWeight: 'bold' }
+  container: {
+    flex: 1,
+    backgroundColor: '#f4f6f8'
+  },
+  authCard: {
+    backgroundColor: '#ffffff',
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5
+  },
+  authTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#1b4332',
+    marginBottom: 8
+  },
+  authSubTitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20
+  },
+  header: {
+    backgroundColor: '#1b4332',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  headerTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold'
+  },
+  headerSubtitle: {
+    color: '#b7e4c7',
+    fontSize: 12,
+    marginTop: 2
+  },
+  logoutBtn: {
+    backgroundColor: '#d62828',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6
+  },
+  logoutBtnText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 12
+  },
+  navBar: {
+    backgroundColor: '#2d6a4f',
+    paddingVertical: 8
+  },
+  navItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    borderRadius: 20,
+    backgroundColor: 'transparent'
+  },
+  navItemActive: {
+    backgroundColor: '#ffffff'
+  },
+  navItemActiveAdmin: {
+    backgroundColor: '#ffb703'
+  },
+  navText: {
+    color: '#d8f3dc',
+    fontWeight: '600',
+    fontSize: 13
+  },
+  navTextActive: {
+    color: '#1b4332',
+    fontWeight: 'bold'
+  },
+  navTextActiveAdmin: {
+    color: '#000000',
+    fontWeight: 'bold'
+  },
+  content: {
+    flex: 1,
+    padding: 16
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#1b4332',
+    marginBottom: 12
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between'
+  },
+  statCard: {
+    backgroundColor: '#ffffff',
+    width: '48%',
+    padding: 12,
+    borderRadius: 10,
+    borderLeftWidth: 5,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5
+  },
+  statTitle: {
+    fontSize: 12,
+    color: '#666'
+  },
+  statValue: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#212529',
+    marginTop: 4
+  },
+  csvContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 15
+  },
+  csvExportBtn: {
+    flex: 1,
+    backgroundColor: '#2a9d8f',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center'
+  },
+  csvImportBtn: {
+    flex: 1,
+    backgroundColor: '#e76f51',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center'
+  },
+  csvBtnText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 12
+  },
+  listItem: {
+    backgroundColor: '#ffffff',
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.03,
+    shadowRadius: 3
+  },
+  listTitle: {
+    fontWeight: 'bold',
+    fontSize: 15,
+    color: '#212529'
+  },
+  listSubText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2
+  },
+  actionBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  editBtn: {
+    backgroundColor: '#3a86ff',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignItems: 'center'
+  },
+  deleteBtn: {
+    backgroundColor: '#d62828',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignItems: 'center'
+  },
+  formCard: {
+    backgroundColor: '#ffffff',
+    padding: 16,
+    borderRadius: 12,
+    elevation: 2
+  },
+  formTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1b4332',
+    marginBottom: 15
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#495057',
+    marginTop: 10,
+    marginBottom: 4,
+    width: '100%'
+  },
+  input: {
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#ced4da',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#212529',
+    width: '100%'
+  },
+  rowBtnGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginVertical: 4
+  },
+  groupBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#e9ecef'
+  },
+  groupBtnActive: {
+    backgroundColor: '#1b4332'
+  },
+  groupBtnText: {
+    fontSize: 12,
+    color: '#495057'
+  },
+  groupBtnTextActive: {
+    color: '#ffffff',
+    fontWeight: 'bold'
+  },
+  submitBtn: {
+    backgroundColor: '#1b4332',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20
+  },
+  submitBtnText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#8d99ae',
+    marginVertical: 20,
+    fontStyle: 'italic'
+  },
+  bulkRow: {
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    gap: 8
+  },
+  removeRowBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 4
+  },
+  addRowBtn: {
+    backgroundColor: '#e9ecef',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 5
+  },
+  addRowBtnText: {
+    color: '#1b4332',
+    fontWeight: 'bold',
+    fontSize: 13
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    width: '100%',
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center'
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1b4332',
+    marginBottom: 15
+  }
 });
