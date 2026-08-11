@@ -11,6 +11,19 @@ app.use(express.json());
 // Veritabanı adresi (.env yoksa varsayılan lokal adresi kullanır)
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'cryptomarsisadmin';
+const ADMIN_PHONE_RAW = process.env.ADMIN_PHONE || '05432037007';
+const normalizePhone = (value) => {
+  let p = String(value || '').replace(/\D/g, '');
+  if (p.startsWith('90')) p = '0' + p.slice(2);
+  if (p.length === 10 && p.startsWith('5')) p = '0' + p;
+  return p;
+};
+const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
+const isAdminRequest = (req) => {
+  if (req.headers['admin-secret'] === ADMIN_SECRET) return true;
+  const { userId, userPhone } = getUserIdentifier(req);
+  return normalizePhone(userPhone) === ADMIN_PHONE || String(userId || '') === `usr_${ADMIN_PHONE}`;
+};
 
 mongoose.connect(MONGO_URI, {
   serverSelectionTimeoutMS: 10000,
@@ -77,6 +90,9 @@ const FactoryPriceSchema = new mongoose.Schema({
   firma: { type: String, required: true },
   fiyat: { type: Number, required: true },
   tarih: { type: String, required: true },
+  fiyatTuru: { type: String, enum: ['Haftalık', 'Aylık', 'Peşin', 'Vadeli', 'Diğer'], default: 'Peşin' },
+  vadeGun: { type: Number, default: 0 },
+  gecerlilikBaslangic: String,
   politika: String,
   kaynak: String,
   aciklama: String,
@@ -85,6 +101,13 @@ const FactoryPriceSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Uygulama reklam alanları
+const UserProfileSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  phone: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  role: { type: String, enum: ['admin', 'user'], default: 'user' }
+}, { timestamps: true });
+
 const AdSchema = new mongoose.Schema({
   slot: { type: String, enum: ['dashboard_top', 'dashboard_middle', 'prices_top'], default: 'dashboard_middle' },
   firma: { type: String, required: true },
@@ -107,20 +130,13 @@ const Expense = mongoose.model('Expense', ExpenseSchema);
 const Garden = mongoose.model('Garden', GardenSchema);
 const FactoryPrice = mongoose.model('FactoryPrice', FactoryPriceSchema);
 const Ad = mongoose.model('Ad', AdSchema);
+const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
 
 // HELPER FUNCTIONS
 const getUserIdentifier = (req) => {
   const userId = req.headers['user-id'] || req.query.userId || req.body?.userId;
   const userPhone = req.headers['user-phone'] || req.query.userPhone || req.body?.userPhone;
   return { userId, userPhone };
-};
-
-const requireAdmin = (req, res) => {
-  if (req.headers['admin-secret'] !== ADMIN_SECRET) {
-    res.status(403).json({ error: 'Bu işlem yalnızca yönetici tarafından yapılabilir.' });
-    return false;
-  }
-  return true;
 };
 
 const buildUserFilter = (req) => {
@@ -145,6 +161,39 @@ const buildUserFilter = (req) => {
 
 app.get('/', (req, res) => {
   res.send('🌱 Çay Takip Sistemi API Çalışıyor!');
+});
+
+
+// USER PROFILE ROUTES
+app.get('/api/users/profile', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.query.phone || req.headers['user-phone']);
+    if (!phone) return res.status(400).json({ error: 'Telefon numarası zorunludur.' });
+    const profile = await UserProfile.findOne({ phone });
+    if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/users/profile', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone || req.headers['user-phone']);
+    const name = String(req.body.name || '').trim();
+    if (!phone || phone.length < 10) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
+    if (!name) return res.status(400).json({ error: 'Ad Soyad zorunludur.' });
+    const role = phone === ADMIN_PHONE ? 'admin' : 'user';
+    const userId = `usr_${phone}`;
+    const profile = await UserProfile.findOneAndUpdate(
+      { phone },
+      { userId, phone, name, role },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: `Üretici profili kaydedilemedi: ${err.message}` });
+  }
 });
 
 // HARVEST ROUTES
@@ -204,12 +253,6 @@ app.put('/api/harvests/:id', async (req, res) => {
   try {
     const existing = await Harvest.findById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-    if (req.headers['admin-secret'] !== ADMIN_SECRET) {
-      const { userId, userPhone } = getUserIdentifier(req);
-      if ((existing.userId && existing.userId !== userId) || (existing.userPhone && existing.userPhone !== userPhone)) {
-        return res.status(403).json({ error: 'Bu kayıt üzerinde işlem yapma yetkiniz yok.' });
-      }
-    }
 
     const kgVal = Number(req.body.kg ?? req.body.weight ?? existing.kg) || 0;
     const fiyatVal = Number(req.body.fiyat ?? existing.fiyat) || 0;
@@ -241,15 +284,8 @@ app.put('/api/harvests/:id', async (req, res) => {
 
 app.delete('/api/harvests/:id', async (req, res) => {
   try {
-    const existing = await Harvest.findById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-    if (req.headers['admin-secret'] !== ADMIN_SECRET) {
-      const { userId, userPhone } = getUserIdentifier(req);
-      if ((existing.userId && existing.userId !== userId) || (existing.userPhone && existing.userPhone !== userPhone)) {
-        return res.status(403).json({ error: 'Bu kayıt üzerinde işlem yapma yetkiniz yok.' });
-      }
-    }
     const deleted = await Harvest.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     // İlişkili ödemeleri de temizle
     await Payment.deleteMany({ harvestId: req.params.id });
     res.json({ message: 'Hasat kaydı silindi.' });
@@ -261,18 +297,6 @@ app.delete('/api/harvests/:id', async (req, res) => {
 // --- YENİ EKLENEN ÖZEL ROTALAR ---
 
 // --- YENİ RAPOR VE TAKİP ROTALARI ---
-
-// TAHSİLAT GEÇMİŞİ
-app.get('/api/payments', async (req, res) => {
-  try {
-    const filter = buildUserFilter(req);
-    if (filter._id === null) return res.json([]);
-    const data = await Payment.find(filter).sort({ tarih: -1, createdAt: -1 });
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // 1. Belirli satışa tahsilat ekle
 app.post('/api/payments', async (req, res) => {
@@ -421,7 +445,7 @@ app.get('/api/reports/receivables', async (req, res) => {
 // 4. FABRİKA ÇAY FİYATLARI / FİYAT POLİTİKASI
 app.get('/api/factory-prices', async (req, res) => {
   try {
-    const data = await FactoryPrice.find().sort({ tarih: -1, createdAt: -1 });
+    const data = await FactoryPrice.find().sort({ firma: 1, tarih: -1, createdAt: -1 });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -430,13 +454,20 @@ app.get('/api/factory-prices', async (req, res) => {
 
 app.post('/api/factory-prices', async (req, res) => {
   try {
-    if (!requireAdmin(req, res)) return;
+    if (!isAdminRequest(req)) return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
     const { userId, userPhone } = getUserIdentifier(req);
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
 
     const firma = String(req.body.firma || '').trim();
     const fiyat = Number(String(req.body.fiyat ?? '').replace(',', '.'));
-    const tarih = String(req.body.tarih || '').trim();
+    const tarihRaw = String(req.body.tarih || '').trim();
+    const tarihMatch = tarihRaw.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+    const tarih = tarihMatch ? `${tarihMatch[3]}-${tarihMatch[2].padStart(2,'0')}-${tarihMatch[1].padStart(2,'0')}` : tarihRaw;
+    const gecerlilikRaw = String(req.body.gecerlilikBaslangic || '').trim();
+    const gecerlilikMatch = gecerlilikRaw.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+    const gecerlilikBaslangic = gecerlilikMatch ? `${gecerlilikMatch[3]}-${gecerlilikMatch[2].padStart(2,'0')}-${gecerlilikMatch[1].padStart(2,'0')}` : gecerlilikRaw;
+    const fiyatTuru = ['Haftalık','Aylık','Peşin','Vadeli','Diğer'].includes(String(req.body.fiyatTuru)) ? String(req.body.fiyatTuru) : 'Peşin';
+    const vadeGun = Number(req.body.vadeGun) || 0;
 
     if (!firma) return res.status(400).json({ error: 'Fabrika adı zorunludur.' });
     if (!Number.isFinite(fiyat) || fiyat < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
@@ -456,7 +487,7 @@ app.post('/api/factory-prices', async (req, res) => {
 
 app.delete('/api/factory-prices/:id', async (req, res) => {
   try {
-    if (!requireAdmin(req, res)) return;
+    if (!isAdminRequest(req)) return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
     const deleted = await FactoryPrice.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Fiyat kaydı bulunamadı.' });
     res.json({ message: 'Fiyat kaydı silindi.' });
@@ -477,7 +508,6 @@ app.get('/api/ads', async (req, res) => {
 
 app.post('/api/ads', async (req, res) => {
   try {
-    if (!requireAdmin(req, res)) return;
     const { userId, userPhone } = getUserIdentifier(req);
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
 
@@ -498,7 +528,6 @@ app.post('/api/ads', async (req, res) => {
 
 app.delete('/api/ads/:id', async (req, res) => {
   try {
-    if (!requireAdmin(req, res)) return;
     const deleted = await Ad.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Reklam bulunamadı.' });
     res.json({ message: 'Reklam silindi.' });
@@ -598,47 +627,19 @@ app.delete('/api/gardens/:id', async (req, res) => {
   }
 });
 
-// GENEL DASHBOARD / RAPOR ÖZETİ
-app.get('/api/reports/dashboard', async (req, res) => {
-  try {
-    const filter = buildUserFilter(req);
-    if (filter._id === null) return res.json({ totalKg: 0, totalSales: 0, totalPay: 0, totalReceivables: 0, totalExpense: 0, net: 0, recordCount: 0 });
-    const [sales] = await Harvest.aggregate([
-      { $match: filter },
-      { $group: {
-        _id: null,
-        totalKg: { $sum: { $ifNull: ['$kg', '$weight'] } },
-        totalSales: { $sum: { $multiply: [{ $ifNull: ['$kg', '$weight'] }, { $ifNull: ['$fiyat', 0] }] } },
-        totalPay: { $sum: { $ifNull: ['$tahsilat', 0] } },
-        recordCount: { $sum: 1 }
-      }}
-    ]);
-    const [expense] = await Expense.aggregate([
-      { $match: filter },
-      { $group: { _id: null, totalExpense: { $sum: { $ifNull: ['$tutar', 0] } } } }
-    ]);
-    const row = sales || { totalKg: 0, totalSales: 0, totalPay: 0, recordCount: 0 };
-    const totalExpense = expense?.totalExpense || 0;
-    res.json({ ...row, totalReceivables: Math.max(0, row.totalSales - row.totalPay), totalExpense, net: row.totalSales - totalExpense });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ADMIN ROUTES
 app.get('/api/admin/all-data', async (req, res) => {
   try {
     const adminSecret = req.headers['admin-secret'];
     if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: 'Bu alana erişim yetkiniz yok.' });
-    const [harvests, expenses, gardens, factoryPrices, ads, payments] = await Promise.all([
+    const [harvests, expenses, gardens, factoryPrices, ads] = await Promise.all([
       Harvest.find().sort({ createdAt: -1 }),
       Expense.find().sort({ createdAt: -1 }),
       Garden.find().sort({ createdAt: -1 }),
       FactoryPrice.find().sort({ tarih: -1 }),
-      Ad.find().sort({ createdAt: -1 }),
-      Payment.find().sort({ createdAt: -1 })
+      Ad.find().sort({ createdAt: -1 })
     ]);
-    res.json({ harvests, expenses, gardens, factoryPrices, ads, payments });
+    res.json({ harvests, expenses, gardens, factoryPrices, ads });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

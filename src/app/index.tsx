@@ -21,7 +21,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ==========================================
 const API_URL = "https://cay-ureticisi-takip.onrender.com/api";
 const ADMIN_PHONE = "05432037007";
-const ADMIN_SECRET = "cryptomarsisadmin";
 const SESSION_KEY = '@cay_takip_user_session';
 
 // ==========================================
@@ -83,6 +82,28 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout 
 const formatTL = (val: number) =>
   `${(val || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
 
+const normalizePhone = (value: string) => {
+  let p = String(value || '').replace(/\D/g, '');
+  if (p.startsWith('90')) p = '0' + p.slice(2);
+  if (p.length === 10 && p.startsWith('5')) p = '0' + p;
+  return p;
+};
+
+const formatDisplayDate = (value: any) => {
+  const s = String(value || '').trim();
+  const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
+  if (m) return `${m[3].padStart(2,'0')}.${m[2].padStart(2,'0')}.${m[1]}`;
+  return s || '-';
+};
+
+const toServerDate = (value: string) => {
+  const s = String(value || '').trim();
+  const m = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return s;
+};
+
+
 // ==========================================
 // MAIN COMPONENT
 // ==========================================
@@ -103,18 +124,12 @@ export default function App() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [gardens, setGardens] = useState<any[]>([]);
   const [factoryPrices, setFactoryPrices] = useState<any[]>([]);
+  const [selectedFactory, setSelectedFactory] = useState<string | null>(null);
+  const [factoryFilter, setFactoryFilter] = useState<'Tümü' | 'Haftalık' | 'Aylık' | 'Peşin' | 'Vadeli'>('Tümü');
   const [ads, setAds] = useState<any[]>([]);
-  const [payments, setPayments] = useState<any[]>([]);
-  const [dashboardSummary, setDashboardSummary] = useState<any>(null);
 
-  const [priceForm, setPriceForm] = useState({
-    firma: 'ÇAYKUR',
-    fiyat: '',
-    tarih: new Date().toISOString().split('T')[0],
-    politika: '',
-    kaynak: '',
-    aciklama: ''
-  });
+  const todayTR = (() => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; })();
+  const [priceForm, setPriceForm] = useState({ firma: 'ÇAYKUR', fiyat: '', tarih: todayTR, fiyatTuru: 'Peşin', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
 
   const [adForm, setAdForm] = useState({
     slot: 'dashboard_middle',
@@ -170,8 +185,7 @@ export default function App() {
     return {
       'Content-Type': 'application/json',
       'user-id': currentUser?.userId || `usr_${currentUser?.phone || ''}`,
-      'user-phone': currentUser?.phone || '',
-      ...(currentUser?.role === 'admin' ? { 'admin-secret': ADMIN_SECRET } : {})
+      'user-phone': normalizePhone(currentUser?.phone || '')
     };
   };
 
@@ -181,7 +195,22 @@ export default function App() {
       try {
         const savedUser = await getSession();
         if (savedUser) {
-          setCurrentUser(savedUser);
+          const profile = await syncProfile(savedUser.phone);
+          const refreshedRole: UserSession['role'] =
+            profile?.role === 'admin' || normalizePhone(savedUser.phone) === ADMIN_PHONE
+              ? 'admin'
+              : 'user';
+          const refreshed: UserSession = profile
+            ? {
+                ...savedUser,
+                userId: profile.userId || savedUser.userId,
+                name: profile.name || savedUser.name,
+                phone: normalizePhone(profile.phone || savedUser.phone),
+                role: refreshedRole,
+              }
+            : savedUser;
+          setCurrentUser(refreshed);
+          await saveSession(refreshed);
         }
       } catch (error) {
         console.log('Oturum okuma hatası:', error);
@@ -198,14 +227,12 @@ export default function App() {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [resH, resE, resG, resP, resA, resPayments, resDashboard] = await Promise.all([
+      const [resH, resE, resG, resP, resA] = await Promise.all([
         fetchWithTimeout(`${API_URL}/harvests`, { headers }),
         fetchWithTimeout(`${API_URL}/expenses`, { headers }),
         fetchWithTimeout(`${API_URL}/gardens`, { headers }),
         fetchWithTimeout(`${API_URL}/factory-prices`, { headers }),
-        fetchWithTimeout(`${API_URL}/ads`, { headers }),
-        fetchWithTimeout(`${API_URL}/payments`, { headers }),
-        fetchWithTimeout(`${API_URL}/reports/dashboard`, { headers })
+        fetchWithTimeout(`${API_URL}/ads`, { headers })
       ]);
 
       let rawH = resH.ok ? await resH.json() : [];
@@ -213,8 +240,6 @@ export default function App() {
       let rawG = resG.ok ? await resG.json() : [];
       let rawP = resP.ok ? await resP.json() : [];
       let rawA = resA.ok ? await resA.json() : [];
-      let rawPayments = resPayments.ok ? await resPayments.json() : [];
-      let rawDashboard = resDashboard.ok ? await resDashboard.json() : null;
 
       if (!isAdmin) {
         const currentUserId = currentUser.userId;
@@ -240,8 +265,6 @@ export default function App() {
       setGardens(rawG || []);
       setFactoryPrices(rawP || []);
       setAds(rawA || []);
-      setPayments(rawPayments || []);
-      setDashboardSummary(rawDashboard);
     } catch (err: any) {
       console.log('Veri çekme hatası:', err.message);
       Alert.alert('Bağlantı Kurulamadı', err.message);
@@ -281,11 +304,12 @@ export default function App() {
   // 2. Vadeli / Bekleyen Alacakların Dinamik Hesaplanması (Madde 2)
   const formatVadeMonth = (value: any) => {
     if (!value) return 'Vadesi Belirtilmeyenler';
-    const s = String(value);
-    const match = s.match(/^(\d{4})-(\d{1,2})/);
-    if (!match) return s;
-    const year = Number(match[1]);
-    const month = Number(match[2]);
+    const s = String(value).trim();
+    let year = 0, month = 0;
+    let m = s.match(/^(\d{4})[-./](\d{1,2})/);
+    if (m) { year = Number(m[1]); month = Number(m[2]); }
+    else { m = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/); if (m) { month = Number(m[2]); year = Number(m[3]); } }
+    if (!year || !month) return s;
     const names = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
     return `${names[month - 1] || 'Bilinmeyen Ay'} ${year}`;
   };
@@ -314,29 +338,7 @@ export default function App() {
       if (!groups[key]) groups[key] = [];
       groups[key].push(h);
     });
-    return Object.entries(groups).sort((a, b) => {
-      const av = a[1][0]?.vadeTarihi || a[1][0]?.tarih || '';
-      const bv = b[1][0]?.vadeTarihi || b[1][0]?.tarih || '';
-      return String(av).localeCompare(String(bv));
-    });
-  };
-
-  const getMonthlyReceivableSummary = (items: any[]) => {
-    const groups: { [key: string]: any } = {};
-    (items || []).filter((h: any) => h.isVadeli || ((Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0) - (Number(h.tahsilat) || 0) > 0)).forEach((h: any) => {
-      const raw = String(h.vadeTarihi || h.tarih || '');
-      const m = raw.match(/^(\d{4})[-./](\d{1,2})/);
-      if (!m) return;
-      const key = `${m[1]}-${String(m[2]).padStart(2,'0')}`;
-      if (!groups[key]) groups[key] = { key, totalKg: 0, totalSales: 0, totalPay: 0, count: 0 };
-      const kg = Number(h.kg || h.weight) || 0;
-      const sale = kg * (Number(h.fiyat) || 0);
-      groups[key].totalKg += kg;
-      groups[key].totalSales += sale;
-      groups[key].totalPay += Number(h.tahsilat) || 0;
-      groups[key].count += 1;
-    });
-    return Object.values(groups).sort((a: any,b: any) => a.key.localeCompare(b.key));
+    return Object.entries(groups).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   };
 
   const receivablesSafe = (items: any[]) => (items || []).filter((h: any) => {
@@ -346,36 +348,66 @@ export default function App() {
   });
 
   // Giriş Yap / Kayıt Ol İşlemleri
+  const syncProfile = async (phone: string, fallbackName?: string) => {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return null;
+    try {
+      const res = await fetchWithTimeout(`${API_URL}/users/profile?phone=${encodeURIComponent(normalized)}`, { headers: { 'Content-Type': 'application/json', 'user-phone': normalized } });
+      if (res.ok) return await res.json();
+      return null;
+    } catch (e) {
+      console.warn('Profil senkronizasyonu:', e);
+      return null;
+    }
+  };
+
+  const saveProfile = async (phone: string, name: string) => {
+    const normalized = normalizePhone(phone);
+    const res = await fetchWithTimeout(`${API_URL}/users/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'user-phone': normalized },
+      body: JSON.stringify({ phone: normalized, name: name.trim() })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || 'Üretici profili kaydedilemedi.');
+    return data;
+  };
+
   const handleAuth = async () => {
-    const cleanPhone = authPhone.trim();
+    const cleanPhone = normalizePhone(authPhone);
     if (!cleanPhone || cleanPhone.length < 10) {
-      Alert.alert('Eksik Bilgi', 'Lütfen en az 10 haneli geçerli bir telefon numarası girin.');
+      Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.');
       return;
     }
-
-    const isAdminUser = cleanPhone === ADMIN_PHONE || authName.toLowerCase().includes('admin');
-    const userRole: 'admin' | 'user' = isAdminUser ? 'admin' : 'user';
-    const generatedUserId = `usr_${cleanPhone}`;
-
-    const userData: UserSession = {
-      userId: generatedUserId,
-      name: authName.trim() || (isAdminUser ? 'Yönetici' : 'Üretici'),
-      phone: cleanPhone,
-      role: userRole
-    };
-
-    if (authMode === 'register') {
-      if (!authName.trim()) {
-        Alert.alert('Eksik Bilgi', 'Lütfen Adınız ve Soyadınızı girin.');
-        return;
+    setLoading(true);
+    try {
+      let profile: any = null;
+      if (authMode === 'register') {
+        if (!authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
+        profile = await saveProfile(cleanPhone, authName);
+      } else {
+        profile = await syncProfile(cleanPhone);
+        if (!profile && cleanPhone === ADMIN_PHONE) {
+          profile = await saveProfile(cleanPhone, authName.trim() || 'Yönetici');
+        }
+        if (!profile) {
+          Alert.alert('Kayıt Bulunamadı', 'Bu telefon numarasıyla kayıtlı üretici bulunamadı. Yeni Kayıt Ol bölümünden Ad Soyadınızı girerek kayıt oluşturun.');
+          return;
+        }
       }
+      const userData: UserSession = {
+        userId: profile.userId || `usr_${cleanPhone}`,
+        name: profile.name || authName.trim() || (cleanPhone === ADMIN_PHONE ? 'Yönetici' : 'Üretici'),
+        phone: normalizePhone(profile.phone || cleanPhone),
+        role: profile.role === 'admin' || cleanPhone === ADMIN_PHONE ? 'admin' : 'user'
+      };
       setCurrentUser(userData);
       await saveSession(userData);
-      Alert.alert('Kayıt Başarılı', `Hoş geldiniz, ${authName.trim()}! ${isAdminUser ? '(Admin Yetkisi Tanımlandı)' : ''}`);
-    } else {
-      setCurrentUser(userData);
-      await saveSession(userData);
-      Alert.alert('Giriş Başarılı', 'Uygulamaya giriş yapıldı.');
+      Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
+    } catch (e: any) {
+      Alert.alert('Profil Hatası', e?.message || 'Üretici profili kaydedilemedi.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -569,32 +601,24 @@ export default function App() {
 
   // Fabrika fiyatı kaydet
   const handleSaveFactoryPrice = async () => {
-    if (!isAdmin) { Alert.alert('Yetki Yok', 'Fabrika fiyatı ekleme yalnızca yönetici panelinden yapılabilir.'); return; }
+    if (!isAdmin) { Alert.alert('Yetki Yok', 'Bu işlemi sadece yönetici yapabilir.'); return; }
     const fiyat = Number(String(priceForm.fiyat).replace(',', '.'));
-    if (!priceForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0) {
-      Alert.alert('Eksik Bilgi', 'Fabrika adı ve geçerli fiyat girin.');
-      return;
+    const tarih = toServerDate(priceForm.tarih);
+    const gecerlilikBaslangic = toServerDate(priceForm.gecerlilikBaslangic);
+    if (!priceForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0 || !tarih) {
+      Alert.alert('Eksik Bilgi', 'Fabrika adı, fiyat ve fiyat tarihi zorunludur.'); return;
     }
     setLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/factory-prices`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ ...priceForm, firma: priceForm.firma.trim(), fiyat })
-      });
+      const res = await fetchWithTimeout(`${API_URL}/factory-prices`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ ...priceForm, firma: priceForm.firma.trim(), fiyat, tarih, gecerlilikBaslangic, vadeGun: Number(priceForm.vadeGun) || 0 }) });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         Alert.alert('Başarılı', 'Fabrika fiyatı kaydedildi.');
-        setPriceForm({ ...priceForm, fiyat: '', politika: '', kaynak: '', aciklama: '' });
+        setPriceForm({ ...priceForm, fiyat: '', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
         await fetchData();
-      } else {
-        Alert.alert('Hata', data?.error || 'Fiyat kaydedilemedi.');
-      }
-    } catch (e: any) {
-      Alert.alert('Hata', e.message);
-    } finally {
-      setLoading(false);
-    }
+      } else Alert.alert('Hata', data?.error || 'Fiyat kaydedilemedi.');
+    } catch (e: any) { Alert.alert('Hata', e.message); }
+    finally { setLoading(false); }
   };
 
   const handleSaveAd = async () => {
@@ -763,6 +787,9 @@ export default function App() {
                   placeholder="Ahmet Yılmaz"
                   value={authName}
                   onChangeText={setAuthName}
+                  autoCorrect={false}
+                  autoCapitalize="words"
+                  keyboardType="default"
                 />
               </View>
             )}
@@ -937,33 +964,6 @@ export default function App() {
                   </Text>
                 </View>
               </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>📅 AYLIK VADELİ ALACAK ÖZETİ</Text>
-              {getMonthlyReceivableSummary(harvests).length === 0 ? (
-                <Text style={styles.emptyText}>Henüz aylık vadeli alacak bulunmuyor.</Text>
-              ) : getMonthlyReceivableSummary(harvests).map((m: any) => {
-                const names = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
-                const [y, mo] = m.key.split('-');
-                const remaining = m.totalSales - m.totalPay;
-                return <View key={m.key} style={styles.listItem}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.listTitle}>📅 {names[Number(mo)-1]} {y}</Text>
-                    <Text style={styles.listSubText}>⚖️ {m.totalKg.toLocaleString('tr-TR')} KG • 💰 Satış: {formatTL(m.totalSales)}</Text>
-                    <Text style={styles.listSubText}>💳 Tahsilat: {formatTL(m.totalPay)} • 🔴 Kalan: {formatTL(remaining)}</Text>
-                  </View>
-                </View>;
-              })}
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>🔔 YAKLAŞAN VADELER</Text>
-              {receivablesList.filter((h:any) => {
-                if (!h.vadeTarihi || h.vadeTarihi === 'Belirtilmedi') return false;
-                const d = new Date(String(h.vadeTarihi).replace(/\./g,'-'));
-                const today = new Date(); today.setHours(0,0,0,0);
-                return !Number.isNaN(d.getTime()) && d >= today;
-              }).slice(0,5).map((h:any,i:number) => <View key={h._id || i} style={styles.listItem}>
-                <View style={{flex:1}}><Text style={styles.listTitle}>🏭 {h.firma || 'Fabrika'}</Text><Text style={styles.listSubText}>📅 Vade: {h.vadeTarihi} • 🔴 {formatTL(((Number(h.kg||h.weight)||0)*(Number(h.fiyat)||0))-(Number(h.tahsilat)||0))}</Text></View>
-              </View>)}
-
 {/* RECENT HARVESTS LIST */}
               <Text style={[styles.sectionTitle, { marginTop: 20 }]}>SON HASAT KAYITLARI</Text>
               {harvests.length === 0 ? (
@@ -984,7 +984,7 @@ export default function App() {
                           📅 {item.tarih || 'Tarih Yok'} | ⚖️ {item.kg || item.weight || 0} KG | 💵 Fiyat: {item.fiyat || 0} TL
                         </Text>
                         {item.bahce ? <Text style={styles.listSubText}>🏡 Bahçe: {item.bahce}</Text> : null}
-                        {item.isVadeli ? <Text style={styles.listSubText}>⏳ Vade: {item.vadeTarihi || 'Belirtilmedi'}</Text> : null}
+                        {item.isVadeli ? <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text> : null}
                         <Text style={styles.listSubText}>
                           💰 Toplam: {formatTL(saleVal)} | 🟢 Ödenen: {formatTL(payVal)}
                         </Text>
@@ -1124,12 +1124,6 @@ export default function App() {
           {/* TAHSİLAT TABI (Toplu Tahsilat Alanı Kaldırıldı - Madde 4) */}
           {activeTab === 'collections' && (
             <View>
-              <Text style={styles.sectionTitle}>💳 TAHSİLAT GEÇMİŞİ</Text>
-              {payments.length === 0 ? <Text style={styles.emptyText}>Henüz tahsilat geçmişi bulunmuyor.</Text> : payments.slice(0,20).map((p:any,i:number) => {
-                const sale = harvests.find((h:any) => String(h._id) === String(p.harvestId));
-                return <View key={p._id || i} style={styles.listItem}><View style={{flex:1}}><Text style={styles.listTitle}>💵 {formatTL(Number(p.tutar)||0)}</Text><Text style={styles.listSubText}>📅 {p.tarih || '-'} {sale ? `• 🏭 ${sale.firma || '-'}` : ''}</Text>{p.aciklama ? <Text style={styles.listSubText}>📝 {p.aciklama}</Text> : null}</View></View>;
-              })}
-
               <View style={styles.formCard}>
                 <Text style={styles.formTitle}>🎯 ÇAY SATIŞINA ÖZEL TAHSİLAT</Text>
                 <Text style={{ color: '#666', marginBottom: 10, fontSize: 13 }}>
@@ -1184,7 +1178,7 @@ export default function App() {
                   placeholder="Örn: Banka havalesi"
                   value={payDesc}
                   onChangeText={setPayDesc}
-                />
+                 autoCorrect={false} />
 
                 <TouchableOpacity style={styles.submitBtn} onPress={handleSpecificHarvestPayment}>
                   <Text style={styles.submitBtnText}>💳 SEÇİLİ SATIŞTAN DÜŞ VE KAYDET</Text>
@@ -1225,9 +1219,9 @@ export default function App() {
                             <View style={{ flex: 1 }}>
                               <Text style={styles.listTitle}>🏭 {item.firma || 'Firma Belirtilmedi'}</Text>
                               <Text style={styles.listSubText}>
-                                📅 Satış: {item.tarih || '-'} | ⚖️ {item.kg || item.weight || 0} KG | 💵 {item.fiyat || 0} TL/KG
+                                📅 Satış: {formatDisplayDate(item.tarih)} | ⚖️ {item.kg || item.weight || 0} KG | 💵 {item.fiyat || 0} TL/KG
                               </Text>
-                              <Text style={styles.listSubText}>⏳ Vade: {item.vadeTarihi || 'Belirtilmedi'}</Text>
+                              <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text>
                               <Text style={styles.listSubText}>
                                 Toplam: {formatTL(saleVal)} | Tahsilat: {formatTL(payVal)}
                               </Text>
@@ -1321,30 +1315,59 @@ export default function App() {
             <View>
               <Text style={styles.sectionTitle}>🏭 FABRİKA ÇAY FİYATLARI & POLİTİKA TAKİBİ</Text>
 
-              <View style={styles.infoCard}>
-                <Text style={styles.infoTitle}>👀 Üretici Görünümü</Text>
-                <Text style={styles.infoText}>Güncel fabrika fiyatlarını ve fiyat politikalarını buradan takip edebilirsiniz. Fiyat ekleme ve değiştirme yalnızca Yönetici Paneli'nden yapılır.</Text>
+              {isAdmin && <View style={styles.formCard}>
+                <Text style={styles.formTitle}>➕ Yeni Fiyat / Politika Kaydı</Text>
+                <Text style={styles.label}>Fabrika</Text>
+                <TextInput style={styles.input} value={priceForm.firma} onChangeText={(t) => setPriceForm({ ...priceForm, firma: t })} autoCorrect={false} autoCapitalize="characters" keyboardType="default" placeholder="ÇAYKUR / EFOR / DOĞUŞ..." />
+                <Text style={styles.label}>Fiyat (TL/KG)</Text>
+                <TextInput style={styles.input} value={priceForm.fiyat} onChangeText={(t) => setPriceForm({ ...priceForm, fiyat: t })} keyboardType="decimal-pad" placeholder="Örn: 35,00" />
+                <Text style={styles.label}>Fiyat Türü</Text>
+                <View style={styles.rowBtnGroup}>
+                  {['Haftalık','Aylık','Peşin','Vadeli'].map((tur) => <TouchableOpacity key={tur} style={[styles.groupBtn, priceForm.fiyatTuru === tur && styles.groupBtnActive]} onPress={() => setPriceForm({ ...priceForm, fiyatTuru: tur })}><Text style={[styles.groupBtnText, priceForm.fiyatTuru === tur && styles.groupBtnTextActive]}>{tur}</Text></TouchableOpacity>)}
+                </View>
+                {priceForm.fiyatTuru === 'Vadeli' && <><Text style={styles.label}>Vade (Gün)</Text><TextInput style={styles.input} value={priceForm.vadeGun} onChangeText={(t) => setPriceForm({ ...priceForm, vadeGun: t })} keyboardType="numeric" placeholder="Örn: 30" /></>}
+                <Text style={styles.label}>Fiyat Tarihi</Text>
+                <TextInput style={styles.input} value={priceForm.tarih} onChangeText={(t) => setPriceForm({ ...priceForm, tarih: t })} placeholder="GG.AA.YYYY" keyboardType="default" />
+                <Text style={styles.label}>Geçerlilik Başlangıcı (opsiyonel)</Text>
+                <TextInput style={styles.input} value={priceForm.gecerlilikBaslangic} onChangeText={(t) => setPriceForm({ ...priceForm, gecerlilikBaslangic: t })} placeholder="GG.AA.YYYY" keyboardType="default" />
+                <Text style={styles.label}>Fiyat Politikası / Açıklama</Text>
+                <TextInput style={styles.input} value={priceForm.politika} onChangeText={(t) => setPriceForm({ ...priceForm, politika: t })} autoCorrect={false} placeholder="Prim, vade, kampanya, kota vb." />
+                <Text style={styles.label}>Kaynak</Text>
+                <TextInput style={styles.input} value={priceForm.kaynak} onChangeText={(t) => setPriceForm({ ...priceForm, kaynak: t })} autoCorrect={false} placeholder="Firma duyurusu / WhatsApp / telefon..." />
+                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><Text style={styles.submitBtnText}>💾 FİYATI KAYDET</Text></TouchableOpacity>
+              </View>} 
+
+              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>FABRİKALAR</Text>
+              <View style={styles.rowBtnGroup}>
+                {Array.from(new Set(factoryPrices.map((p: any) => String(p.firma || '').trim()).filter(Boolean))).map((firma) => <TouchableOpacity key={firma} style={[styles.groupBtn, selectedFactory === firma && styles.groupBtnActive]} onPress={() => setSelectedFactory(selectedFactory === firma ? null : firma)}><Text style={[styles.groupBtnText, selectedFactory === firma && styles.groupBtnTextActive]}>{firma}</Text></TouchableOpacity>)}
               </View>
+              {selectedFactory && <>
+                <View style={styles.rowBtnGroup}>
+                  {['Tümü','Haftalık','Aylık','Peşin','Vadeli'].map((tur: any) => <TouchableOpacity key={tur} style={[styles.groupBtn, factoryFilter === tur && styles.groupBtnActive]} onPress={() => setFactoryFilter(tur)}><Text style={[styles.groupBtnText, factoryFilter === tur && styles.groupBtnTextActive]}>{tur}</Text></TouchableOpacity>)}
+                </View>
+                <Text style={styles.sectionTitle}>🏭 {selectedFactory} • FİYAT GEÇMİŞİ</Text>
+              </>}
 
               <Text style={[styles.sectionTitle, { marginTop: 20 }]}>GÜNCEL / SON KAYITLAR</Text>
               {factoryPrices.length === 0 ? (
                 <Text style={styles.emptyText}>Henüz fabrika fiyatı eklenmedi.</Text>
               ) : (
-                factoryPrices.map((p, index) => (
-                  <View key={p._id || index} style={styles.priceCard}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏭 {p.firma}</Text>
-                      <Text style={styles.priceValue}>{formatTL(Number(p.fiyat) || 0)} / KG</Text>
-                      <Text style={styles.listSubText}>📅 {p.tarih} {p.politika ? `• ${p.politika}` : ''}</Text>
-                      {p.kaynak ? <Text style={styles.listSubText}>🔎 Kaynak: {p.kaynak}</Text> : null}
+                factoryPrices
+                  .filter((p: any) => !selectedFactory || String(p.firma || '').trim() === selectedFactory)
+                  .filter((p: any) => factoryFilter === 'Tümü' || String(p.fiyatTuru || 'Peşin') === factoryFilter)
+                  .map((p: any, index: number) => (
+                    <View key={p._id || index} style={styles.priceCard}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.listTitle}>🏭 {p.firma}</Text>
+                        <Text style={styles.priceValue}>{formatTL(Number(p.fiyat) || 0)} / KG</Text>
+                        <Text style={styles.listSubText}>📌 {p.fiyatTuru || 'Peşin'}{p.vadeGun ? ` • ${p.vadeGun} Gün` : ''} • 📅 {formatDisplayDate(p.tarih)}</Text>
+                        {p.gecerlilikBaslangic ? <Text style={styles.listSubText}>⏱️ Geçerlilik başlangıcı: {formatDisplayDate(p.gecerlilikBaslangic)}</Text> : null}
+                        {p.politika ? <Text style={styles.listSubText}>📝 {p.politika}</Text> : null}
+                        {p.kaynak ? <Text style={styles.listSubText}>🔎 Kaynak: {p.kaynak}</Text> : null}
+                      </View>
+                      {isAdmin && <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('factory-prices', p._id, 'Fiyat')}><Text style={styles.actionBtnText}>🗑️</Text></TouchableOpacity>}
                     </View>
-                    {isAdmin && (
-                      <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('factory-prices', p._id, 'Fiyat')}>
-                        <Text style={styles.actionBtnText}>🗑️</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                ))
+                  ))
               )}
 
               <View style={styles.infoCard}>
@@ -1428,22 +1451,6 @@ export default function App() {
           {/* ADMIN PANELİ TABI */}
           {activeTab === 'admin' && isAdmin && (
             <View>
-              <Text style={styles.sectionTitle}>🏭 FABRİKA FİYATI YÖNETİMİ</Text>
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>➕ Yeni Fiyat / Politika Kaydı</Text>
-                <Text style={styles.label}>Fabrika</Text>
-                <TextInput style={styles.input} value={priceForm.firma} onChangeText={(t) => setPriceForm({ ...priceForm, firma: t })} placeholder="ÇAYKUR / EFOR / DOĞUŞ..." />
-                <Text style={styles.label}>Fiyat (TL/KG)</Text>
-                <TextInput style={styles.input} value={priceForm.fiyat} onChangeText={(t) => setPriceForm({ ...priceForm, fiyat: t })} keyboardType="decimal-pad" placeholder="Örn: 35,00" />
-                <Text style={styles.label}>Tarih</Text>
-                <TextInput style={styles.input} value={priceForm.tarih} onChangeText={(t) => setPriceForm({ ...priceForm, tarih: t })} placeholder="YYYY-AA-GG" />
-                <Text style={styles.label}>Fiyat Politikası</Text>
-                <TextInput style={styles.input} value={priceForm.politika} onChangeText={(t) => setPriceForm({ ...priceForm, politika: t })} placeholder="Prim, vade, kampanya..." />
-                <Text style={styles.label}>Kaynak</Text>
-                <TextInput style={styles.input} value={priceForm.kaynak} onChangeText={(t) => setPriceForm({ ...priceForm, kaynak: t })} placeholder="Firma duyurusu / telefon..." />
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><Text style={styles.submitBtnText}>💾 FİYATI KAYDET</Text></TouchableOpacity>
-              </View>
-
               <Text style={styles.sectionTitle}>📢 REKLAM YÖNETİMİ</Text>
               <View style={styles.formCard}>
                 <Text style={styles.formTitle}>Yeni Reklam Alanı</Text>
