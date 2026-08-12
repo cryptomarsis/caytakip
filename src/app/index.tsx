@@ -436,7 +436,7 @@ export default function App() {
         throw error;
       }
       return data;
-    } catch (e) { console.warn('Profil senkronizasyonu:', e); throw e; }
+    } catch (e) { throw e; }
   };
 
   const saveProfile = async (phone: string, name: string, pin: string) => {
@@ -479,7 +479,12 @@ export default function App() {
       setCurrentUser(userData); await saveSession(userData);
       Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
     } catch (e: any) {
-      if (e?.code === 'PIN_SETUP_REQUIRED') Alert.alert('Giriş Şifresi Gerekli', e?.message || 'Oturumunuz açık olan cihazdan Ayarlar ekranına giderek giriş şifresi oluşturun.');
+      if (e?.code === 'PIN_SETUP_REQUIRED') {
+        setAuthMode('register');
+        setAuthPin('');
+        setAuthPinConfirm('');
+        Alert.alert('İlk Giriş Şifresi', 'Bu eski hesap için henüz giriş şifresi yok. Aşağıdaki kayıt ekranında aynı telefon numaranızı ve yeni 6 haneli şifrenizi girin.');
+      }
       else Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.');
     }
     finally { setLoading(false); }
