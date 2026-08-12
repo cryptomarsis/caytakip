@@ -39,7 +39,7 @@ app.use((req, res, next) => {
 // Veritabanı adresi (.env yoksa varsayılan lokal adresi kullanır)
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
 const isProduction = process.env.NODE_ENV === 'production';
-const APP_NAME = process.env.APP_NAME || 'Çay Üreticisi';
+const APP_NAME = process.env.APP_NAME || 'Çaylık';
 const SUPPORT_EMAIL = String(process.env.SUPPORT_EMAIL || '').trim();
 const ADMIN_PHONE_RAW = process.env.ADMIN_PHONE || '';
 const normalizePhone = (value) => {
@@ -55,6 +55,9 @@ const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'development-o
 // OTP, NetGSM hesabı ve gönderici adı hazır olduğunda Render'da açıkça true yapılır.
 // Böylece eksik üçüncü taraf hesabı yeni dağıtımı çalışmaz hâle getirmez.
 const AUTH_REQUIRE_OTP = process.env.AUTH_REQUIRE_OTP === 'true';
+// Yalnızca ilk sürümden kalan yönetici hesabının 6 haneli şifre oluşturabilmesi için
+// kısa süreliğine açılır. Kullanımdan hemen sonra tekrar false yapılmalıdır.
+const AUTH_ALLOW_PIN_MIGRATION = process.env.AUTH_ALLOW_PIN_MIGRATION === 'true';
 const OTP_SECRET = process.env.OTP_SECRET || JWT_SECRET;
 const NETGSM_USERCODE = String(process.env.NETGSM_USERCODE || '').trim();
 const NETGSM_PASSWORD = String(process.env.NETGSM_PASSWORD || '').trim();
@@ -72,6 +75,7 @@ if (isProduction) {
     throw new Error('BACKUP_WEBHOOK_URL kullanılırken BACKUP_ENCRYPTION_KEY en az 32 karakter olmalıdır.');
   }
   if (!AUTH_REQUIRE_OTP) console.warn('UYARI: AUTH_REQUIRE_OTP=false. Herkese açık yayın öncesinde SMS doğrulamayı etkinleştirin.');
+  if (AUTH_ALLOW_PIN_MIGRATION) console.warn('UYARI: AUTH_ALLOW_PIN_MIGRATION=true. Yönetici şifresini oluşturduktan sonra bu değeri false yapın.');
 }
 
 const base64url = (value) => Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -257,7 +261,7 @@ const UserProfileSchema = new mongoose.Schema({
 const SessionSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true },
   userId: { type: String, required: true, index: true },
-  expiresAt: { type: Date, required: true, index: true },
+  expiresAt: { type: Date, required: true },
   revokedAt: { type: Date, default: null }
 }, { timestamps: true });
 SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
@@ -268,7 +272,7 @@ const OtpChallengeSchema = new mongoose.Schema({
   purpose: { type: String, enum: ['login', 'register'], required: true },
   codeHash: { type: String, required: true },
   attempts: { type: Number, default: 0 },
-  expiresAt: { type: Date, required: true, index: true },
+  expiresAt: { type: Date, required: true },
   consumedAt: { type: Date, default: null }
 }, { timestamps: true });
 OtpChallengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
@@ -597,11 +601,21 @@ app.post('/api/users/profile', limitPublicUsage('profile', 10, 15 * 60 * 1000), 
     if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
     if (!name) return res.status(400).json({ error: 'Ad Soyad zorunludur.' });
     if (!isValidPin(pin)) return res.status(400).json({ error: 'Giriş şifresi 6 haneli olmalıdır.' });
-    const existing = await UserProfile.findOne({ phone });
-    if (existing) return res.status(409).json({ error: 'Bu telefon numarasıyla zaten kayıtlı bir hesap var. Giriş yapın.', code: 'ACCOUNT_EXISTS' });
-    if (await findLegacyUser(phone)) return res.status(409).json({ error: 'Bu telefon numarası eski kayıtlarda bulunuyor. Hesabınızı güvenli biçimde taşımak için destek ile iletişime geçin.', code: 'PIN_SETUP_REQUIRED' });
+    const existing = await UserProfile.findOne({ phone }).select('+pinHash +pinSalt');
+    const canMigrateAdminPin = AUTH_ALLOW_PIN_MIGRATION && phone === ADMIN_PHONE;
+    if (existing) {
+      if (!canMigrateAdminPin || existing.pinHash || existing.pinSalt) return res.status(409).json({ error: 'Bu telefon numarasıyla zaten kayıtlı bir hesap var. Giriş yapın.', code: 'ACCOUNT_EXISTS' });
+      const { salt, hash } = await hashPin(pin);
+      existing.pinSalt = salt;
+      existing.pinHash = hash;
+      await existing.save();
+      return res.json(await issueTokens(existing));
+    }
+    const legacy = await findLegacyUser(phone);
+    if (legacy && !canMigrateAdminPin) return res.status(409).json({ error: 'Bu telefon numarası eski kayıtlarda bulunuyor. Hesabınızı güvenli biçimde taşımak için destek ile iletişime geçin.', code: 'PIN_SETUP_REQUIRED' });
     const { salt, hash } = await hashPin(pin);
-    const profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name, pinSalt: salt, pinHash: hash, role: phone === ADMIN_PHONE ? 'admin' : 'user' });
+    const legacyName = legacy ? String(legacy.producerName || legacy.ureticici || legacy.uretici || legacy.name || '').trim() : '';
+    const profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name: legacyName || name, pinSalt: salt, pinHash: hash, role: phone === ADMIN_PHONE ? 'admin' : 'user' });
     res.json(await issueTokens(profile));
   } catch (err) {
     console.error('PROFILE ERROR:', err);
