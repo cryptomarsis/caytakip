@@ -30,9 +30,8 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authPhone, setAuthPhone] = useState('');
   const [authName, setAuthName] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [useOtpFlow, setUseOtpFlow] = useState(false);
+  const [authPin, setAuthPin] = useState('');
+  const [authPinConfirm, setAuthPinConfirm] = useState('');
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
@@ -423,12 +422,12 @@ export default function App() {
   });
 
   // Giriş Yap / Kayıt Ol İşlemleri
-  const syncProfile = async (phone: string) => {
+  const syncProfile = async (phone: string, pin: string) => {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
     try {
       const res = await fetchWithTimeout(`${API_URL}/auth/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: normalized })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: normalized, pin })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -440,11 +439,11 @@ export default function App() {
     } catch (e) { console.warn('Profil senkronizasyonu:', e); throw e; }
   };
 
-  const saveProfile = async (phone: string, name: string) => {
+  const saveProfile = async (phone: string, name: string, pin: string) => {
     const normalized = normalizePhone(phone);
     const res = await fetchWithTimeout(`${API_URL}/users/profile`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: normalized, name: name.trim() })
+      body: JSON.stringify({ phone: normalized, name: name.trim(), pin })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -457,11 +456,14 @@ export default function App() {
 
   const handleAuth = async () => {
     const cleanPhone = normalizePhone(authPhone);
+    const cleanPin = authPin.replace(/\D/g, '');
     if (!cleanPhone || cleanPhone.length !== 11) { Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.'); return; }
     if (authMode === 'register' && !authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
+    if (!/^\d{6}$/.test(cleanPin)) { Alert.alert('Eksik Bilgi', 'Lütfen 6 haneli giriş şifrenizi belirleyin.'); return; }
+    if (authMode === 'register' && cleanPin !== authPinConfirm.replace(/\D/g, '')) { Alert.alert('Şifre Eşleşmiyor', 'Giriş şifreleri aynı olmalıdır.'); return; }
     setLoading(true);
     try {
-      const profile = authMode === 'register' ? await saveProfile(cleanPhone, authName) : await syncProfile(cleanPhone);
+      const profile = authMode === 'register' ? await saveProfile(cleanPhone, authName, cleanPin) : await syncProfile(cleanPhone, cleanPin);
       if (!profile?.token) {
         Alert.alert('Giriş Başarısız', authMode === 'login' ? 'Kayıt bulunamadı veya oturum oluşturulamadı.' : 'Profil kaydedildi ancak güvenli oturum oluşturulamadı.');
         return;
@@ -477,47 +479,9 @@ export default function App() {
       setCurrentUser(userData); await saveSession(userData);
       Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
     } catch (e: any) {
-      if (e?.code === 'OTP_REQUIRED') {
-        setUseOtpFlow(true);
-        Alert.alert('SMS Doğrulama Gerekli', 'Bu hesap için SMS kodu ile güvenli giriş yapın.');
-      } else Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.');
+      if (e?.code === 'PIN_SETUP_REQUIRED') Alert.alert('Giriş Şifresi Gerekli', e?.message || 'Oturumunuz açık olan cihazdan Ayarlar ekranına giderek giriş şifresi oluşturun.');
+      else Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.');
     }
-    finally { setLoading(false); }
-  };
-
-  const requestOtp = async () => {
-    const phone = normalizePhone(authPhone);
-    if (!phone || phone.length !== 11) { Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.'); return; }
-    if (authMode === 'register' && !authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
-    setLoading(true);
-    try {
-      const response = await fetchWithTimeout(`${API_URL}/auth/request-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, purpose: authMode })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || 'Doğrulama kodu gönderilemedi.');
-      setOtpSent(true);
-      setUseOtpFlow(true);
-      Alert.alert('Kod Gönderildi', 'Telefonunuza gelen 6 haneli doğrulama kodunu girin.');
-    } catch (error: any) { Alert.alert('SMS Doğrulama', error?.message || 'Kod gönderilemedi.'); }
-    finally { setLoading(false); }
-  };
-
-  const verifyOtp = async () => {
-    const phone = normalizePhone(authPhone);
-    if (!/^\d{6}$/.test(otpCode.replace(/\D/g, ''))) { Alert.alert('Eksik Bilgi', 'Lütfen SMS ile gelen 6 haneli kodu girin.'); return; }
-    setLoading(true);
-    try {
-      const response = await fetchWithTimeout(`${API_URL}/auth/verify-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, name: authName.trim(), purpose: authMode, code: otpCode })
-      });
-      const profile = await response.json().catch(() => ({}));
-      if (!response.ok || !profile?.token) throw new Error(profile?.error || 'Doğrulama tamamlanamadı.');
-      const userData: UserSession = { userId: profile.userId, name: profile.name || authName.trim() || 'Üretici', phone: normalizePhone(profile.phone || phone), role: profile.role === 'admin' ? 'admin' : 'user', token: profile.token, refreshToken: profile.refreshToken };
-      setCurrentUser(userData); await saveSession(userData);
-      setOtpCode(''); setOtpSent(false);
-      Alert.alert('Doğrulama Başarılı', `Hoş geldiniz, ${userData.name}!`);
-    } catch (error: any) { Alert.alert('SMS Doğrulama', error?.message || 'Kod doğrulanamadı.'); }
     finally { setLoading(false); }
   };
 
@@ -540,6 +504,27 @@ export default function App() {
       setCurrentUser(null);
       Alert.alert('Hesap Silindi', 'Hesabınız ve ilişkili kayıtlarınız silindi.');
     } catch (error: any) { Alert.alert('Hesap Silme', error?.message || 'Hesap silinemedi.'); throw error; }
+  };
+
+  const handleChangePin = async (currentPin: string, newPin: string) => {
+    if (!currentUser) throw new Error('Oturum bulunamadı.');
+    const response = await authFetch(`${API_URL}/users/me/pin`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ currentPin, newPin })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.token) throw new Error(data?.error || 'Giriş şifresi güncellenemedi.');
+    const refreshedUser: UserSession = {
+      ...currentUser,
+      token: data.token,
+      refreshToken: data.refreshToken || currentUser.refreshToken,
+      name: data.name || currentUser.name,
+      phone: normalizePhone(data.phone || currentUser.phone),
+      role: data.role === 'admin' ? 'admin' : 'user'
+    };
+    setCurrentUser(refreshedUser);
+    await saveSession(refreshedUser);
   };
 
   // Genel Hesaplamalar
@@ -910,9 +895,9 @@ export default function App() {
         <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 20 }]}>
           <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
           <View style={styles.authCard}>
-            <Text style={styles.authTitle}>🍃 ÇAY ÜRETİCİ SİSTEMİ</Text>
+            <Text style={styles.authTitle}>🍃 ÇAYLIK</Text>
             <Text style={styles.authSubTitle}>
-              {authMode === 'login' ? 'Telefon numaranızla devam edin' : 'Yeni üretici kaydı oluşturun'}
+              {authMode === 'login' ? 'Telefon ve giriş şifrenizle devam edin' : 'Yeni üretici kaydı oluşturun'}
             </Text>
 
             {authMode === 'register' && (
@@ -939,22 +924,36 @@ export default function App() {
               onChangeText={setAuthPhone}
             />
 
-            {otpSent && <>
-              <Text style={styles.label}>SMS Doğrulama Kodu</Text>
-              <TextInput style={styles.input} placeholder="6 haneli kod" keyboardType="number-pad" maxLength={6} value={otpCode} onChangeText={setOtpCode} />
-              <TouchableOpacity style={styles.submitBtn} onPress={verifyOtp}><Text style={styles.submitBtnText}>KODU DOĞRULA</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={requestOtp}><Text style={styles.secondaryBtnText}>Kodu yeniden gönder</Text></TouchableOpacity>
+            <Text style={styles.label}>6 Haneli Giriş Şifresi</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Örn: 123456"
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+              value={authPin}
+              onChangeText={setAuthPin}
+            />
+            {authMode === 'register' && <>
+              <Text style={styles.label}>Giriş Şifresi Tekrar</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="6 haneyi tekrar yazın"
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={6}
+                value={authPinConfirm}
+                onChangeText={setAuthPinConfirm}
+              />
+              <Text style={styles.formHelp}>Bu şifreyi not edin; telefon numaranızla birlikte girişte kullanacaksınız.</Text>
             </>}
-            {!otpSent && <>
-              <TouchableOpacity style={styles.submitBtn} onPress={useOtpFlow ? requestOtp : handleAuth}>
-                <Text style={styles.submitBtnText}>{useOtpFlow ? 'SMS KODU GÖNDER' : authMode === 'login' ? 'GİRİŞ YAP' : 'KAYIT OL VE GİRİŞ YAP'}</Text>
-              </TouchableOpacity>
-              {!useOtpFlow && <TouchableOpacity style={styles.secondaryBtn} onPress={() => setUseOtpFlow(true)}><Text style={styles.secondaryBtnText}>SMS kodu ile güvenli giriş</Text></TouchableOpacity>}
-            </>}
+            <TouchableOpacity style={styles.submitBtn} onPress={handleAuth}>
+              <Text style={styles.submitBtnText}>{authMode === 'login' ? 'GİRİŞ YAP' : 'KAYIT OL VE GİRİŞ YAP'}</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={{ marginTop: 15 }}
-              onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setOtpSent(false); setOtpCode(''); }}
+              onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthPin(''); setAuthPinConfirm(''); }}
             >
               <Text style={{ color: '#1b4332', fontWeight: 'bold', textDecorationLine: 'underline' }}>
                 {authMode === 'login'
@@ -980,7 +979,7 @@ export default function App() {
         {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle}>🍃 Çay Takip</Text>
+            <Text style={styles.headerTitle}>🍃 Çaylık</Text>
             <Text style={styles.headerSubtitle}>
               Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}
             </Text>
@@ -1133,7 +1132,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'settings' && <SettingsScreen currentUser={currentUser} onDeleteAccount={handleDeleteAccount} />}
+          {activeTab === 'settings' && <SettingsScreen currentUser={currentUser} onChangePin={handleChangePin} onDeleteAccount={handleDeleteAccount} />}
 
           {/* ADMIN PANELİ TABI */}
           {activeTab === 'admin' && isAdmin && (

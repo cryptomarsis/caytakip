@@ -96,6 +96,21 @@ const verifyAccessToken = (token) => {
 };
 const hashRefreshToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const makeRefreshToken = () => crypto.randomBytes(48).toString('base64url');
+const normalizePin = (value) => String(value || '').replace(/\D/g, '');
+const isValidPin = (pin) => /^\d{6}$/.test(pin);
+const hashPin = (pin, salt = crypto.randomBytes(16).toString('hex')) => new Promise((resolve, reject) => {
+  crypto.scrypt(pin, salt, 64, (error, derivedKey) => {
+    if (error) reject(error);
+    else resolve({ salt, hash: derivedKey.toString('hex') });
+  });
+});
+const verifyPin = async (profile, pin) => {
+  if (!profile?.pinHash || !profile?.pinSalt || !isValidPin(pin)) return false;
+  const { hash } = await hashPin(pin, profile.pinSalt);
+  const expected = Buffer.from(profile.pinHash, 'hex');
+  const supplied = Buffer.from(hash, 'hex');
+  return expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
+};
 const hashOtp = (phone, purpose, code) => crypto.createHmac('sha256', OTP_SECRET).update(`${phone}:${purpose}:${code}`).digest('hex');
 const createOtpCode = () => String(crypto.randomInt(100000, 1000000));
 const toNetgsmPhone = (phone) => normalizePhone(phone).replace(/^0/, '');
@@ -233,6 +248,8 @@ const UserProfileSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   phone: { type: String, required: true, unique: true },
   name: { type: String, required: true },
+  pinHash: { type: String, select: false },
+  pinSalt: { type: String, select: false },
   role: { type: String, enum: ['admin', 'user'], default: 'user' },
   active: { type: Boolean, default: true }
 }, { timestamps: true });
@@ -406,16 +423,19 @@ const findLegacyUser = async (phone) => {
 app.post('/api/auth/login', limitPublicUsage('login', 10, 15 * 60 * 1000), async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
+    const pin = normalizePin(req.body.pin);
     if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
     if (AUTH_REQUIRE_OTP) return res.status(403).json({ error: 'SMS doğrulaması gereklidir.', code: 'OTP_REQUIRED' });
-    let profile = await UserProfile.findOne({ phone });
+    if (!isValidPin(pin)) return res.status(400).json({ error: '6 haneli giriş şifrenizi girin.' });
+    const profile = await UserProfile.findOne({ phone }).select('+pinHash +pinSalt');
     if (!profile) {
       const legacy = await findLegacyUser(phone);
-      if (!legacy) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-      const name = String(legacy.producerName || legacy.ureticici || legacy.uretici || legacy.name || 'Üretici').trim();
-      profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name: name || 'Üretici', role: phone === ADMIN_PHONE ? 'admin' : 'user' });
+      if (legacy) return res.status(409).json({ error: 'Bu eski hesap için önce oturumun açık olduğu cihazdan giriş şifresi oluşturun.', code: 'PIN_SETUP_REQUIRED' });
+      return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     }
     if (profile.active === false) return res.status(403).json({ error: 'Kullanıcı hesabı pasif durumda.' });
+    if (!profile.pinHash || !profile.pinSalt) return res.status(409).json({ error: 'Bu hesap için giriş şifresi henüz oluşturulmamış. Oturumun açık olduğu cihazdan Ayarlar ekranını açın.', code: 'PIN_SETUP_REQUIRED' });
+    if (!await verifyPin(profile, pin)) return res.status(401).json({ error: 'Telefon numarası veya giriş şifresi hatalı.' });
     const tokens = await issueTokens(profile);
     res.json(tokens);
   } catch (err) {
@@ -573,19 +593,39 @@ app.post('/api/users/profile', limitPublicUsage('profile', 10, 15 * 60 * 1000), 
     if (AUTH_REQUIRE_OTP) return res.status(403).json({ error: 'SMS doğrulaması gereklidir.', code: 'OTP_REQUIRED' });
     const phone = normalizePhone(req.body.phone);
     const name = String(req.body.name || '').trim();
+    const pin = normalizePin(req.body.pin);
     if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
     if (!name) return res.status(400).json({ error: 'Ad Soyad zorunludur.' });
-    let profile = await UserProfile.findOne({ phone });
-    if (profile && profile.name !== name) {
-      profile.name = name;
-      await profile.save();
-    } else if (!profile) {
-      profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name, role: phone === ADMIN_PHONE ? 'admin' : 'user' });
-    }
+    if (!isValidPin(pin)) return res.status(400).json({ error: 'Giriş şifresi 6 haneli olmalıdır.' });
+    const existing = await UserProfile.findOne({ phone });
+    if (existing) return res.status(409).json({ error: 'Bu telefon numarasıyla zaten kayıtlı bir hesap var. Giriş yapın.', code: 'ACCOUNT_EXISTS' });
+    if (await findLegacyUser(phone)) return res.status(409).json({ error: 'Bu telefon numarası eski kayıtlarda bulunuyor. Hesabınızı güvenli biçimde taşımak için destek ile iletişime geçin.', code: 'PIN_SETUP_REQUIRED' });
+    const { salt, hash } = await hashPin(pin);
+    const profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name, pinSalt: salt, pinHash: hash, role: phone === ADMIN_PHONE ? 'admin' : 'user' });
     res.json(await issueTokens(profile));
   } catch (err) {
     console.error('PROFILE ERROR:', err);
     res.status(500).json({ error: `Üretici profili kaydedilemedi: ${err.message}` });
+  }
+});
+
+app.put('/api/users/me/pin', requireAuth, limitPublicUsage('pin-change', 5, 15 * 60 * 1000), async (req, res) => {
+  try {
+    const newPin = normalizePin(req.body.newPin);
+    const currentPin = normalizePin(req.body.currentPin);
+    if (!isValidPin(newPin)) return res.status(400).json({ error: 'Yeni giriş şifresi 6 haneli olmalıdır.' });
+    const profile = await UserProfile.findOne({ userId: req.auth.userId }).select('+pinHash +pinSalt');
+    if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
+    if (profile.pinHash && !await verifyPin(profile, currentPin)) return res.status(401).json({ error: 'Mevcut giriş şifresi hatalı.' });
+    const { salt, hash } = await hashPin(newPin);
+    profile.pinSalt = salt;
+    profile.pinHash = hash;
+    await profile.save();
+    await Session.deleteMany({ userId: profile.userId });
+    res.json(await issueTokens(profile));
+  } catch (err) {
+    console.error('PIN CHANGE ERROR:', err.message);
+    res.status(500).json({ error: 'Giriş şifresi güncellenemedi.' });
   }
 });
 

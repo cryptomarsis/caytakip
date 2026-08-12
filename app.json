@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "Çay Üreticisi",
+    "name": "Çaylık",
     "slug": "cay-ureticisi",
-    "description": "Çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
+    "description": "Çaylık; çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
     "scheme": "cayureticisi",
     "version": "1.0.0",
     "orientation": "portrait",
     "backgroundColor": "#F8F3E7",
-    "icon": "./assets/icon-v2.png",
+    "icon": "./assets/caylik-icon-v1.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
@@ -30,8 +30,8 @@
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon-v2.png",
-        "backgroundColor": "#F8F3E7"
+        "foregroundImage": "./assets/caylik-icon-v1.png",
+        "backgroundColor": "#002A17"
       }
     },
     "web": {

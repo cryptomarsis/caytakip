@@ -66,8 +66,11 @@ export default function FactoryPricesScreen(props: any) {
           {isAdmin && <TouchableOpacity style={styles.compactDeleteBtn} onPress={()=>handleDelete('factory-prices', cashPrice._id, 'Fiyat')}><Text style={styles.compactDeleteText}>Sil</Text></TouchableOpacity>}
         </View> : <Text style={styles.factoryEmptyPrice}>Peşin fiyat girilmemiş.</Text>}
         {otherPrices.map((p:any) => <View key={p._id} style={styles.factoryDetailRow}>
-          <Text style={styles.factoryDetailLabel}>{p.fiyatTuru}</Text>
-          <Text style={styles.factoryDetailValue}>{formatTL(Number(p.fiyat)||0)} / KG{p.vadeGun ? ` · ${p.vadeGun} gün` : ''}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.factoryDetailLabel}>{p.fiyatTuru}</Text>
+            <Text style={styles.factoryDetailValue}>{formatTL(Number(p.fiyat)||0)} / KG{p.vadeGun ? ` · ${p.vadeGun} gün` : ''}</Text>
+          </View>
+          {isAdmin && <TouchableOpacity style={styles.compactDeleteBtn} onPress={()=>handleDelete('factory-prices', p._id, 'Fiyat')}><Text style={styles.compactDeleteText}>Sil</Text></TouchableOpacity>}
         </View>)}
       </View>;
     })}

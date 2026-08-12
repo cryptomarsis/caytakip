@@ -73,6 +73,19 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
     return [...map.values()].sort((a,b)=>b.kg-a.kg);
   }, [selected]);
 
+  const gardenHarvests = useMemo(() => {
+    const map = new Map<string,{name:string;kg:number;sales:number}>();
+    selected.forEach(h => {
+      const name = String(h.garden || h.bahce || 'Bahçesi belirtilmeyen').trim() || 'Bahçesi belirtilmeyen';
+      const row = map.get(name) || { name, kg: 0, sales: 0 };
+      row.kg += kgOf(h);
+      row.sales += saleOf(h);
+      map.set(name, row);
+    });
+    return [...map.values()].sort((a,b) => b.kg - a.kg);
+  }, [selected]);
+  const maxGardenKg = Math.max(...gardenHarvests.map(g => g.kg), 1);
+
   const exportCSV = async () => {
     const esc = (v:unknown) => `"${String(v ?? '').replace(/"/g,'""')}"`;
     const rows = [
@@ -93,12 +106,18 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
         Kalan: Math.max(0, saleOf(h)-paidOf(h)), Bahçe: h.garden || h.bahce || '', 'Vade Tarihi': formatDisplayDate(h.vadeTarihi)
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
+      const gardenWs = XLSX.utils.json_to_sheet(gardenHarvests.map(g => ({
+        Bahçe: g.name,
+        'Toplam Hasat (KG)': g.kg,
+        'Toplam Satış (TL)': g.sales
+      })));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Hasatlar');
+      XLSX.utils.book_append_sheet(wb, gardenWs, 'Bahçe Özeti');
       const base64 = XLSX.write(wb, { bookType:'xlsx', type:'base64' });
-      const fileUri = `${FileSystem.cacheDirectory}CayTakip_${year}.xlsx`;
+      const fileUri = `${FileSystem.cacheDirectory}Caylik_${year}.xlsx`;
       await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri, { mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle:`Çay Takip ${year} Excel` });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri, { mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle:`Çaylık ${year} Excel` });
       else Alert.alert('Excel Hazır', fileUri);
     } catch (e) {
       Alert.alert('Excel', 'Gerçek Excel dışa aktarma için xlsx, expo-file-system ve expo-sharing paketlerini kurun.');
@@ -112,19 +131,20 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       const versionRows = versions.map(v => `<tr><td>${v.name}</td><td>${v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td></tr>`).join('');
       const monthRows = monthly.map(x => `<tr><td>${months[x.month]}</td><td>${x.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(x.sales)}</td></tr>`).join('');
       const factoryRows = factorySales.map(f => `<tr><td>${f.name}</td><td>${f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(f.sales)}</td></tr>`).join('');
-      const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px;color:#1b4332}h1,h2{color:#1b4332}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#e9f5ee}.cards{display:flex;flex-wrap:wrap;gap:10px}.card{border:1px solid #ddd;padding:10px;width:45%}</style></head><body><h1>Çay Takip Raporu - ${year}</h1><div class="cards"><div class="card">Toplam Hasat<br><b>${totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</b></div><div class="card">Toplam Satış<br><b>${formatTL(totalSales)}</b></div><div class="card">Toplam Tahsilat<br><b>${formatTL(totalPaid)}</b></div><div class="card">Vadeli Alacak<br><b>${formatTL(receivable)}</b></div><div class="card">Toplam Gider<br><b>${formatTL(totalExpenses)}</b></div></div><h2>Sürüm Bazlı Hasat</h2><table><tr><th>Sürüm</th><th>Toplam KG</th></tr>${versionRows}</table><h2>Aylık Hasat</h2><table><tr><th>Ay</th><th>KG</th><th>Satış</th></tr>${monthRows}</table><h2>Fabrika Bazında Satış</h2><table><tr><th>Fabrika</th><th>KG</th><th>Satış</th></tr>${factoryRows}</table></body></html>`;
+      const gardenRows = gardenHarvests.map(g => `<tr><td>${g.name}</td><td>${g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(g.sales)}</td></tr>`).join('');
+      const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px;color:#1b4332}h1,h2{color:#1b4332}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#e9f5ee}.cards{display:flex;flex-wrap:wrap;gap:10px}.card{border:1px solid #ddd;padding:10px;width:45%}</style></head><body><h1>Çaylık Raporu - ${year}</h1><div class="cards"><div class="card">Toplam Hasat<br><b>${totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</b></div><div class="card">Toplam Satış<br><b>${formatTL(totalSales)}</b></div><div class="card">Toplam Tahsilat<br><b>${formatTL(totalPaid)}</b></div><div class="card">Vadeli Alacak<br><b>${formatTL(receivable)}</b></div><div class="card">Toplam Gider<br><b>${formatTL(totalExpenses)}</b></div></div><h2>Sürüm Bazlı Hasat</h2><table><tr><th>Sürüm</th><th>Toplam KG</th></tr>${versionRows}</table><h2>Bahçe Bazında Hasat</h2><table><tr><th>Bahçe</th><th>Toplam KG</th><th>Toplam Satış</th></tr>${gardenRows}</table><h2>Aylık Hasat</h2><table><tr><th>Ay</th><th>KG</th><th>Satış</th></tr>${monthRows}</table><h2>Fabrika Bazında Satış</h2><table><tr><th>Fabrika</th><th>KG</th><th>Satış</th></tr>${factoryRows}</table></body></html>`;
       const pdf = await Print.printToFileAsync({ html, base64: true });
       if (!pdf.base64 || !FileSystem.cacheDirectory) throw new Error('PDF dosyası hazırlanamadı.');
 
       // Print modülünün geçici URL'si bazı Android cihazlarda paylaşım izni vermez.
       // PDF'yi uygulamanın kendi önbelleğine yazarak paylaşılabilir bir file:// URL oluşturuyoruz.
-      const fileUri = `${FileSystem.cacheDirectory}CayTakip_${year}.pdf`;
+      const fileUri = `${FileSystem.cacheDirectory}Caylik_${year}.pdf`;
       await FileSystem.writeAsStringAsync(fileUri, pdf.base64, { encoding: FileSystem.EncodingType.Base64 });
       const fileInfo = await FileSystem.getInfoAsync(fileUri);
       if (!fileInfo.exists) throw new Error('PDF dosyası telefona kaydedilemedi.');
 
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'application/pdf', dialogTitle: `Çay Takip ${year} PDF` });
+        await Sharing.shareAsync(fileUri, { mimeType: 'application/pdf', dialogTitle: `Çaylık ${year} PDF` });
       } else {
         Alert.alert('PDF Hazır', fileUri);
       }
@@ -150,6 +170,12 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       <Text style={styles.formTitle}>🌿 Sürüm Bazlı Hasat</Text>
       {versions.length === 0 ? <Text style={styles.emptyText}>Bu yıl hasat kaydı yok.</Text> : versions.map(v => <View key={v.name} style={{marginBottom:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={styles.listTitle}>{v.name}</Text><Text style={styles.listSubText}>{v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><View style={{height:14,backgroundColor:'#e9ecef',borderRadius:7,overflow:'hidden'}}><View style={{width:`${Math.max(2,(v.kg/maxVersionKg)*100)}%`,height:'100%',backgroundColor:'#2d6a4f'}}/></View></View>)}
       <Text style={[styles.listSubText,{marginTop:4}]}>Grafik: Sürümlerin toplam KG karşılaştırması</Text>
+    </View>
+
+    <View style={styles.formCard}>
+      <Text style={styles.formTitle}>🏡 Bahçe Bazında Hasat</Text>
+      {gardenHarvests.length === 0 ? <Text style={styles.emptyText}>Bu yıl bahçe bilgisi olan hasat kaydı yok.</Text> : gardenHarvests.map(g => <View key={g.name} style={{marginBottom:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={styles.listTitle}>{g.name}</Text><Text style={styles.listSubText}>{g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><Text style={[styles.listSubText,{marginTop:2}]}>Toplam satış: {formatTL(g.sales)}</Text><View style={{height:12,marginTop:6,backgroundColor:'#e9ecef',borderRadius:6,overflow:'hidden'}}><View style={{width:`${Math.max(2,(g.kg/maxGardenKg)*100)}%`,height:'100%',backgroundColor:'#2d6a4f'}}/></View></View>)}
+      <Text style={[styles.listSubText,{marginTop:4}]}>Her bahçeden üretilen toplam çay miktarı</Text>
     </View>
 
     <View style={styles.formCard}>

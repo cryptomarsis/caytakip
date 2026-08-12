@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_ORIGIN, API_URL, fetchWithTimeout } from '../services/api';
 import { styles } from '../styles/styles';
 
 type Props = {
   currentUser: { token?: string } | null;
+  onChangePin: (currentPin: string, newPin: string) => Promise<void>;
   onDeleteAccount: () => Promise<void>;
 };
 
-export default function SettingsScreen({ currentUser, onDeleteAccount }: Props) {
+export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccount }: Props) {
   const [privacy, setPrivacy] = useState<any>(null);
   const [loadingPrivacy, setLoadingPrivacy] = useState(true);
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [savingPin, setSavingPin] = useState(false);
 
   useEffect(() => {
     fetchWithTimeout(`${API_URL}/legal/privacy`)
@@ -31,6 +36,30 @@ export default function SettingsScreen({ currentUser, onDeleteAccount }: Props) 
     );
   };
 
+  const savePin = async () => {
+    const cleanNewPin = newPin.replace(/\D/g, '');
+    if (!/^\d{6}$/.test(cleanNewPin)) {
+      Alert.alert('Giriş Şifresi', 'Yeni giriş şifresi 6 haneli olmalıdır.');
+      return;
+    }
+    if (cleanNewPin !== confirmPin.replace(/\D/g, '')) {
+      Alert.alert('Giriş Şifresi', 'Yeni giriş şifreleri aynı olmalıdır.');
+      return;
+    }
+    setSavingPin(true);
+    try {
+      await onChangePin(currentPin.replace(/\D/g, ''), cleanNewPin);
+      setCurrentPin('');
+      setNewPin('');
+      setConfirmPin('');
+      Alert.alert('Başarılı', 'Giriş şifreniz kaydedildi.');
+    } catch (error: any) {
+      Alert.alert('Giriş Şifresi', error?.message || 'Giriş şifresi güncellenemedi.');
+    } finally {
+      setSavingPin(false);
+    }
+  };
+
   return <View>
     <Text style={styles.sectionTitle}>Ayarlar ve Gizlilik</Text>
     <View style={styles.formCard}>
@@ -46,6 +75,20 @@ export default function SettingsScreen({ currentUser, onDeleteAccount }: Props) 
       </TouchableOpacity>
       {privacy?.contactEmail && !String(privacy.contactEmail).startsWith('Destek') && <Text style={styles.listSubText}>Destek: {privacy.contactEmail}</Text>}
     </View>
+
+    {currentUser?.token && <View style={styles.formCard}>
+      <Text style={styles.formTitle}>Giriş Şifresi</Text>
+      <Text style={styles.formHelp}>Telefon numaranızla birlikte kullanacağınız 6 haneli giriş şifresini belirleyin veya değiştirin.</Text>
+      <Text style={styles.label}>Mevcut giriş şifresi</Text>
+      <TextInput style={styles.input} placeholder="İlk kez oluşturuyorsanız boş bırakın" keyboardType="number-pad" secureTextEntry maxLength={6} value={currentPin} onChangeText={setCurrentPin} />
+      <Text style={styles.label}>Yeni 6 haneli giriş şifresi</Text>
+      <TextInput style={styles.input} placeholder="Örn: 123456" keyboardType="number-pad" secureTextEntry maxLength={6} value={newPin} onChangeText={setNewPin} />
+      <Text style={styles.label}>Yeni giriş şifresi tekrar</Text>
+      <TextInput style={styles.input} placeholder="6 haneyi tekrar yazın" keyboardType="number-pad" secureTextEntry maxLength={6} value={confirmPin} onChangeText={setConfirmPin} />
+      <TouchableOpacity style={styles.submitBtn} onPress={savePin} disabled={savingPin}>
+        <Text style={styles.submitBtnText}>{savingPin ? 'KAYDEDİLİYOR...' : 'GİRİŞ ŞİFRESİNİ KAYDET'}</Text>
+      </TouchableOpacity>
+    </View>}
 
     {currentUser?.token && <View style={styles.dangerCard}>
       <Text style={styles.dangerTitle}>Hesabı sil</Text>
