@@ -2,6 +2,7 @@ require('dotenv').config(); // .env dosyasındaki değişkenleri yükler
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const crypto = require('crypto');
 
 const app = express();
 
@@ -19,10 +20,36 @@ const normalizePhone = (value) => {
   return p;
 };
 const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
+const ACCESS_TTL_SECONDS = 15 * 60;
+const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_SECRET || 'cay-takip-change-this-secret';
+
+const base64url = (value) => Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+const fromBase64url = (value) => Buffer.from(String(value).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+const signAccessToken = (payload) => {
+  const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body = base64url(JSON.stringify(payload));
+  const signature = base64url(crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest());
+  return `${header}.${body}.${signature}`;
+};
+const verifyAccessToken = (token) => {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
+    const expected = base64url(crypto.createHmac('sha256', JWT_SECRET).update(`${parts[0]}.${parts[1]}`).digest());
+    const a = Buffer.from(parts[2]); const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const payload = JSON.parse(fromBase64url(parts[1]));
+    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch { return null; }
+};
+const hashRefreshToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+const makeRefreshToken = () => crypto.randomBytes(48).toString('base64url');
+
 const isAdminRequest = (req) => {
-  if (req.headers['admin-secret'] === ADMIN_SECRET) return true;
-  const { userId, userPhone } = getUserIdentifier(req);
-  return normalizePhone(userPhone) === ADMIN_PHONE || String(userId || '') === `usr_${ADMIN_PHONE}`;
+  const auth = getAuthUser(req);
+  return Boolean(auth?.role === 'admin');
 };
 
 mongoose.connect(MONGO_URI, {
@@ -108,6 +135,15 @@ const UserProfileSchema = new mongoose.Schema({
   role: { type: String, enum: ['admin', 'user'], default: 'user' }
 }, { timestamps: true });
 
+const SessionSchema = new mongoose.Schema({
+  tokenHash: { type: String, required: true, unique: true },
+  userId: { type: String, required: true, index: true },
+  expiresAt: { type: Date, required: true, index: true },
+  revokedAt: { type: Date, default: null }
+}, { timestamps: true });
+SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+const Session = mongoose.model('Session', SessionSchema);
+
 const AdSchema = new mongoose.Schema({
   slot: { type: String, enum: ['dashboard_top', 'dashboard_middle', 'prices_top'], default: 'dashboard_middle' },
   firma: { type: String, required: true },
@@ -133,71 +169,149 @@ const Ad = mongoose.model('Ad', AdSchema);
 const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
 
 // HELPER FUNCTIONS
+const getAuthUser = (req) => {
+  const header = String(req.headers.authorization || '');
+  if (!header.startsWith('Bearer ')) return null;
+  return verifyAccessToken(header.slice(7).trim());
+};
+
 const getUserIdentifier = (req) => {
-  const userId = req.headers['user-id'] || req.query.userId || req.body?.userId;
-  const userPhone = req.headers['user-phone'] || req.query.userPhone || req.body?.userPhone;
-  return { userId, userPhone };
+  const auth = getAuthUser(req);
+  if (auth?.userId) return { userId: auth.userId, userPhone: auth.phone, role: auth.role };
+  // Legacy headers are accepted only for public profile migration routes; protected data routes reject them.
+  return { userId: null, userPhone: null, role: null };
+};
+
+const requireAuth = (req, res, next) => {
+  const auth = getAuthUser(req);
+  if (!auth?.userId) return res.status(401).json({ error: 'Oturum geçersiz veya süresi dolmuş.' });
+  req.auth = auth;
+  next();
+};
+
+const requireAdmin = (req, res, next) => {
+  if (req.auth?.role !== 'admin') return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
+  next();
 };
 
 const buildUserFilter = (req) => {
-  if (req.headers['admin-secret'] === ADMIN_SECRET) {
-    return {};
-  }
-
-  const { userId, userPhone } = getUserIdentifier(req);
-
-  if (!userId && !userPhone) {
-    return { _id: null };
-  }
-
-  const conditions = [];
-  if (userId) conditions.push({ userId });
-  if (userPhone) conditions.push({ userPhone });
-
-  return conditions.length > 1 ? { $or: conditions } : conditions[0];
+  const auth = getAuthUser(req);
+  if (!auth?.userId) return { _id: null };
+  return { $or: [{ userId: auth.userId }, { userPhone: auth.phone }] };
 };
 
 // --- ROUTES ---
+
+app.get('/api/health', (req, res) => res.json({ ok: true, version: '2026-08-11-secure-v1', service: 'cay-ureticisi-takip' }));
 
 app.get('/', (req, res) => {
   res.send('🌱 Çay Takip Sistemi API Çalışıyor!');
 });
 
 
-// USER PROFILE ROUTES
-app.get('/api/users/profile', async (req, res) => {
+// AUTH ROUTES
+const issueTokens = async (profile) => {
+  const accessToken = signAccessToken({
+    userId: profile.userId,
+    phone: profile.phone,
+    role: profile.role,
+    name: profile.name,
+    exp: Math.floor(Date.now() / 1000) + ACCESS_TTL_SECONDS
+  });
+  const refreshToken = makeRefreshToken();
+  await Session.create({ tokenHash: hashRefreshToken(refreshToken), userId: profile.userId, expiresAt: new Date(Date.now() + REFRESH_TTL_MS) });
+  return { token: accessToken, refreshToken, userId: profile.userId, phone: profile.phone, name: profile.name, role: profile.role };
+};
+
+const findLegacyUser = async (phone) => {
+  const checks = [
+    () => Harvest.findOne({ userPhone: phone }).sort({ createdAt: -1 }),
+    () => Expense.findOne({ userPhone: phone }).sort({ createdAt: -1 }),
+    () => Garden.findOne({ userPhone: phone }).sort({ createdAt: -1 }),
+    () => Payment.findOne({ userPhone: phone }).sort({ createdAt: -1 })
+  ];
+  for (const check of checks) {
+    const doc = await check();
+    if (doc) return doc;
+  }
+  return null;
+};
+
+app.post('/api/auth/login', async (req, res) => {
   try {
-    const phone = normalizePhone(req.query.phone || req.headers['user-phone']);
-    if (!phone) return res.status(400).json({ error: 'Telefon numarası zorunludur.' });
-    const profile = await UserProfile.findOne({ phone });
+    const phone = normalizePhone(req.body.phone);
+    if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
+    let profile = await UserProfile.findOne({ phone });
+    if (!profile) {
+      const legacy = await findLegacyUser(phone);
+      if (!legacy) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+      const name = String(legacy.producerName || legacy.ureticici || legacy.uretici || legacy.name || 'Üretici').trim();
+      profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name: name || 'Üretici', role: phone === ADMIN_PHONE ? 'admin' : 'user' });
+    }
+    const tokens = await issueTokens(profile);
+    res.json(tokens);
+  } catch (err) {
+    console.error('AUTH LOGIN ERROR:', err);
+    res.status(500).json({ error: 'Giriş yapılamadı.' });
+  }
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const refreshToken = String(req.body.refreshToken || '');
+    if (!refreshToken) return res.status(401).json({ error: 'Refresh token gerekli.' });
+    const session = await Session.findOne({ tokenHash: hashRefreshToken(refreshToken), revokedAt: null, expiresAt: { $gt: new Date() } });
+    if (!session) return res.status(401).json({ error: 'Refresh oturumu geçersiz veya süresi dolmuş.' });
+    const profile = await UserProfile.findOne({ userId: session.userId });
+    if (!profile) return res.status(401).json({ error: 'Kullanıcı profili bulunamadı.' });
+    session.revokedAt = new Date();
+    await session.save();
+    res.json(await issueTokens(profile));
+  } catch (err) {
+    console.error('AUTH REFRESH ERROR:', err);
+    res.status(500).json({ error: 'Oturum yenilenemedi.' });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const refreshToken = String(req.body.refreshToken || '');
+    if (refreshToken) await Session.updateOne({ tokenHash: hashRefreshToken(refreshToken), revokedAt: null }, { $set: { revokedAt: new Date() } });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: 'Çıkış yapılamadı.' }); }
+});
+
+// USER PROFILE ROUTES
+app.get('/api/users/profile', requireAuth, async (req, res) => {
+  try {
+    const profile = await UserProfile.findOne({ userId: req.auth.userId });
     if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
     res.json(profile);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/users/profile', async (req, res) => {
   try {
-    const phone = normalizePhone(req.body.phone || req.headers['user-phone']);
+    const phone = normalizePhone(req.body.phone);
     const name = String(req.body.name || '').trim();
-    if (!phone || phone.length < 10) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
+    if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
     if (!name) return res.status(400).json({ error: 'Ad Soyad zorunludur.' });
-    const role = phone === ADMIN_PHONE ? 'admin' : 'user';
-    const userId = `usr_${phone}`;
-    const profile = await UserProfile.findOneAndUpdate(
-      { phone },
-      { userId, phone, name, role },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    res.json(profile);
+    let profile = await UserProfile.findOne({ phone });
+    if (profile && profile.name !== name) {
+      profile.name = name;
+      await profile.save();
+    } else if (!profile) {
+      profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name, role: phone === ADMIN_PHONE ? 'admin' : 'user' });
+    }
+    res.json(await issueTokens(profile));
   } catch (err) {
+    console.error('PROFILE ERROR:', err);
     res.status(500).json({ error: `Üretici profili kaydedilemedi: ${err.message}` });
   }
 });
 
 // HARVEST ROUTES
-app.get('/api/harvests', async (req, res) => {
+app.get('/api/harvests', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
@@ -209,7 +323,7 @@ app.get('/api/harvests', async (req, res) => {
   }
 });
 
-app.post('/api/harvests', async (req, res) => {
+app.post('/api/harvests', requireAuth, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -217,10 +331,14 @@ app.post('/api/harvests', async (req, res) => {
       return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
     }
 
-    const kgVal = Number(req.body.kg || req.body.weight) || 0;
-    const fiyatVal = Number(req.body.fiyat) || 0;
-    const tahsilatVal = Number(req.body.tahsilat) || 0;
+    const kgVal = Number(String(req.body.kg ?? req.body.weight ?? '').replace(',', '.'));
+    const fiyatVal = Number(String(req.body.fiyat ?? '').replace(',', '.'));
+    const tahsilatVal = Number(String(req.body.tahsilat ?? '0').replace(',', '.'));
+    if (!Number.isFinite(kgVal) || kgVal <= 0) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
+    if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
+    if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
     const toplam = kgVal * fiyatVal;
+    if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
     const kalan = toplam - tahsilatVal;
 
     let durum = 'Bekliyor';
@@ -229,8 +347,8 @@ app.post('/api/harvests', async (req, res) => {
 
     const payload = {
       ...req.body,
-      userId: userId || req.body.userId,
-      userPhone: userPhone || req.body.userPhone,
+      userId: req.auth.userId,
+      userPhone: req.auth.phone,
       kg: kgVal,
       weight: kgVal,
       fiyat: fiyatVal,
@@ -249,15 +367,19 @@ app.post('/api/harvests', async (req, res) => {
   }
 });
 
-app.put('/api/harvests/:id', async (req, res) => {
+app.put('/api/harvests/:id', requireAuth, async (req, res) => {
   try {
-    const existing = await Harvest.findById(req.params.id);
+    const existing = await Harvest.findOne({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!existing) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
 
     const kgVal = Number(req.body.kg ?? req.body.weight ?? existing.kg) || 0;
     const fiyatVal = Number(req.body.fiyat ?? existing.fiyat) || 0;
     const tahsilatVal = Number(req.body.tahsilat ?? existing.tahsilat) || 0;
     const toplam = kgVal * fiyatVal;
+    if (kgVal <= 0 || !Number.isFinite(kgVal)) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
+    if (fiyatVal < 0 || !Number.isFinite(fiyatVal)) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
+    if (tahsilatVal < 0 || !Number.isFinite(tahsilatVal)) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
+    if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
     const kalan = toplam - tahsilatVal;
 
     let durum = 'Bekliyor';
@@ -275,16 +397,16 @@ app.put('/api/harvests/:id', async (req, res) => {
       odemeDurumu: durum
     };
 
-    const updated = await Harvest.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
+    const updated = await Harvest.findByIdAndUpdate(req.params.id, updatePayload, { returnDocument: 'after' });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.delete('/api/harvests/:id', async (req, res) => {
+app.delete('/api/harvests/:id', requireAuth, async (req, res) => {
   try {
-    const deleted = await Harvest.findByIdAndDelete(req.params.id);
+    const deleted = await Harvest.findOneAndDelete({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     // İlişkili ödemeleri de temizle
     await Payment.deleteMany({ harvestId: req.params.id });
@@ -299,7 +421,7 @@ app.delete('/api/harvests/:id', async (req, res) => {
 // --- YENİ RAPOR VE TAKİP ROTALARI ---
 
 // 1. Belirli satışa tahsilat ekle
-app.post('/api/payments', async (req, res) => {
+app.post('/api/payments', requireAuth, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
     const { harvestId, tutar, tarih, aciklama } = req.body;
@@ -318,10 +440,10 @@ app.post('/api/payments', async (req, res) => {
     if (!harvest) return res.status(404).json({ error: 'Seçilen satış kaydı bulunamadı.' });
 
     // Kullanıcının başka bir kaydına ödeme yazılmasını engelle
-    if (userId && harvest.userId && harvest.userId !== userId) {
+    if (harvest.userId && harvest.userId !== req.auth.userId) {
       return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
     }
-    if (userPhone && harvest.userPhone && harvest.userPhone !== userPhone) {
+    if (harvest.userPhone && harvest.userPhone !== req.auth.phone) {
       return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
     }
 
@@ -343,8 +465,8 @@ app.post('/api/payments', async (req, res) => {
 
     try {
       const newPayment = await Payment.create({
-        userId: userId || harvest.userId,
-        userPhone: userPhone || harvest.userPhone,
+        userId: req.auth.userId,
+        userPhone: req.auth.phone,
         harvestId,
         tarih: tarih || new Date().toISOString().split('T')[0],
         tutar: ödemeTutar,
@@ -366,7 +488,7 @@ app.post('/api/payments', async (req, res) => {
 });
 
 // 2. BAHÇELERE GÖRE TOPLAM KG VE KAZANÇ ÖZETİ
-app.get('/api/gardens/summary', async (req, res) => {
+app.get('/api/gardens/summary', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
@@ -392,7 +514,7 @@ app.get('/api/gardens/summary', async (req, res) => {
 });
 
 // 3. VADELİ SATIŞLAR VE BEKLENEN ALACAK RAPORU
-app.get('/api/reports/receivables', async (req, res) => {
+app.get('/api/reports/receivables', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json({ toplamAlacak: 0, detaylar: [] });
@@ -443,7 +565,7 @@ app.get('/api/reports/receivables', async (req, res) => {
 });
 
 // 4. FABRİKA ÇAY FİYATLARI / FİYAT POLİTİKASI
-app.get('/api/factory-prices', async (req, res) => {
+app.get('/api/factory-prices', requireAuth, async (req, res) => {
   try {
     const data = await FactoryPrice.find().sort({ firma: 1, tarih: -1, createdAt: -1 });
     res.json(data);
@@ -452,9 +574,8 @@ app.get('/api/factory-prices', async (req, res) => {
   }
 });
 
-app.post('/api/factory-prices', async (req, res) => {
+app.post('/api/factory-prices', requireAuth, requireAdmin, async (req, res) => {
   try {
-    if (!isAdminRequest(req)) return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
     const { userId, userPhone } = getUserIdentifier(req);
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
 
@@ -476,8 +597,8 @@ app.post('/api/factory-prices', async (req, res) => {
     const item = await FactoryPrice.create({
       ...req.body,
       firma, fiyat, tarih,
-      userId: userId || req.body.userId,
-      userPhone: userPhone || req.body.userPhone
+      userId: req.auth.userId,
+      userPhone: req.auth.phone
     });
     res.status(201).json(item);
   } catch (err) {
@@ -485,9 +606,8 @@ app.post('/api/factory-prices', async (req, res) => {
   }
 });
 
-app.delete('/api/factory-prices/:id', async (req, res) => {
+app.delete('/api/factory-prices/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
-    if (!isAdminRequest(req)) return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
     const deleted = await FactoryPrice.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Fiyat kaydı bulunamadı.' });
     res.json({ message: 'Fiyat kaydı silindi.' });
@@ -497,7 +617,7 @@ app.delete('/api/factory-prices/:id', async (req, res) => {
 });
 
 // 5. REKLAM ALANLARI
-app.get('/api/ads', async (req, res) => {
+app.get('/api/ads', requireAuth, async (req, res) => {
   try {
     const data = await Ad.find({ aktif: true }).sort({ createdAt: -1 });
     res.json(data);
@@ -506,7 +626,7 @@ app.get('/api/ads', async (req, res) => {
   }
 });
 
-app.post('/api/ads', async (req, res) => {
+app.post('/api/ads', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
@@ -517,8 +637,8 @@ app.post('/api/ads', async (req, res) => {
     const item = await Ad.create({
       ...req.body,
       firma,
-      userId: userId || req.body.userId,
-      userPhone: userPhone || req.body.userPhone
+      userId: req.auth.userId,
+      userPhone: req.auth.phone
     });
     res.status(201).json(item);
   } catch (err) {
@@ -526,7 +646,7 @@ app.post('/api/ads', async (req, res) => {
   }
 });
 
-app.delete('/api/ads/:id', async (req, res) => {
+app.delete('/api/ads/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const deleted = await Ad.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Reklam bulunamadı.' });
@@ -537,7 +657,7 @@ app.delete('/api/ads/:id', async (req, res) => {
 });
 
 // EXPENSE ROUTES
-app.get('/api/expenses', async (req, res) => {
+app.get('/api/expenses', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
@@ -549,7 +669,7 @@ app.get('/api/expenses', async (req, res) => {
   }
 });
 
-app.post('/api/expenses', async (req, res) => {
+app.post('/api/expenses', requireAuth, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -559,8 +679,8 @@ app.post('/api/expenses', async (req, res) => {
 
     const payload = {
       ...req.body,
-      userId: userId || req.body.userId,
-      userPhone: userPhone || req.body.userPhone,
+      userId: req.auth.userId,
+      userPhone: req.auth.phone,
       tutar: Number(req.body.tutar) || 0
     };
 
@@ -572,9 +692,9 @@ app.post('/api/expenses', async (req, res) => {
   }
 });
 
-app.delete('/api/expenses/:id', async (req, res) => {
+app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
   try {
-    const deleted = await Expense.findByIdAndDelete(req.params.id);
+    const deleted = await Expense.findOneAndDelete({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     res.json({ message: 'Gider kaydı silindi.' });
   } catch (err) {
@@ -583,7 +703,7 @@ app.delete('/api/expenses/:id', async (req, res) => {
 });
 
 // GARDEN ROUTES
-app.get('/api/gardens', async (req, res) => {
+app.get('/api/gardens', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
@@ -595,7 +715,7 @@ app.get('/api/gardens', async (req, res) => {
   }
 });
 
-app.post('/api/gardens', async (req, res) => {
+app.post('/api/gardens', requireAuth, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -605,8 +725,8 @@ app.post('/api/gardens', async (req, res) => {
 
     const payload = {
       ...req.body,
-      userId: userId || req.body.userId,
-      userPhone: userPhone || req.body.userPhone
+      userId: req.auth.userId,
+      userPhone: req.auth.phone
     };
 
     const newGarden = new Garden(payload);
@@ -617,9 +737,9 @@ app.post('/api/gardens', async (req, res) => {
   }
 });
 
-app.delete('/api/gardens/:id', async (req, res) => {
+app.delete('/api/gardens/:id', requireAuth, async (req, res) => {
   try {
-    const deleted = await Garden.findByIdAndDelete(req.params.id);
+    const deleted = await Garden.findOneAndDelete({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
     res.json({ message: 'Bahçe kaydı silindi.' });
   } catch (err) {
@@ -628,10 +748,8 @@ app.delete('/api/gardens/:id', async (req, res) => {
 });
 
 // ADMIN ROUTES
-app.get('/api/admin/all-data', async (req, res) => {
+app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const adminSecret = req.headers['admin-secret'];
-    if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: 'Bu alana erişim yetkiniz yok.' });
     const [harvests, expenses, gardens, factoryPrices, ads] = await Promise.all([
       Harvest.find().sort({ createdAt: -1 }),
       Expense.find().sort({ createdAt: -1 }),

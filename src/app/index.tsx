@@ -20,7 +20,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // CONFIGURATION & CONSTANTS
 // ==========================================
 const API_URL = "https://cay-ureticisi-takip.onrender.com/api";
-const ADMIN_PHONE = "05432037007";
 const SESSION_KEY = '@cay_takip_user_session';
 
 // ==========================================
@@ -31,6 +30,8 @@ interface UserSession {
   name: string;
   phone: string;
   role: 'admin' | 'user';
+  token: string;
+  refreshToken: string;
 }
 
 // ==========================================
@@ -181,12 +182,33 @@ export default function App() {
   const isAdmin = currentUser?.role === 'admin';
 
   // Ortak İstek Başlıklarını Oluşturan Yardımcı Fonksiyon (Madde 6)
-  const getAuthHeaders = () => {
-    return {
-      'Content-Type': 'application/json',
-      'user-id': currentUser?.userId || `usr_${currentUser?.phone || ''}`,
-      'user-phone': normalizePhone(currentUser?.phone || '')
-    };
+  const getAuthHeaders = () => ({
+    'Content-Type': 'application/json',
+    ...(currentUser?.token ? { Authorization: `Bearer ${currentUser.token}` } : {})
+  });
+
+  const refreshAccessToken = async (): Promise<UserSession | null> => {
+    if (!currentUser?.refreshToken) return null;
+    try {
+      const res = await fetchWithTimeout(`${API_URL}/auth/refresh`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: currentUser.refreshToken })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.token || !data?.refreshToken) { await clearSession(); setCurrentUser(null); return null; }
+      const nextUser: UserSession = { ...currentUser, userId: data.userId || currentUser.userId, name: data.name || currentUser.name, phone: normalizePhone(data.phone || currentUser.phone), role: data.role === 'admin' ? 'admin' : 'user', token: data.token, refreshToken: data.refreshToken };
+      setCurrentUser(nextUser); await saveSession(nextUser); return nextUser;
+    } catch { return null; }
+  };
+
+  const authFetch = async (url: string, options: RequestInit = {}, timeout = 60000) => {
+    const makeOptions = (user: UserSession) => ({ ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}), Authorization: `Bearer ${user.token}` } });
+    if (!currentUser?.token) throw new Error('Oturum bulunamadı.');
+    let res = await fetchWithTimeout(url, makeOptions(currentUser), timeout);
+    if (res.status !== 401) return res;
+    const nextUser = await refreshAccessToken();
+    if (!nextUser) return res;
+    return fetchWithTimeout(url, makeOptions(nextUser), timeout);
   };
 
   // Uygulama Açılışında Oturumu Kontrol Et
@@ -194,24 +216,7 @@ export default function App() {
     const checkSavedSession = async () => {
       try {
         const savedUser = await getSession();
-        if (savedUser) {
-          const profile = await syncProfile(savedUser.phone);
-          const refreshedRole: UserSession['role'] =
-            profile?.role === 'admin' || normalizePhone(savedUser.phone) === ADMIN_PHONE
-              ? 'admin'
-              : 'user';
-          const refreshed: UserSession = profile
-            ? {
-                ...savedUser,
-                userId: profile.userId || savedUser.userId,
-                name: profile.name || savedUser.name,
-                phone: normalizePhone(profile.phone || savedUser.phone),
-                role: refreshedRole,
-              }
-            : savedUser;
-          setCurrentUser(refreshed);
-          await saveSession(refreshed);
-        }
+        if (savedUser?.token && savedUser?.refreshToken) { setCurrentUser(savedUser); } else if (savedUser) { await clearSession(); }
       } catch (error) {
         console.log('Oturum okuma hatası:', error);
       } finally {
@@ -223,54 +228,23 @@ export default function App() {
 
   // Verileri Sunucudan Çek
   const fetchData = async () => {
-    if (!currentUser) return;
+    if (!currentUser?.token) return;
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [resH, resE, resG, resP, resA] = await Promise.all([
-        fetchWithTimeout(`${API_URL}/harvests`, { headers }),
-        fetchWithTimeout(`${API_URL}/expenses`, { headers }),
-        fetchWithTimeout(`${API_URL}/gardens`, { headers }),
-        fetchWithTimeout(`${API_URL}/factory-prices`, { headers }),
-        fetchWithTimeout(`${API_URL}/ads`, { headers })
+      const results = await Promise.allSettled([
+        authFetch(`${API_URL}/harvests`, { headers }),
+        authFetch(`${API_URL}/expenses`, { headers }),
+        authFetch(`${API_URL}/gardens`, { headers }),
+        authFetch(`${API_URL}/factory-prices`, { headers }),
+        authFetch(`${API_URL}/ads`, { headers })
       ]);
-
-      let rawH = resH.ok ? await resH.json() : [];
-      let rawE = resE.ok ? await resE.json() : [];
-      let rawG = resG.ok ? await resG.json() : [];
-      let rawP = resP.ok ? await resP.json() : [];
-      let rawA = resA.ok ? await resA.json() : [];
-
-      if (!isAdmin) {
-        const currentUserId = currentUser.userId;
-        const uPhone = currentUser.phone;
-        const uName = currentUser.name.toLowerCase().trim();
-
-        rawH = (rawH || []).filter((h: any) => {
-          if (h.userId) return h.userId === currentUserId;
-          if (!h.userPhone && !h.uretici && !h.producerName) return true;
-          const matchPhone = h.userPhone === uPhone;
-          const matchName =
-            (h.uretici && h.uretici.toLowerCase().trim().includes(uName)) ||
-            (h.producerName && h.producerName.toLowerCase().trim().includes(uName));
-          return matchPhone || matchName || !h.userPhone;
-        });
-
-        rawE = (rawE || []).filter((e: any) => (e.userId ? e.userId === currentUserId : !e.userPhone || e.userPhone === uPhone));
-        rawG = (rawG || []).filter((g: any) => (g.userId ? g.userId === currentUserId : !g.userPhone || g.userPhone === uPhone));
-      }
-
-      setHarvests(rawH || []);
-      setExpenses(rawE || []);
-      setGardens(rawG || []);
-      setFactoryPrices(rawP || []);
-      setAds(rawA || []);
-    } catch (err: any) {
-      console.log('Veri çekme hatası:', err.message);
-      Alert.alert('Bağlantı Kurulamadı', err.message);
-    } finally {
-      setLoading(false);
-    }
+      const parse = async (r: PromiseSettledResult<Response>) => r.status === 'fulfilled' && r.value.ok ? r.value.json() : [];
+      const [rawH, rawE, rawG, rawP, rawA] = await Promise.all(results.map(parse));
+      setHarvests(rawH || []); setExpenses(rawE || []); setGardens(rawG || []); setFactoryPrices(rawP || []); setAds(rawA || []);
+      if (results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok))) console.warn('Bazı veriler güncellenemedi.');
+    } catch (err: any) { Alert.alert('Bağlantı Kurulamadı', err.message); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -348,24 +322,23 @@ export default function App() {
   });
 
   // Giriş Yap / Kayıt Ol İşlemleri
-  const syncProfile = async (phone: string, fallbackName?: string) => {
+  const syncProfile = async (phone: string) => {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
     try {
-      const res = await fetchWithTimeout(`${API_URL}/users/profile?phone=${encodeURIComponent(normalized)}`, { headers: { 'Content-Type': 'application/json', 'user-phone': normalized } });
-      if (res.ok) return await res.json();
-      return null;
-    } catch (e) {
-      console.warn('Profil senkronizasyonu:', e);
-      return null;
-    }
+      const res = await fetchWithTimeout(`${API_URL}/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: normalized })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return null;
+      return data;
+    } catch (e) { console.warn('Profil senkronizasyonu:', e); return null; }
   };
 
   const saveProfile = async (phone: string, name: string) => {
     const normalized = normalizePhone(phone);
     const res = await fetchWithTimeout(`${API_URL}/users/profile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'user-phone': normalized },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone: normalized, name: name.trim() })
     });
     const data = await res.json().catch(() => ({}));
@@ -375,44 +348,34 @@ export default function App() {
 
   const handleAuth = async () => {
     const cleanPhone = normalizePhone(authPhone);
-    if (!cleanPhone || cleanPhone.length < 10) {
-      Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.');
-      return;
-    }
+    if (!cleanPhone || cleanPhone.length !== 11) { Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.'); return; }
+    if (authMode === 'register' && !authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
     setLoading(true);
     try {
-      let profile: any = null;
-      if (authMode === 'register') {
-        if (!authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
-        profile = await saveProfile(cleanPhone, authName);
-      } else {
-        profile = await syncProfile(cleanPhone);
-        if (!profile && cleanPhone === ADMIN_PHONE) {
-          profile = await saveProfile(cleanPhone, authName.trim() || 'Yönetici');
-        }
-        if (!profile) {
-          Alert.alert('Kayıt Bulunamadı', 'Bu telefon numarasıyla kayıtlı üretici bulunamadı. Yeni Kayıt Ol bölümünden Ad Soyadınızı girerek kayıt oluşturun.');
-          return;
-        }
+      const profile = authMode === 'register' ? await saveProfile(cleanPhone, authName) : await syncProfile(cleanPhone);
+      if (!profile?.token) {
+        Alert.alert('Giriş Başarısız', authMode === 'login' ? 'Kayıt bulunamadı veya oturum oluşturulamadı.' : 'Profil kaydedildi ancak güvenli oturum oluşturulamadı.');
+        return;
       }
       const userData: UserSession = {
-        userId: profile.userId || `usr_${cleanPhone}`,
-        name: profile.name || authName.trim() || (cleanPhone === ADMIN_PHONE ? 'Yönetici' : 'Üretici'),
+        userId: profile.userId,
+        name: profile.name || authName.trim() || 'Üretici',
         phone: normalizePhone(profile.phone || cleanPhone),
-        role: profile.role === 'admin' || cleanPhone === ADMIN_PHONE ? 'admin' : 'user'
+        role: profile.role === 'admin' ? 'admin' : 'user',
+        token: profile.token,
+        refreshToken: profile.refreshToken
       };
-      setCurrentUser(userData);
-      await saveSession(userData);
+      setCurrentUser(userData); await saveSession(userData);
       Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
-    } catch (e: any) {
-      Alert.alert('Profil Hatası', e?.message || 'Üretici profili kaydedilemedi.');
-    } finally {
-      setLoading(false);
-    }
+    } catch (e: any) { Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.'); }
+    finally { setLoading(false); }
   };
 
   // Çıkış Yap
   const handleLogout = async () => {
+    try {
+      if (currentUser?.refreshToken) await fetchWithTimeout(`${API_URL}/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: currentUser.refreshToken }) });
+    } catch {}
     await clearSession();
     setCurrentUser(null);
   };
@@ -459,7 +422,7 @@ export default function App() {
         onPress: async () => {
           setLoading(true);
           try {
-            const res = await fetchWithTimeout(`${API_URL}/${endpoint}/${id}`, {
+            const res = await authFetch(`${API_URL}/${endpoint}/${id}`, {
               method: 'DELETE',
               headers: getAuthHeaders()
             });
@@ -489,8 +452,6 @@ export default function App() {
     setLoading(true);
     try {
       const payload = {
-        userId: currentUser?.userId || `usr_${currentUser?.phone}`,
-        userPhone: currentUser?.phone || '',
         tarih: hForm.date || new Date().toISOString().split('T')[0],
         surum: hForm.surum || '1. Sürüm',
         uretici: producerName,
@@ -506,7 +467,7 @@ export default function App() {
         vadeTarihi: hForm.isVadeli ? hForm.vadeTarihi : ''
       };
 
-      const res = await fetchWithTimeout(`${API_URL}/harvests`, {
+      const res = await authFetch(`${API_URL}/harvests`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(payload)
@@ -571,9 +532,9 @@ export default function App() {
 
     setLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/payments`, {
+      const res = await authFetch(`${API_URL}/payments`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: { ...getAuthHeaders(), 'Idempotency-Key': `payment-${payHarvestId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
         body: JSON.stringify({
           harvestId: payHarvestId,
           tutar: amount,
@@ -610,7 +571,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/factory-prices`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ ...priceForm, firma: priceForm.firma.trim(), fiyat, tarih, gecerlilikBaslangic, vadeGun: Number(priceForm.vadeGun) || 0 }) });
+      const res = await authFetch(`${API_URL}/factory-prices`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ ...priceForm, firma: priceForm.firma.trim(), fiyat, tarih, gecerlilikBaslangic, vadeGun: Number(priceForm.vadeGun) || 0 }) });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         Alert.alert('Başarılı', 'Fabrika fiyatı kaydedildi.');
@@ -628,7 +589,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/ads`, {
+      const res = await authFetch(`${API_URL}/ads`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ ...adForm, firma: adForm.firma.trim(), baslik: adForm.baslik.trim() })
@@ -695,12 +656,10 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/gardens`, {
+      const res = await authFetch(`${API_URL}/gardens`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          userId: currentUser?.userId || `usr_${currentUser?.phone}`,
-          userPhone: currentUser?.phone || '',
           name: gForm.name.trim(),
           adaParsel: gForm.adaParsel.trim(),
           alan: gForm.alan.trim()
@@ -730,12 +689,10 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/expenses`, {
+      const res = await authFetch(`${API_URL}/expenses`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          userId: currentUser?.userId || `usr_${currentUser?.phone}`,
-          userPhone: currentUser?.phone || '',
           tarih: eForm.date || new Date().toISOString().split('T')[0],
           kategori: eForm.kategori,
           aciklama: eForm.aciklama ? eForm.aciklama.trim() : '',
