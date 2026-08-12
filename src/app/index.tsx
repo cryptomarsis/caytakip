@@ -5,7 +5,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { API_URL, fetchWithTimeout } from '../services/api';
 import { saveSession, getSession, clearSession } from '../services/session';
-import { enqueueOfflineRequest, getDataSnapshot, getPendingRequestCount, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
+import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
 import { UserSession, HarvestRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
 import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney } from '../utils/format';
 import { styles } from '../styles/styles';
@@ -18,6 +18,8 @@ import FactoryPricesScreen from '../screens/FactoryPricesScreen';
 import GardensScreen from '../screens/GardensScreen';
 import AdminScreen from '../screens/AdminScreen';
 import ReportsScreen from '../screens/ReportsScreen';
+import MoreScreen from '../screens/MoreScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 // ==========================================
 // MAIN COMPONENT
@@ -28,12 +30,16 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authPhone, setAuthPhone] = useState('');
   const [authName, setAuthName] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [useOtpFlow, setUseOtpFlow] = useState(false);
 
   // Navigasyon ve Yüklenme State'leri
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'expense' | 'gardens' | 'prices' | 'reports' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [failedSyncCount, setFailedSyncCount] = useState(0);
   const isSyncingOfflineQueue = useRef(false);
 
   // Veri Listeleri
@@ -128,7 +134,9 @@ export default function App() {
   };
 
   const refreshPendingSyncCount = async () => {
-    if (currentUser?.userId) setPendingSyncCount(await getPendingRequestCount(currentUser.userId));
+    if (!currentUser?.userId) return;
+    setPendingSyncCount(await getPendingRequestCount(currentUser.userId));
+    setFailedSyncCount(await getFailedRequestCount(currentUser.userId));
   };
 
   const queueOfflineRequest = async (endpoint: string, body: Record<string, unknown>) => {
@@ -174,10 +182,27 @@ export default function App() {
         body: JSON.stringify(request.body)
       }));
       setPendingSyncCount(result.pending);
+      setFailedSyncCount(await getFailedRequestCount(currentUser.userId));
       return result;
     } finally {
       isSyncingOfflineQueue.current = false;
     }
+  };
+
+  const manageFailedOfflineRequests = async () => {
+    if (!currentUser?.userId) return;
+    const failed = (await getOfflineRequests(currentUser.userId)).filter((item) => item.status === 'failed');
+    if (!failed.length) return;
+    const first = failed[0];
+    Alert.alert(
+      'Gönderilemeyen kayıt var',
+      `${failed.length} kayıt sunucu tarafından kabul edilmedi. İlk hata: ${first.lastError || 'Bilinmeyen hata'}`,
+      [
+        { text: 'Kapat', style: 'cancel' },
+        { text: 'Sil', style: 'destructive', onPress: async () => { await discardOfflineRequest(currentUser.userId, first.id); await refreshPendingSyncCount(); } },
+        { text: 'Tekrar Dene', onPress: async () => { await retryOfflineRequest(currentUser.userId, first.id); await syncOfflineQueue(); await refreshPendingSyncCount(); } }
+      ]
+    );
   };
 
   // Uygulama Açılışında Oturumu Kontrol Et
@@ -196,7 +221,7 @@ export default function App() {
   }, []);
 
   // Verileri Sunucudan Çek
-  const setupNotifications = async (user: UserSession) => {
+  const setupNotifications = async () => {
     try {
       // Expo Go Android'de remote push token desteği yoktur (SDK 53+).
       // Development/production build'de ise bildirim sistemi normal şekilde çalışır.
@@ -234,24 +259,6 @@ export default function App() {
         });
       }
 
-      const projectId = process.env.EXPO_PUBLIC_PROJECT_ID || undefined;
-
-      const tokenResponse = await Notifications.getExpoPushTokenAsync(
-        projectId ? { projectId } : undefined
-      );
-
-      const token = tokenResponse?.data;
-
-      if (token) {
-        await fetchWithTimeout(`${API_URL}/notifications/register`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${user.token}`
-          },
-          body: JSON.stringify({ token })
-        });
-      }
     } catch (e) {
       console.log('Bildirim kurulumu atlandı:', e);
     }
@@ -326,7 +333,7 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      setupNotifications(currentUser);
+      setupNotifications();
       refreshPendingSyncCount();
       syncOfflineQueue().then((result) => {
         if (result.synced > 0) fetchData();
@@ -424,9 +431,13 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: normalized })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return null;
+      if (!res.ok) {
+        const error: any = new Error(data?.error || 'Giriş yapılamadı.');
+        error.code = data?.code;
+        throw error;
+      }
       return data;
-    } catch (e) { console.warn('Profil senkronizasyonu:', e); return null; }
+    } catch (e) { console.warn('Profil senkronizasyonu:', e); throw e; }
   };
 
   const saveProfile = async (phone: string, name: string) => {
@@ -436,7 +447,11 @@ export default function App() {
       body: JSON.stringify({ phone: normalized, name: name.trim() })
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || 'Üretici profili kaydedilemedi.');
+    if (!res.ok) {
+      const error: any = new Error(data?.error || 'Üretici profili kaydedilemedi.');
+      error.code = data?.code;
+      throw error;
+    }
     return data;
   };
 
@@ -461,7 +476,48 @@ export default function App() {
       };
       setCurrentUser(userData); await saveSession(userData);
       Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
-    } catch (e: any) { Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.'); }
+    } catch (e: any) {
+      if (e?.code === 'OTP_REQUIRED') {
+        setUseOtpFlow(true);
+        Alert.alert('SMS Doğrulama Gerekli', 'Bu hesap için SMS kodu ile güvenli giriş yapın.');
+      } else Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.');
+    }
+    finally { setLoading(false); }
+  };
+
+  const requestOtp = async () => {
+    const phone = normalizePhone(authPhone);
+    if (!phone || phone.length !== 11) { Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.'); return; }
+    if (authMode === 'register' && !authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
+    setLoading(true);
+    try {
+      const response = await fetchWithTimeout(`${API_URL}/auth/request-otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, purpose: authMode })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Doğrulama kodu gönderilemedi.');
+      setOtpSent(true);
+      setUseOtpFlow(true);
+      Alert.alert('Kod Gönderildi', 'Telefonunuza gelen 6 haneli doğrulama kodunu girin.');
+    } catch (error: any) { Alert.alert('SMS Doğrulama', error?.message || 'Kod gönderilemedi.'); }
+    finally { setLoading(false); }
+  };
+
+  const verifyOtp = async () => {
+    const phone = normalizePhone(authPhone);
+    if (!/^\d{6}$/.test(otpCode.replace(/\D/g, ''))) { Alert.alert('Eksik Bilgi', 'Lütfen SMS ile gelen 6 haneli kodu girin.'); return; }
+    setLoading(true);
+    try {
+      const response = await fetchWithTimeout(`${API_URL}/auth/verify-otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, name: authName.trim(), purpose: authMode, code: otpCode })
+      });
+      const profile = await response.json().catch(() => ({}));
+      if (!response.ok || !profile?.token) throw new Error(profile?.error || 'Doğrulama tamamlanamadı.');
+      const userData: UserSession = { userId: profile.userId, name: profile.name || authName.trim() || 'Üretici', phone: normalizePhone(profile.phone || phone), role: profile.role === 'admin' ? 'admin' : 'user', token: profile.token, refreshToken: profile.refreshToken };
+      setCurrentUser(userData); await saveSession(userData);
+      setOtpCode(''); setOtpSent(false);
+      Alert.alert('Doğrulama Başarılı', `Hoş geldiniz, ${userData.name}!`);
+    } catch (error: any) { Alert.alert('SMS Doğrulama', error?.message || 'Kod doğrulanamadı.'); }
     finally { setLoading(false); }
   };
 
@@ -472,6 +528,18 @@ export default function App() {
     } catch {}
     await clearSession();
     setCurrentUser(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      const response = await authFetch(`${API_URL}/users/me`, { method: 'DELETE', headers: getAuthHeaders() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Hesap silinemedi.');
+      if (currentUser?.userId) await clearOfflineData(currentUser.userId);
+      await clearSession();
+      setCurrentUser(null);
+      Alert.alert('Hesap Silindi', 'Hesabınız ve ilişkili kayıtlarınız silindi.');
+    } catch (error: any) { Alert.alert('Hesap Silme', error?.message || 'Hesap silinemedi.'); throw error; }
   };
 
   // Genel Hesaplamalar
@@ -539,8 +607,8 @@ export default function App() {
   // Hasat Kaydetme
   const handleSaveHarvest = async () => {
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
-    if (!hForm.kg.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen KG alanını doldurun.');
+    if (!hForm.kg.trim() || !hForm.firma.trim() || !hForm.fiyat.trim()) {
+      Alert.alert('Eksik Bilgi', 'Lütfen miktar, firma ve birim fiyat alanlarını doldurun.');
       return;
     }
     setLoading(true);
@@ -550,8 +618,8 @@ export default function App() {
         surum: hForm.surum || '1. Sürüm',
         uretici: producerName,
         producerName: producerName,
-        kg: parseFloat(hForm.kg) || 0,
-        weight: parseFloat(hForm.kg) || 0,
+        kg: parseMoney(hForm.kg),
+        weight: parseMoney(hForm.kg),
         firma: hForm.firma ? hForm.firma.trim() : '',
         fiyat: parseMoney(hForm.fiyat),
         tahsilat: parseMoney(hForm.tahsilat),
@@ -844,7 +912,7 @@ export default function App() {
           <View style={styles.authCard}>
             <Text style={styles.authTitle}>🍃 ÇAY ÜRETİCİ SİSTEMİ</Text>
             <Text style={styles.authSubTitle}>
-              {authMode === 'login' ? 'Telefon Numarası ile Giriş Yap' : 'Yeni Üretici Kaydı Oluştur'}
+              {authMode === 'login' ? 'Telefon numaranızla devam edin' : 'Yeni üretici kaydı oluşturun'}
             </Text>
 
             {authMode === 'register' && (
@@ -871,15 +939,22 @@ export default function App() {
               onChangeText={setAuthPhone}
             />
 
-            <TouchableOpacity style={styles.submitBtn} onPress={handleAuth}>
-              <Text style={styles.submitBtnText}>
-                {authMode === 'login' ? '📱 GİRİŞ YAP' : '📝 KAYIT OL VE GİRİŞ YAP'}
-              </Text>
-            </TouchableOpacity>
+            {otpSent && <>
+              <Text style={styles.label}>SMS Doğrulama Kodu</Text>
+              <TextInput style={styles.input} placeholder="6 haneli kod" keyboardType="number-pad" maxLength={6} value={otpCode} onChangeText={setOtpCode} />
+              <TouchableOpacity style={styles.submitBtn} onPress={verifyOtp}><Text style={styles.submitBtnText}>KODU DOĞRULA</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={requestOtp}><Text style={styles.secondaryBtnText}>Kodu yeniden gönder</Text></TouchableOpacity>
+            </>}
+            {!otpSent && <>
+              <TouchableOpacity style={styles.submitBtn} onPress={useOtpFlow ? requestOtp : handleAuth}>
+                <Text style={styles.submitBtnText}>{useOtpFlow ? 'SMS KODU GÖNDER' : authMode === 'login' ? 'GİRİŞ YAP' : 'KAYIT OL VE GİRİŞ YAP'}</Text>
+              </TouchableOpacity>
+              {!useOtpFlow && <TouchableOpacity style={styles.secondaryBtn} onPress={() => setUseOtpFlow(true)}><Text style={styles.secondaryBtnText}>SMS kodu ile güvenli giriş</Text></TouchableOpacity>}
+            </>}
 
             <TouchableOpacity
               style={{ marginTop: 15 }}
-              onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+              onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setOtpSent(false); setOtpCode(''); }}
             >
               <Text style={{ color: '#1b4332', fontWeight: 'bold', textDecorationLine: 'underline' }}>
                 {authMode === 'login'
@@ -912,6 +987,7 @@ export default function App() {
             {pendingSyncCount > 0 && (
               <Text style={styles.headerSubtitle}>⏳ {pendingSyncCount} kayıt senkronizasyon bekliyor</Text>
             )}
+            {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={styles.headerWarning}>⚠️ {failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
           </View>
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
             <Text style={styles.logoutBtnText}>Çıkış</Text>
@@ -949,43 +1025,9 @@ export default function App() {
               <Text style={[styles.navText, activeTab === 'receivables' && styles.navTextActive]}>⏳ Alacaklar</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'expense' && styles.navItemActive]}
-              onPress={() => setActiveTab('expense')}
-            >
-              <Text style={[styles.navText, activeTab === 'expense' && styles.navTextActive]}>🧾 Gider Ekle</Text>
+            <TouchableOpacity style={[styles.navItem, activeTab === 'more' && styles.navItemActive]} onPress={() => setActiveTab('more')}>
+              <Text style={[styles.navText, activeTab === 'more' && styles.navTextActive]}>☰ Diğer</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'gardens' && styles.navItemActive]}
-              onPress={() => setActiveTab('gardens')}
-            >
-              <Text style={[styles.navText, activeTab === 'gardens' && styles.navTextActive]}>🏡 Bahçeler</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'prices' && styles.navItemActive]}
-              onPress={() => setActiveTab('prices')}
-            >
-              <Text style={[styles.navText, activeTab === 'prices' && styles.navTextActive]}>🏭 Fiyatlar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'reports' && styles.navItemActive]}
-              onPress={() => setActiveTab('reports')}
-            >
-              <Text style={[styles.navText, activeTab === 'reports' && styles.navTextActive]}>📊 Raporlar</Text>
-            </TouchableOpacity>
-
-            {/* ADMIN SEKMESİ */}
-            {isAdmin && (
-              <TouchableOpacity
-                style={[styles.navItem, activeTab === 'admin' && styles.navItemActiveAdmin]}
-                onPress={() => setActiveTab('admin')}
-              >
-                <Text style={[styles.navText, activeTab === 'admin' && styles.navTextActiveAdmin]}>👑 Admin Paneli</Text>
-              </TouchableOpacity>
-            )}
           </ScrollView>
         </View>
 
@@ -1042,6 +1084,8 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'more' && <MoreScreen isAdmin={Boolean(isAdmin)} onNavigate={(tab) => setActiveTab(tab)} />}
+
           {/* GİDERLER TABI */}
           {activeTab === 'expense' && (
             <ExpenseScreen
@@ -1088,6 +1132,8 @@ export default function App() {
               currentUser={currentUser}
             />
           )}
+
+          {activeTab === 'settings' && <SettingsScreen currentUser={currentUser} onDeleteAccount={handleDeleteAccount} />}
 
           {/* ADMIN PANELİ TABI */}
           {activeTab === 'admin' && isAdmin && (

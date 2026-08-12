@@ -1,18 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Share, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Share, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { formatTL, formatDisplayDate, parseMoney } from '../utils/format';
 import { HarvestRecord, ExpenseRecord } from '../types';
 import { styles } from '../styles/styles';
-import { API_URL, fetchWithTimeout } from '../services/api';
-
-type AiInsight = {
-  summary: string;
-  insights: Array<{ title: string; detail: string }>;
-  disclaimer?: string;
-};
-
-type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: { token?: string } | null };
+type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: unknown };
 
 const months = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const dateOf = (value?: string) => {
@@ -30,7 +22,7 @@ const priceOf = (h: HarvestRecord) => parseMoney(h.fiyat ?? 0);
 const saleOf = (h: HarvestRecord) => kgOf(h) * priceOf(h);
 const paidOf = (h: HarvestRecord) => parseMoney(h.tahsilat ?? 0);
 
-export default function ReportsScreen({ harvests, expenses, currentUser }: Props) {
+export default function ReportsScreen({ harvests, expenses }: Props) {
   const years = useMemo(() => {
     const values = new Set<number>();
     harvests.forEach(h => { const y = yearOf(h.tarih); if (y) values.add(y); });
@@ -39,8 +31,6 @@ export default function ReportsScreen({ harvests, expenses, currentUser }: Props
     return [...values].sort((a,b) => b-a);
   }, [harvests, expenses]);
   const [year, setYear] = useState(new Date().getFullYear());
-  const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
-  const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
   const selected = harvests.filter(h => yearOf(h.tarih) === year);
   const selectedExpenses = expenses.filter(e => yearOf(e.tarih) === year);
   const totalKg = selected.reduce((s,h) => s + kgOf(h), 0);
@@ -82,33 +72,6 @@ export default function ReportsScreen({ harvests, expenses, currentUser }: Props
     });
     return [...map.values()].sort((a,b)=>b.kg-a.kg);
   }, [selected]);
-
-  const generateAiInsight = async () => {
-    if (!currentUser?.token) {
-      Alert.alert('Oturum Gerekli', 'Yapay zekâ raporu için önce giriş yapmalısınız.');
-      return;
-    }
-    setIsGeneratingInsight(true);
-    try {
-      const response = await fetchWithTimeout(`${API_URL}/ai/report-insights`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
-        body: JSON.stringify({ year }),
-      }, 90000);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('Yapay zekâ rapor servisi henüz yayındaki sunucuya eklenmemiş. Sunucuyu yeni kodla Render’a dağıtın.');
-        }
-        throw new Error(data?.error || 'Yapay zekâ yorumu hazırlanamadı.');
-      }
-      setAiInsight(data);
-    } catch (error: any) {
-      Alert.alert('Yapay Zekâ Raporu', error?.message || 'Rapor hazırlanırken bir hata oluştu.');
-    } finally {
-      setIsGeneratingInsight(false);
-    }
-  };
 
   const exportCSV = async () => {
     const esc = (v:unknown) => `"${String(v ?? '').replace(/"/g,'""')}"`;
@@ -173,7 +136,7 @@ export default function ReportsScreen({ harvests, expenses, currentUser }: Props
 
   return <View>
     <Text style={styles.sectionTitle}>📊 RAPORLAR</Text>
-    <View style={styles.rowBtnGroup}>{years.map(y=><TouchableOpacity key={y} style={[styles.groupBtn,year===y&&styles.groupBtnActive]} onPress={()=>{ setYear(y); setAiInsight(null); }}><Text style={[styles.groupBtnText,year===y&&styles.groupBtnTextActive]}>{y}</Text></TouchableOpacity>)}</View>
+    <View style={styles.rowBtnGroup}>{years.map(y=><TouchableOpacity key={y} style={[styles.groupBtn,year===y&&styles.groupBtnActive]} onPress={()=>setYear(y)}><Text style={[styles.groupBtnText,year===y&&styles.groupBtnTextActive]}>{y}</Text></TouchableOpacity>)}</View>
 
     <View style={styles.statsGrid}>
       <View style={styles.statCard}><Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text><Text style={styles.statLabel}>Toplam Hasat</Text></View>
@@ -181,22 +144,6 @@ export default function ReportsScreen({ harvests, expenses, currentUser }: Props
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalPaid)}</Text><Text style={styles.statLabel}>Toplam Tahsilat</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(receivable)}</Text><Text style={styles.statLabel}>Vadeli Alacak</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalExpenses)}</Text><Text style={styles.statLabel}>Toplam Gider</Text></View>
-    </View>
-
-    <View style={styles.aiCard}>
-      <Text style={styles.aiTitle}>Yapay zekâ ile kısa değerlendirme</Text>
-      <Text style={styles.aiText}>Seçtiğiniz yılın hasat, tahsilat ve gider toplamlarından anlaşılır öneriler hazırlanır. İsim ve telefon bilgileri gönderilmez.</Text>
-      {aiInsight && <>
-        <Text style={[styles.aiText, { fontWeight: 'bold', marginTop: 12 }]}>{aiInsight.summary}</Text>
-        {aiInsight.insights.map((item, index) => <View key={`${item.title}-${index}`} style={styles.aiInsightItem}>
-          <Text style={styles.aiInsightTitle}>{item.title}</Text>
-          <Text style={styles.aiText}>{item.detail}</Text>
-        </View>)}
-        {aiInsight.disclaimer && <Text style={[styles.aiText, { fontSize: 12 }]}>{aiInsight.disclaimer}</Text>}
-      </>}
-      <TouchableOpacity style={[styles.aiButton, isGeneratingInsight && styles.buttonDisabled]} disabled={isGeneratingInsight} onPress={generateAiInsight}>
-        {isGeneratingInsight ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.aiButtonText}>{aiInsight ? 'Yorumu Yenile' : 'Yapay Zekâ Yorumu Al'}</Text>}
-      </TouchableOpacity>
     </View>
 
     <View style={styles.formCard}>

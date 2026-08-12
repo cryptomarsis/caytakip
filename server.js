@@ -5,8 +5,6 @@ const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const multer = require('multer');
-const OpenAI = require('openai');
 
 const app = express();
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
@@ -40,8 +38,10 @@ app.use((req, res, next) => {
 
 // Veritabanı adresi (.env yoksa varsayılan lokal adresi kullanır)
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'cryptomarsisadmin';
-const ADMIN_PHONE_RAW = process.env.ADMIN_PHONE || '05432037007';
+const isProduction = process.env.NODE_ENV === 'production';
+const APP_NAME = process.env.APP_NAME || 'Çay Üreticisi';
+const SUPPORT_EMAIL = String(process.env.SUPPORT_EMAIL || '').trim();
+const ADMIN_PHONE_RAW = process.env.ADMIN_PHONE || '';
 const normalizePhone = (value) => {
   let p = String(value || '').replace(/\D/g, '');
   if (p.startsWith('90')) p = '0' + p.slice(2);
@@ -51,26 +51,28 @@ const normalizePhone = (value) => {
 const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_SECRET || 'cay-takip-change-this-secret';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
-const RECEIPT_MAX_BYTES = 6 * 1024 * 1024;
-const acceptedReceiptTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const receiptUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: RECEIPT_MAX_BYTES, files: 1 },
-  fileFilter: (req, file, callback) => {
-    if (!acceptedReceiptTypes.has(file.mimetype)) return callback(new Error('Sadece JPEG, PNG veya WEBP fiş fotoğrafı yükleyin.'));
-    callback(null, true);
+const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'development-only-change-me');
+// OTP, NetGSM hesabı ve gönderici adı hazır olduğunda Render'da açıkça true yapılır.
+// Böylece eksik üçüncü taraf hesabı yeni dağıtımı çalışmaz hâle getirmez.
+const AUTH_REQUIRE_OTP = process.env.AUTH_REQUIRE_OTP === 'true';
+const OTP_SECRET = process.env.OTP_SECRET || JWT_SECRET;
+const NETGSM_USERCODE = String(process.env.NETGSM_USERCODE || '').trim();
+const NETGSM_PASSWORD = String(process.env.NETGSM_PASSWORD || '').trim();
+const NETGSM_HEADER = String(process.env.NETGSM_HEADER || '').trim();
+const BACKUP_WEBHOOK_URL = String(process.env.BACKUP_WEBHOOK_URL || '').trim();
+const BACKUP_ENCRYPTION_KEY = String(process.env.BACKUP_ENCRYPTION_KEY || '').trim();
+
+if (isProduction) {
+  if (JWT_SECRET.length < 32) throw new Error('JWT_SECRET üretimde en az 32 karakter olmalıdır.');
+  if (!ADMIN_PHONE) throw new Error('ADMIN_PHONE üretimde zorunludur.');
+  if (AUTH_REQUIRE_OTP && (!NETGSM_USERCODE || !NETGSM_PASSWORD || !NETGSM_HEADER || OTP_SECRET.length < 32)) {
+    throw new Error('OTP etkinleştirilmiş üretim ortamında NETGSM_USERCODE, NETGSM_PASSWORD, NETGSM_HEADER ve en az 32 karakterlik OTP_SECRET zorunludur.');
   }
-});
-const uploadReceipt = (req, res, next) => receiptUpload.single('receipt')(req, res, (error) => {
-  if (!error) return next();
-  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'Fiş fotoğrafı en fazla 6 MB olabilir.' });
+  if (BACKUP_WEBHOOK_URL && BACKUP_ENCRYPTION_KEY.length < 32) {
+    throw new Error('BACKUP_WEBHOOK_URL kullanılırken BACKUP_ENCRYPTION_KEY en az 32 karakter olmalıdır.');
   }
-  return res.status(400).json({ error: error.message || 'Fiş fotoğrafı yüklenemedi.' });
-});
+  if (!AUTH_REQUIRE_OTP) console.warn('UYARI: AUTH_REQUIRE_OTP=false. Herkese açık yayın öncesinde SMS doğrulamayı etkinleştirin.');
+}
 
 const base64url = (value) => Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 const fromBase64url = (value) => Buffer.from(String(value).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
@@ -94,6 +96,49 @@ const verifyAccessToken = (token) => {
 };
 const hashRefreshToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const makeRefreshToken = () => crypto.randomBytes(48).toString('base64url');
+const hashOtp = (phone, purpose, code) => crypto.createHmac('sha256', OTP_SECRET).update(`${phone}:${purpose}:${code}`).digest('hex');
+const createOtpCode = () => String(crypto.randomInt(100000, 1000000));
+const toNetgsmPhone = (phone) => normalizePhone(phone).replace(/^0/, '');
+
+const sendOtpSms = async (phone, code) => {
+  if (!NETGSM_USERCODE || !NETGSM_PASSWORD || !NETGSM_HEADER) {
+    throw new Error('SMS doğrulama servisi henüz yapılandırılmadı.');
+  }
+  const response = await fetch('https://api.netgsm.com.tr/sms/rest/v2/otp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Basic ${Buffer.from(`${NETGSM_USERCODE}:${NETGSM_PASSWORD}`).toString('base64')}`
+    },
+    body: JSON.stringify({
+      msgheader: NETGSM_HEADER,
+      msg: `${APP_NAME} dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`,
+      no: toNetgsmPhone(phone),
+      appname: 'CayUreticisi'
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.code !== '00') {
+    console.error('NETGSM OTP ERROR:', response.status, data?.code || 'unknown', data?.description || '');
+    throw new Error('Doğrulama kodu gönderilemedi. Lütfen biraz sonra tekrar deneyin.');
+  }
+};
+
+const createEncryptedBackup = (payload) => {
+  if (!BACKUP_ENCRYPTION_KEY) return null;
+  const key = crypto.createHash('sha256').update(BACKUP_ENCRYPTION_KEY).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    version: 1,
+    algorithm: 'aes-256-gcm',
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    ciphertext: ciphertext.toString('base64')
+  });
+};
 
 const isAdminRequest = (req) => {
   const auth = getAuthUser(req);
@@ -131,6 +176,8 @@ const HarvestSchema = new mongoose.Schema({
   vadeTarihi: String,      // YYYY-AA veya YYYY-AA-GG (Örn: "2026-08")
   odemeDurumu: { type: String, enum: ['Ödendi', 'Kısmi Ödendi', 'Bekliyor'], default: 'Bekliyor' }
 }, { timestamps: true });
+HarvestSchema.index({ userId: 1, createdAt: -1 });
+HarvestSchema.index({ userPhone: 1, createdAt: -1 });
 
 // Tahsilat Geçmişi Kaydı (Hangi hasada ne kadar ödeme yapıldı?)
 const PaymentSchema = new mongoose.Schema({
@@ -141,6 +188,8 @@ const PaymentSchema = new mongoose.Schema({
   tutar: Number,
   aciklama: String
 }, { timestamps: true });
+PaymentSchema.index({ userId: 1, createdAt: -1 });
+PaymentSchema.index({ userPhone: 1, createdAt: -1 });
 
 const ExpenseSchema = new mongoose.Schema({
   userId: { type: String, required: false },
@@ -150,6 +199,8 @@ const ExpenseSchema = new mongoose.Schema({
   aciklama: String,
   tutar: Number
 }, { timestamps: true });
+ExpenseSchema.index({ userId: 1, createdAt: -1 });
+ExpenseSchema.index({ userPhone: 1, createdAt: -1 });
 
 const GardenSchema = new mongoose.Schema({
   userId: { type: String, required: false },
@@ -158,6 +209,8 @@ const GardenSchema = new mongoose.Schema({
   adaParsel: String,
   alan: String
 }, { timestamps: true });
+GardenSchema.index({ userId: 1, createdAt: -1 });
+GardenSchema.index({ userPhone: 1, createdAt: -1 });
 
 
 // Fabrika fiyat/politika takip kayıtları
@@ -192,6 +245,17 @@ const SessionSchema = new mongoose.Schema({
 }, { timestamps: true });
 SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 const Session = mongoose.model('Session', SessionSchema);
+
+const OtpChallengeSchema = new mongoose.Schema({
+  phone: { type: String, required: true, index: true },
+  purpose: { type: String, enum: ['login', 'register'], required: true },
+  codeHash: { type: String, required: true },
+  attempts: { type: Number, default: 0 },
+  expiresAt: { type: Date, required: true, index: true },
+  consumedAt: { type: Date, default: null }
+}, { timestamps: true });
+OtpChallengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
 
 // Mobil uygulamanın çevrimdışı kuyruğu aynı isteği bağlantı koptuğunda yeniden
 // gönderebilir. Bu kayıt, aynı Idempotency-Key ile oluşabilecek çift kayıtları engeller.
@@ -274,87 +338,7 @@ setInterval(() => {
   for (const [key, value] of publicRateWindows.entries()) if (value.resetAt <= now) publicRateWindows.delete(key);
 }, 60 * 60 * 1000).unref();
 
-// Yapay zekâ isteklerini kullanıcı bazında sınırlıyoruz. Bu bellek içi sınır,
-// tek sunucu çalıştıran mevcut Render kurulumu için yeterlidir; çoklu sunucuya
-// geçildiğinde Redis gibi paylaşılan bir rate-limit deposuna taşınmalıdır.
-const aiRateWindows = new Map();
-const limitAiUsage = (scope, maxRequests, windowMs) => (req, res, next) => {
-  const key = `${req.auth?.userId || 'anonymous'}:${scope}`;
-  const now = Date.now();
-  const current = aiRateWindows.get(key);
-  const active = current && current.resetAt > now ? current : { count: 0, resetAt: now + windowMs };
-  if (active.count >= maxRequests) {
-    const minutes = Math.max(1, Math.ceil((active.resetAt - now) / 60000));
-    return res.status(429).json({ error: `Bu özellik için kullanım sınırına ulaştınız. ${minutes} dakika sonra tekrar deneyin.` });
-  }
-  active.count += 1;
-  aiRateWindows.set(key, active);
-  next();
-};
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of aiRateWindows.entries()) if (value.resetAt <= now) aiRateWindows.delete(key);
-}, 60 * 60 * 1000).unref();
-
-const receiptSchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    date: { type: 'string' },
-    kg: { type: 'number' },
-    firma: { type: 'string' },
-    fiyat: { type: 'number' },
-    tahsilat: { type: 'number' },
-    aciklama: { type: 'string' },
-    confidence: { type: 'string', enum: ['high', 'medium', 'low'] }
-  },
-  required: ['date', 'kg', 'firma', 'fiyat', 'tahsilat', 'aciklama', 'confidence']
-};
-
-const reportInsightSchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    summary: { type: 'string' },
-    insights: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: { title: { type: 'string' }, detail: { type: 'string' } },
-        required: ['title', 'detail']
-      }
-    },
-    disclaimer: { type: 'string' }
-  },
-  required: ['summary', 'insights', 'disclaimer']
-};
-
-const runStructuredAi = async (name, schema, input) => {
-  if (!openai) {
-    const error = new Error('Yapay zekâ henüz etkin değil. Sunucunun OPENAI_API_KEY ayarını ekleyin.');
-    error.status = 503;
-    throw error;
-  }
-  const response = await openai.responses.create({
-    model: OPENAI_MODEL,
-    input,
-    text: { format: { type: 'json_schema', name, strict: true, schema } }
-  });
-  if (!response.output_text) throw new Error('Yapay zekâ yanıtı alınamadı.');
-  return JSON.parse(response.output_text);
-};
-
 const numeric = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
-const yearFromDate = (value) => {
-  const raw = String(value || '').trim();
-  const iso = raw.match(/^(\d{4})[-./]/);
-  if (iso) return Number(iso[1]);
-  const tr = raw.match(/^\d{1,2}[-./]\d{1,2}[-./](\d{4})$/);
-  if (tr) return Number(tr[1]);
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
-};
 
 const idempotencyMiddleware = async (req, res, next) => {
   const key = String(req.headers['idempotency-key'] || '').trim();
@@ -384,7 +368,7 @@ const buildUserFilter = (req) => {
 
 // --- ROUTES ---
 
-app.get('/api/health', (req, res) => res.json({ ok: true, version: '2026-08-11-secure-v1', service: 'cay-ureticisi-takip' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: '2026-08-12-release-prep-v1', service: 'cay-ureticisi-takip' }));
 
 app.get('/', (req, res) => {
   res.send('🌱 Çay Takip Sistemi API Çalışıyor!');
@@ -423,6 +407,7 @@ app.post('/api/auth/login', limitPublicUsage('login', 10, 15 * 60 * 1000), async
   try {
     const phone = normalizePhone(req.body.phone);
     if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
+    if (AUTH_REQUIRE_OTP) return res.status(403).json({ error: 'SMS doğrulaması gereklidir.', code: 'OTP_REQUIRED' });
     let profile = await UserProfile.findOne({ phone });
     if (!profile) {
       const legacy = await findLegacyUser(phone);
@@ -436,6 +421,71 @@ app.post('/api/auth/login', limitPublicUsage('login', 10, 15 * 60 * 1000), async
   } catch (err) {
     console.error('AUTH LOGIN ERROR:', err);
     res.status(500).json({ error: 'Giriş yapılamadı.' });
+  }
+});
+
+app.post('/api/auth/request-otp', limitPublicUsage('otp-request', 3, 15 * 60 * 1000), async (req, res) => {
+  try {
+    if (!AUTH_REQUIRE_OTP) return res.status(400).json({ error: 'SMS doğrulaması bu ortamda etkin değil.' });
+    const phone = normalizePhone(req.body.phone);
+    const purpose = req.body.purpose === 'register' ? 'register' : 'login';
+    if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
+    const profile = await UserProfile.findOne({ phone });
+    if (purpose === 'login' && !profile) {
+      const legacy = await findLegacyUser(phone);
+      if (!legacy) return res.status(404).json({ error: 'Bu telefon numarasıyla kayıt bulunamadı.' });
+    }
+    if (profile?.active === false) return res.status(403).json({ error: 'Kullanıcı hesabı pasif durumda.' });
+    const code = createOtpCode();
+    await OtpChallenge.deleteMany({ phone, purpose, consumedAt: null });
+    await sendOtpSms(phone, code);
+    await OtpChallenge.create({
+      phone,
+      purpose,
+      codeHash: hashOtp(phone, purpose, code),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000)
+    });
+    res.json({ ok: true, expiresInSeconds: 300 });
+  } catch (err) {
+    console.error('OTP REQUEST ERROR:', err.message);
+    res.status(503).json({ error: err.message || 'Doğrulama kodu gönderilemedi.' });
+  }
+});
+
+app.post('/api/auth/verify-otp', limitPublicUsage('otp-verify', 10, 15 * 60 * 1000), async (req, res) => {
+  try {
+    if (!AUTH_REQUIRE_OTP) return res.status(400).json({ error: 'SMS doğrulaması bu ortamda etkin değil.' });
+    const phone = normalizePhone(req.body.phone);
+    const purpose = req.body.purpose === 'register' ? 'register' : 'login';
+    const code = String(req.body.code || '').replace(/\D/g, '');
+    const name = String(req.body.name || '').trim();
+    if (!phone || phone.length !== 11 || !/^\d{6}$/.test(code)) return res.status(400).json({ error: 'Telefon numarası ve 6 haneli kod zorunludur.' });
+    if (purpose === 'register' && !name) return res.status(400).json({ error: 'Kayıt için Ad Soyad zorunludur.' });
+    const challenge = await OtpChallenge.findOne({ phone, purpose, consumedAt: null, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 });
+    if (!challenge) return res.status(400).json({ error: 'Kodun süresi dolmuş. Yeni kod isteyin.' });
+    if (challenge.attempts >= 5) return res.status(429).json({ error: 'Çok fazla hatalı deneme yapıldı. Yeni kod isteyin.' });
+    const suppliedHash = Buffer.from(hashOtp(phone, purpose, code));
+    const storedHash = Buffer.from(challenge.codeHash);
+    if (suppliedHash.length !== storedHash.length || !crypto.timingSafeEqual(suppliedHash, storedHash)) {
+      challenge.attempts += 1;
+      await challenge.save();
+      return res.status(400).json({ error: 'Doğrulama kodu hatalı.' });
+    }
+    challenge.consumedAt = new Date();
+    await challenge.save();
+    let profile = await UserProfile.findOne({ phone });
+    if (purpose === 'login' && !profile) {
+      const legacy = await findLegacyUser(phone);
+      if (!legacy) return res.status(404).json({ error: 'Bu telefon numarasıyla kayıt bulunamadı.' });
+      const legacyName = String(legacy.producerName || legacy.ureticici || legacy.uretici || legacy.name || 'Üretici').trim();
+      profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name: legacyName || 'Üretici', role: phone === ADMIN_PHONE ? 'admin' : 'user' });
+    }
+    if (!profile) profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name, role: phone === ADMIN_PHONE ? 'admin' : 'user' });
+    if (profile.active === false) return res.status(403).json({ error: 'Kullanıcı hesabı pasif durumda.' });
+    res.json(await issueTokens(profile));
+  } catch (err) {
+    console.error('OTP VERIFY ERROR:', err.message);
+    res.status(500).json({ error: 'Doğrulama tamamlanamadı.' });
   }
 });
 
@@ -464,6 +514,31 @@ app.post('/api/auth/logout', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Çıkış yapılamadı.' }); }
 });
 
+app.get('/api/legal/privacy', (req, res) => {
+  res.json({
+    title: `${APP_NAME} Gizlilik Politikası`,
+    updatedAt: '2026-08-12',
+    contactEmail: SUPPORT_EMAIL || 'Destek e-posta adresi henüz tanımlanmadı.',
+    sections: [
+      { heading: 'Toplanan bilgiler', body: 'Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.' },
+      { heading: 'Kullanım amacı', body: 'Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği ve destek taleplerini yanıtlamak için kullanılır.' },
+      { heading: 'Saklama ve güvenlik', body: 'Oturum bilgileri cihazda güvenli depoda tutulur; çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Veriler üçüncü taraflara satılmaz.' },
+      { heading: 'Saklama süresi', body: 'Hesabınız aktif olduğu sürece kayıtlarınız saklanır. Hesap silme talebinde hesap ve ilişkili kayıtlar silinir; yasal saklama zorunlulukları varsa yalnızca gerekli süre boyunca tutulabilir.' },
+      { heading: 'Haklarınız', body: 'Bilgilerinize erişme, düzeltme ve hesabınızı silme talebinde bulunabilirsiniz. Hesap silme işlemi uygulama içinden veya destek e-postası yoluyla başlatılabilir.' }
+    ]
+  });
+});
+
+app.get('/privacy', (req, res) => {
+  const email = SUPPORT_EMAIL || 'uygulama içindeki Ayarlar ve Gizlilik ekranı';
+  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${APP_NAME} Gizlilik Politikası</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#183A2A;line-height:1.6}h1,h2{color:#1F513D}a{color:#246548}</style></head><body><h1>${APP_NAME} Gizlilik Politikası</h1><p>Son güncelleme: 12 Ağustos 2026</p><h2>Toplanan bilgiler</h2><p>Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.</p><h2>Kullanım amacı</h2><p>Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği ve destek taleplerini yanıtlamak için kullanılır. Veriler üçüncü taraflara satılmaz.</p><h2>Saklama ve güvenlik</h2><p>Oturum bilgileri cihazda güvenli depoda tutulur. Çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Hesap silindiğinde bu cihaz içi kopya ile sunucudaki ilişkili kayıtlar silinir; yasal saklama zorunluluğu varsa yalnızca gerekli süre boyunca tutulabilir.</p><h2>Hesap silme</h2><p>Uygulama içindeki Ayarlar ve Gizlilik ekranından hesabınızı kalıcı olarak silebilirsiniz. Uygulamaya erişemiyorsanız silme talebinizi ${email.includes('@') ? `<a href="mailto:${email}">${email}</a>` : email} üzerinden başlatabilirsiniz.</p></body></html>`);
+});
+
+app.get('/delete-account', (req, res) => {
+  const email = SUPPORT_EMAIL || 'uygulama içindeki Ayarlar ve Gizlilik ekranı';
+  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${APP_NAME} Hesap Silme</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#183A2A;line-height:1.6}h1{color:#9F3030}a{color:#246548}</style></head><body><h1>Hesap silme</h1><p>Hesabınızı uygulama içindeki <strong>Ayarlar ve Gizlilik</strong> ekranından silebilirsiniz. Bu işlem hasat, ödeme, gider ve bahçe kayıtlarınızı kalıcı olarak siler.</p><p>Uygulamaya erişemiyorsanız talebinizi ${email.includes('@') ? `<a href="mailto:${email}">${email}</a>` : email} üzerinden başlatabilirsiniz.</p><p><a href="/privacy">Gizlilik politikasını görüntüle</a></p></body></html>`);
+});
+
 // USER PROFILE ROUTES
 app.get('/api/users/profile', requireAuth, async (req, res) => {
   try {
@@ -473,8 +548,29 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.delete('/api/users/me', requireAuth, async (req, res) => {
+  try {
+    const auth = req.auth;
+    await Promise.all([
+      Harvest.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
+      Payment.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
+      Expense.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
+      Garden.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
+      Session.deleteMany({ userId: auth.userId }),
+      IdempotencyRecord.deleteMany({ userId: auth.userId }),
+      OtpChallenge.deleteMany({ phone: auth.phone }),
+      UserProfile.deleteOne({ userId: auth.userId })
+    ]);
+    res.json({ ok: true, message: 'Hesabınız ve ilişkili kayıtlarınız silindi.' });
+  } catch (err) {
+    console.error('ACCOUNT DELETE ERROR:', err.message);
+    res.status(500).json({ error: 'Hesap silinemedi. Lütfen destek ile iletişime geçin.' });
+  }
+});
+
 app.post('/api/users/profile', limitPublicUsage('profile', 10, 15 * 60 * 1000), async (req, res) => {
   try {
+    if (AUTH_REQUIRE_OTP) return res.status(403).json({ error: 'SMS doğrulaması gereklidir.', code: 'OTP_REQUIRED' });
     const phone = normalizePhone(req.body.phone);
     const name = String(req.body.name || '').trim();
     if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
@@ -493,102 +589,16 @@ app.post('/api/users/profile', limitPublicUsage('profile', 10, 15 * 60 * 1000), 
   }
 });
 
-// Fiş görseli yalnızca bu istek boyunca bellekte tutulur; veritabanına veya diske yazılmaz.
-// Modelin döndürdüğü alanlar, mobil uygulamada kullanıcı onayı olmadan kayıt oluşturmaz.
-app.post('/api/receipts/analyze', requireAuth, uploadReceipt, limitAiUsage('receipt', 20, 24 * 60 * 60 * 1000), async (req, res) => {
-  try {
-    if (!req.file?.buffer) return res.status(400).json({ error: 'Okunacak fiş fotoğrafı bulunamadı.' });
-
-    const imageUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-    const extracted = await runStructuredAi('tea_receipt', receiptSchema, [{
-      role: 'developer',
-      content: 'Sen Türkiye’deki yaş çay alım fişlerinden alan çıkaran dikkatli bir asistansın. Sadece fişte açıkça görünen bilgileri çıkar. Tarihi YYYY-AA-GG formatına çevir. kg alanına yaş çay kilogramını, firma alanına alıcı/fabrika adını, fiyat alanına kilogram başına TL fiyatını, tahsilat alanına fişte açıkça ödenmiş TL tutarını yaz. Birim fiyat fişte yoksa ancak toplam tutar ve kilogram açıkça görünüyorsa hesaplayabilirsin. Görünmeyen metin alanlarını boş string, sayısal alanları 0 yap. Tahmin etme; fiş hasat fişi değilse tüm alanları boş/0 yap ve confidence low seç. Kişisel bilgileri çıkarma.'
-    }, {
-      role: 'user',
-      content: [
-        { type: 'input_text', text: 'Bu fişi incele ve hasat formu alanlarını döndür.' },
-        { type: 'input_image', image_url: imageUrl, detail: 'high' }
-      ]
-    }]);
-
-    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(String(extracted.date || '')) ? extracted.date : null;
-    const fields = {
-      date: validDate,
-      kg: numeric(extracted.kg) > 0 ? numeric(extracted.kg) : null,
-      firma: String(extracted.firma || '').trim() || null,
-      fiyat: numeric(extracted.fiyat) > 0 ? numeric(extracted.fiyat) : null,
-      tahsilat: numeric(extracted.tahsilat) > 0 ? numeric(extracted.tahsilat) : null,
-      aciklama: String(extracted.aciklama || '').trim() || null
-    };
-    res.json({ fields, confidence: extracted.confidence });
-  } catch (err) {
-    console.error('RECEIPT ANALYZE ERROR:', err.message);
-    res.status(err.status || 502).json({ error: err.status ? err.message : 'Fiş okunurken bir sorun oluştu. Fotoğrafı daha net çekip tekrar deneyin.' });
-  } finally {
-    if (req.file?.buffer) req.file.buffer.fill(0);
-  }
-});
-
-app.post('/api/ai/report-insights', requireAuth, limitAiUsage('report', 12, 60 * 60 * 1000), async (req, res) => {
-  try {
-    const year = Number(req.body?.year);
-    if (!Number.isInteger(year) || year < 2020 || year > 2100) return res.status(400).json({ error: 'Geçerli bir rapor yılı seçin.' });
-
-    const filter = buildUserFilter(req);
-    const [allHarvests, allExpenses] = await Promise.all([
-      Harvest.find(filter).lean(),
-      Expense.find(filter).lean()
-    ]);
-    const harvests = allHarvests.filter((item) => yearFromDate(item.tarih) === year);
-    const expenses = allExpenses.filter((item) => yearFromDate(item.tarih) === year);
-    const totalKg = harvests.reduce((sum, item) => sum + numeric(item.kg ?? item.weight), 0);
-    const totalSales = harvests.reduce((sum, item) => sum + numeric(item.kg ?? item.weight) * numeric(item.fiyat), 0);
-    const totalPaid = harvests.reduce((sum, item) => sum + numeric(item.tahsilat), 0);
-    const totalExpenses = expenses.reduce((sum, item) => sum + numeric(item.tutar), 0);
-    const factories = new Map();
-    harvests.forEach((item) => {
-      const name = String(item.firma || 'Belirtilmeyen alıcı').trim();
-      const current = factories.get(name) || { name, kg: 0, sales: 0 };
-      current.kg += numeric(item.kg ?? item.weight);
-      current.sales += numeric(item.kg ?? item.weight) * numeric(item.fiyat);
-      factories.set(name, current);
-    });
-    const byFactory = [...factories.values()].sort((a, b) => b.kg - a.kg).slice(0, 5);
-
-    const reportData = {
-      year,
-      harvestRecordCount: harvests.length,
-      totalKg: Math.round(totalKg * 100) / 100,
-      totalSales: Math.round(totalSales * 100) / 100,
-      totalPaid: Math.round(totalPaid * 100) / 100,
-      receivable: Math.round(Math.max(0, totalSales - totalPaid) * 100) / 100,
-      totalExpenses: Math.round(totalExpenses * 100) / 100,
-      netAfterExpenses: Math.round((totalSales - totalExpenses) * 100) / 100,
-      averageSalePrice: totalKg > 0 ? Math.round((totalSales / totalKg) * 100) / 100 : 0,
-      factories: byFactory
-    };
-
-    const insight = await runStructuredAi('tea_report_insights', reportInsightSchema, [{
-      role: 'developer',
-      content: 'Sen çay üreticileri için sade Türkçe rapor yorumları hazırlayan bir asistansın. Yalnızca sana verilen sayısal özet veriden çıkarım yap; eksik veriyi uydurma. En fazla 3 kısa, uygulanabilir gözlem yaz. Finansal veya hukuki tavsiye verme; yorumların karar yerine geçmediğini belirt. Teknik terim kullanma ve üreticinin anlayacağı yalın Türkçe kullan.'
-    }, {
-      role: 'user',
-      content: `Yıllık anonim çay üretim özeti: ${JSON.stringify(reportData)}`
-    }]);
-    res.json(insight);
-  } catch (err) {
-    console.error('AI REPORT ERROR:', err.message);
-    res.status(err.status || 502).json({ error: err.status ? err.message : 'Yapay zekâ raporu hazırlanırken bir sorun oluştu.' });
-  }
-});
-
 // HARVEST ROUTES
 app.get('/api/harvests', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
-
-    const data = await Harvest.find(filter).sort({ createdAt: -1 });
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 200) : 200;
+    const before = String(req.query.before || '').trim();
+    if (before && mongoose.Types.ObjectId.isValid(before)) filter._id = { $lt: new mongoose.Types.ObjectId(before) };
+    const data = await Harvest.find(filter).sort({ _id: -1 }).limit(limit);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -934,7 +944,9 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
 
-    const data = await Expense.find(filter).sort({ createdAt: -1 });
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 200) : 200;
+    const data = await Expense.find(filter).sort({ _id: -1 }).limit(limit);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1023,15 +1035,22 @@ app.delete('/api/gardens/:id', requireAuth, async (req, res) => {
 // ADMIN / PRODUCER MANAGEMENT
 app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const users = await UserProfile.find().sort({ name: 1 }).lean();
-    const [harvests, payments] = await Promise.all([Harvest.find().lean(), Payment.find().lean()]);
-    const summary = users.map(u => {
-      const hs = harvests.filter(h => h.userId === u.userId || h.userPhone === u.phone);
-      const ps = payments.filter(p => p.userId === u.userId || p.userPhone === u.phone);
-      const totalKg = hs.reduce((s,h)=>s+(Number(h.kg)||0),0);
-      const totalSales = hs.reduce((s,h)=>s+(Number(h.toplamTutar)||((Number(h.kg)||0)*(Number(h.fiyat)||0))),0);
-      const totalPaid = hs.reduce((s,h)=>s+(Number(h.tahsilat)||0),0) + ps.reduce((s,p)=>s+(Number(p.tutar)||0),0);
-      return { ...u, totalKg, totalSales, totalPaid, remaining: Math.max(0,totalSales-totalPaid), harvestCount: hs.length };
+    const [users, harvestSummary] = await Promise.all([
+      UserProfile.find().sort({ name: 1 }).lean(),
+      Harvest.aggregate([
+        { $group: {
+          _id: '$userId',
+          totalKg: { $sum: { $ifNull: ['$kg', '$weight'] } },
+          totalSales: { $sum: { $ifNull: ['$toplamTutar', { $multiply: [{ $ifNull: ['$kg', '$weight'] }, { $ifNull: ['$fiyat', 0] }] }] } },
+          totalPaid: { $sum: { $ifNull: ['$tahsilat', 0] } },
+          harvestCount: { $sum: 1 }
+        } }
+      ])
+    ]);
+    const summaryByUserId = new Map(harvestSummary.map((item) => [item._id, item]));
+    const summary = users.map((u) => {
+      const item = summaryByUserId.get(u.userId) || { totalKg: 0, totalSales: 0, totalPaid: 0, harvestCount: 0 };
+      return { ...u, ...item, remaining: Math.max(0, item.totalSales - item.totalPaid) };
     });
     res.json(summary);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1089,14 +1108,31 @@ app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
 
 const runAutomaticBackup = async () => {
   try {
-    const dir = process.env.BACKUP_DIR || path.join(process.cwd(), 'backups');
-    fs.mkdirSync(dir, { recursive: true });
     const [users, harvests, payments, expenses, gardens, factoryPrices, ads] = await Promise.all([
       UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean()
     ]);
+    const payload = { version: 'V17.0', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads };
+    if (BACKUP_WEBHOOK_URL) {
+      const encrypted = createEncryptedBackup(payload);
+      if (!encrypted) throw new Error('Dış yedek için BACKUP_ENCRYPTION_KEY zorunludur.');
+      const response = await fetch(BACKUP_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: encrypted
+      });
+      if (!response.ok) throw new Error(`Dış yedek sunucusu ${response.status} yanıtını verdi.`);
+      console.log('💾 Şifreli dış yedek gönderildi.');
+      return;
+    }
+    if (isProduction) {
+      console.warn('BACKUP_WEBHOOK_URL ayarlanmadı; üretimde yerel diske yedek yazılmadı.');
+      return;
+    }
+    const dir = process.env.BACKUP_DIR || path.join(process.cwd(), 'backups');
+    fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    fs.writeFileSync(path.join(dir, `cay-takip-${stamp}.json`), JSON.stringify({ version:'V16.6', exportedAt:new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads }));
-    console.log('💾 Otomatik yedek oluşturuldu.');
+    fs.writeFileSync(path.join(dir, `cay-takip-${stamp}.json`), JSON.stringify(payload));
+    console.log('💾 Geliştirme yedeği oluşturuldu.');
   } catch (err) { console.error('Otomatik yedek hatası:', err.message); }
 };
 setTimeout(runAutomaticBackup, 15000);

@@ -33,7 +33,7 @@ export default function DashboardScreen({
 }: DashboardProps) {
   return (
     <View>
-      <Text style={styles.sectionTitle}>Bugünkü İşlemler</Text>
+      <Text style={styles.sectionTitle}>Hızlı İşlemler</Text>
 
       <View style={styles.quickActionGrid}>
         <TouchableOpacity style={styles.quickAction} onPress={() => onNavigate('harvest')}>
@@ -42,7 +42,7 @@ export default function DashboardScreen({
         </TouchableOpacity>
         <TouchableOpacity style={styles.quickAction} onPress={() => onNavigate('collections')}>
           <View style={styles.quickActionIconWrap}><SymbolView name={{ ios: 'creditcard.fill', android: 'payments', web: 'payments' }} size={25} tintColor="#246548" /></View>
-          <Text style={styles.quickActionText}>Tahsilat Al</Text>
+          <Text style={styles.quickActionText}>Ödeme Al</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.quickAction} onPress={() => onNavigate('expense')}>
           <View style={styles.quickActionIconWrap}><SymbolView name={{ ios: 'receipt', android: 'receipt_long', web: 'receipt_long' }} size={25} tintColor="#246548" /></View>
@@ -58,7 +58,7 @@ export default function DashboardScreen({
         </TouchableOpacity>
       </View>
 
-      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Genel Durum</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Bu Sezonun Özeti</Text>
 
       {ads.filter(a => a.slot === 'dashboard_top' || a.slot === 'dashboard_middle').slice(0, 2).map((ad, i) => (
         <View key={ad._id || i} style={styles.adCard}>
@@ -76,7 +76,7 @@ export default function DashboardScreen({
         </View>
 
         <View style={[styles.statCard, { borderLeftColor: '#e76f51' }]}>
-          <Text style={styles.statTitle}>Toplam Satış Tutarı</Text>
+          <Text style={styles.statTitle}>Tahakkuk Eden Satış</Text>
           <Text style={styles.statValue}>{formatTL(totalSales)}</Text>
         </View>
 
@@ -98,7 +98,7 @@ export default function DashboardScreen({
         </View>
 
         <View style={[styles.statCard, { borderLeftColor: '#1d3557' }]}>
-          <Text style={styles.statTitle}>Net Kar / Bakiye</Text>
+          <Text style={styles.statTitle}>Tahmini Net Kazanç</Text>
           <Text style={[styles.statValue, { color: netProfit >= 0 ? '#2b9348' : '#d62828' }]}>
             {formatTL(netProfit)}
           </Text>

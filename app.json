@@ -1,11 +1,13 @@
 {
   "expo": {
-    "name": "CayUreticisiV2",
-    "slug": "CayUreticisiV2",
+    "name": "Çay Üreticisi",
+    "slug": "cay-ureticisi",
+    "description": "Çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
     "scheme": "cayureticisi",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "backgroundColor": "#F8F3E7",
+    "icon": "./assets/icon-v2.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
@@ -16,14 +18,21 @@
       "supportsTablet": true
     },
     "android": {
-      "permissions": [
-        "CAMERA"
+      "package": "com.cryptomarsis.cayureticisi",
+      "versionCode": 1,
+      "backgroundColor": "#F8F3E7",
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "package": "com.cryptomarsis.CayUreticisiV2"
+        "foregroundImage": "./assets/icon-v2.png",
+        "backgroundColor": "#F8F3E7"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,15 +42,8 @@
       "@react-native-community/datetimepicker",
       "expo-sharing",
       "expo-notifications",
-      [
-        "expo-image-picker",
-        {
-          "cameraPermission": "Fişteki hasat bilgilerini okuyup formu doldurmak için kameranıza erişim gerekir.",
-          "photosPermission": "Fiş fotoğrafını seçip hasat formunu doldurmak için fotoğraflarınıza erişim gerekir.",
-          "microphonePermission": false
-        }
-      ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-splash-screen"
     ]
   }
 }

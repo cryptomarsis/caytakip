@@ -16,3 +16,5 @@ mycreds.txt
 *.key
 service-account*.json
 secrets/
+src.rar
+android/app/debug.keystore

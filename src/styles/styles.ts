@@ -78,6 +78,12 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 2
   },
+  headerWarning: {
+    color: '#FFE1A6',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginTop: 4
+  },
   logoutBtn: {
     backgroundColor: 'rgba(255,255,255,0.16)',
     paddingHorizontal: 14,
@@ -478,74 +484,16 @@ export const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 12
   },
-  receiptCard: {
-    backgroundColor: '#EEF7F0',
-    borderColor: '#CFE3D2',
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10
-  },
-  receiptTextWrap: {
-    paddingRight: 4
-  },
-  receiptTitle: {
-    color: '#1F513D',
-    fontSize: 16,
-    fontWeight: 'bold'
-  },
-  receiptText: {
-    color: '#47635A',
-    fontSize: 13,
-    lineHeight: 18,
+  detailsToggle: {
+    alignSelf: 'flex-start',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     marginTop: 4
   },
-  receiptBtn: {
-    backgroundColor: '#246548',
-    borderRadius: 10,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    flex: 1
-  },
-  receiptBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: 'bold'
-  },
-  receiptPreview: {
-    width: '100%',
-    height: 150,
-    borderRadius: 10,
-    marginTop: 12,
-    backgroundColor: '#DDE9DF'
-  },
-  receiptActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 12
-  },
-  receiptSecondaryBtn: {
-    flex: 1,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#246548',
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    backgroundColor: '#FFFFFF'
-  },
-  receiptSecondaryBtnText: {
+  detailsToggleText: {
     color: '#246548',
     fontSize: 15,
     fontWeight: 'bold'
-  },
-  receiptLoadingText: {
-    color: '#47635A',
-    fontSize: 13,
-    marginTop: 9
   },
   buttonDisabled: {
     opacity: 0.65
@@ -560,50 +508,6 @@ export const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1B4332',
     fontSize: 16
-  },
-  aiCard: {
-    backgroundColor: '#F2F7FF',
-    borderWidth: 1,
-    borderColor: '#D4E2F8',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 16
-  },
-  aiTitle: {
-    color: '#1D466E',
-    fontSize: 18,
-    fontWeight: 'bold'
-  },
-  aiText: {
-    color: '#35536E',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6
-  },
-  aiButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#2D6A9F',
-    borderRadius: 10,
-    minHeight: 44,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    marginTop: 13
-  },
-  aiButtonText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 15
-  },
-  aiInsightItem: {
-    borderTopWidth: 1,
-    borderTopColor: '#D8E5F4',
-    marginTop: 12,
-    paddingTop: 12
-  },
-  aiInsightTitle: {
-    color: '#1D466E',
-    fontSize: 15,
-    fontWeight: 'bold'
   },
   rowBtnGroup: {
     flexDirection: 'row',
@@ -629,6 +533,83 @@ export const styles = StyleSheet.create({
   },
   groupBtnTextActive: {
     color: '#ffffff',
+    fontWeight: 'bold'
+  },
+  moreRow: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E1EAE2',
+    borderRadius: 14,
+    minHeight: 76,
+    padding: 14,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12
+  },
+  moreChevron: {
+    color: '#246548',
+    fontSize: 30,
+    lineHeight: 30,
+    fontWeight: '300'
+  },
+  secondaryBtn: {
+    borderColor: '#246548',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 14,
+    alignItems: 'center'
+  },
+  secondaryBtnText: {
+    color: '#246548',
+    fontSize: 14,
+    fontWeight: 'bold'
+  },
+  legalSection: {
+    marginBottom: 14
+  },
+  legalTitle: {
+    color: '#1F513D',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 4
+  },
+  legalText: {
+    color: '#47635A',
+    fontSize: 14,
+    lineHeight: 20
+  },
+  dangerCard: {
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#F0C7C7',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 18
+  },
+  dangerTitle: {
+    color: '#9F3030',
+    fontSize: 18,
+    fontWeight: 'bold'
+  },
+  dangerText: {
+    color: '#7A4545',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6
+  },
+  dangerBtn: {
+    borderRadius: 10,
+    backgroundColor: '#B44B4B',
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 14
+  },
+  dangerBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: 'bold'
   },
   modalOverlay: {

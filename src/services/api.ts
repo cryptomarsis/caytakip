@@ -1,4 +1,5 @@
-export const API_URL = 'https://cay-ureticisi-takip.onrender.com/api';
+export const API_ORIGIN = 'https://cay-ureticisi-takip.onrender.com';
+export const API_URL = `${API_ORIGIN}/api`;
 
 export const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 60000) => {
   const controller = new AbortController();
