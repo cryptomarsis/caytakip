@@ -1,109 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet,
-  Text,
-  View,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-  Modal,
-  StatusBar,
-  Switch
-} from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform } from 'react-native';
+import Constants from 'expo-constants';
+import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// ==========================================
-// CONFIGURATION & CONSTANTS
-// ==========================================
-const API_URL = "https://cay-ureticisi-takip.onrender.com/api";
-const SESSION_KEY = '@cay_takip_user_session';
-
-// ==========================================
-// TYPES
-// ==========================================
-interface UserSession {
-  userId: string;
-  name: string;
-  phone: string;
-  role: 'admin' | 'user';
-  token: string;
-  refreshToken: string;
-}
-
-// ==========================================
-// HELPERS & STORAGE SERVICES
-// ==========================================
-const saveSession = async (user: UserSession) => {
-  try {
-    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(user));
-  } catch (e) {
-    console.error('Session save error:', e);
-  }
-};
-
-const getSession = async (): Promise<UserSession | null> => {
-  try {
-    const jsonValue = await AsyncStorage.getItem(SESSION_KEY);
-    return jsonValue != null ? JSON.parse(jsonValue) : null;
-  } catch (e) {
-    console.error('Session read error:', e);
-    return null;
-  }
-};
-
-const clearSession = async () => {
-  try {
-    await AsyncStorage.removeItem(SESSION_KEY);
-  } catch (e) {
-    console.error('Session clear error:', e);
-  }
-};
-
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 60000) => {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return response;
-  } catch (error: any) {
-    clearTimeout(id);
-    if (error.name === 'AbortError') {
-      throw new Error('Sunucu yanıt vermekte gecikti. Lütfen birkaç saniye sonra tekrar deneyin.');
-    }
-    throw new Error('İnternet veya sunucu bağlantısı kurulamadı.');
-  }
-};
-
-const formatTL = (val: number) =>
-  `${(val || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
-
-const normalizePhone = (value: string) => {
-  let p = String(value || '').replace(/\D/g, '');
-  if (p.startsWith('90')) p = '0' + p.slice(2);
-  if (p.length === 10 && p.startsWith('5')) p = '0' + p;
-  return p;
-};
-
-const formatDisplayDate = (value: any) => {
-  const s = String(value || '').trim();
-  const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
-  if (m) return `${m[3].padStart(2,'0')}.${m[2].padStart(2,'0')}.${m[1]}`;
-  return s || '-';
-};
-
-const toServerDate = (value: string) => {
-  const s = String(value || '').trim();
-  const m = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
-  return s;
-};
-
+import { API_URL, fetchWithTimeout } from '../services/api';
+import { saveSession, getSession, clearSession } from '../services/session';
+import { enqueueOfflineRequest, getDataSnapshot, getPendingRequestCount, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
+import { UserSession, HarvestRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
+import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney } from '../utils/format';
+import { styles } from '../styles/styles';
+import DashboardScreen from '../screens/DashboardScreen';
+import HarvestScreen from '../screens/HarvestScreen';
+import CollectionsScreen from '../screens/CollectionsScreen';
+import ReceivablesScreen from '../screens/ReceivablesScreen';
+import ExpenseScreen from '../screens/ExpenseScreen';
+import FactoryPricesScreen from '../screens/FactoryPricesScreen';
+import GardensScreen from '../screens/GardensScreen';
+import AdminScreen from '../screens/AdminScreen';
+import ReportsScreen from '../screens/ReportsScreen';
 
 // ==========================================
 // MAIN COMPONENT
@@ -116,18 +30,20 @@ export default function App() {
   const [authName, setAuthName] = useState('');
 
   // Navigasyon ve Yüklenme State'leri
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'expense' | 'gardens' | 'prices' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'expense' | 'gardens' | 'prices' | 'reports' | 'admin'>('dashboard');
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const isSyncingOfflineQueue = useRef(false);
 
   // Veri Listeleri
-  const [harvests, setHarvests] = useState<any[]>([]);
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [gardens, setGardens] = useState<any[]>([]);
-  const [factoryPrices, setFactoryPrices] = useState<any[]>([]);
+  const [harvests, setHarvests] = useState<HarvestRecord[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [gardens, setGardens] = useState<GardenRecord[]>([]);
+  const [factoryPrices, setFactoryPrices] = useState<FactoryPriceRecord[]>([]);
   const [selectedFactory, setSelectedFactory] = useState<string | null>(null);
   const [factoryFilter, setFactoryFilter] = useState<'Tümü' | 'Haftalık' | 'Aylık' | 'Peşin' | 'Vadeli'>('Tümü');
-  const [ads, setAds] = useState<any[]>([]);
+  const [ads, setAds] = useState<AdRecord[]>([]);
 
   const todayTR = (() => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; })();
   const [priceForm, setPriceForm] = useState({ firma: 'ÇAYKUR', fiyat: '', tarih: todayTR, fiyatTuru: 'Peşin', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
@@ -171,7 +87,7 @@ export default function App() {
 
   // Tahsilat Düzenleme Modal State'leri
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingHarvest, setEditingHarvest] = useState<any>(null);
+  const [editingHarvest, setEditingHarvest] = useState<HarvestRecord | null>(null);
   const [editTahsilatVal, setEditTahsilatVal] = useState('');
 
   // Özel Tahsilat Ekleme Formu State'leri (Belirli Hasada Ödeme Yapma)
@@ -211,6 +127,59 @@ export default function App() {
     return fetchWithTimeout(url, makeOptions(nextUser), timeout);
   };
 
+  const refreshPendingSyncCount = async () => {
+    if (currentUser?.userId) setPendingSyncCount(await getPendingRequestCount(currentUser.userId));
+  };
+
+  const queueOfflineRequest = async (endpoint: string, body: Record<string, unknown>) => {
+    if (!currentUser?.userId) throw new Error('Oturum bulunamadı.');
+    await enqueueOfflineRequest({ userId: currentUser.userId, endpoint, method: 'POST', body });
+    await refreshPendingSyncCount();
+  };
+
+  const postOrQueue = async (endpoint: string, body: Record<string, unknown>) => {
+    const network = await NetInfo.fetch();
+    if (!network.isConnected || network.isInternetReachable === false) {
+      await queueOfflineRequest(endpoint, body);
+      return { queued: true as const };
+    }
+
+    try {
+      const response = await authFetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Idempotency-Key': `online-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` },
+        body: JSON.stringify(body)
+      });
+      return { queued: false as const, response };
+    } catch (error) {
+      const latestNetwork = await NetInfo.fetch();
+      if (!latestNetwork.isConnected || latestNetwork.isInternetReachable === false) {
+        await queueOfflineRequest(endpoint, body);
+        return { queued: true as const };
+      }
+      throw error;
+    }
+  };
+
+  const syncOfflineQueue = async () => {
+    if (!currentUser?.userId || isSyncingOfflineQueue.current) return { synced: 0, pending: 0 };
+    const network = await NetInfo.fetch();
+    if (!network.isConnected || network.isInternetReachable === false) return { synced: 0, pending: await getPendingRequestCount(currentUser.userId) };
+
+    isSyncingOfflineQueue.current = true;
+    try {
+      const result = await syncOfflineRequests(currentUser.userId, (request) => authFetch(`${API_URL}${request.endpoint}`, {
+        method: request.method,
+        headers: { ...getAuthHeaders(), 'Idempotency-Key': request.id },
+        body: JSON.stringify(request.body)
+      }));
+      setPendingSyncCount(result.pending);
+      return result;
+    } finally {
+      isSyncingOfflineQueue.current = false;
+    }
+  };
+
   // Uygulama Açılışında Oturumu Kontrol Et
   useEffect(() => {
     const checkSavedSession = async () => {
@@ -227,6 +196,91 @@ export default function App() {
   }, []);
 
   // Verileri Sunucudan Çek
+  const setupNotifications = async (user: UserSession) => {
+    try {
+      // Expo Go Android'de remote push token desteği yoktur (SDK 53+).
+      // Development/production build'de ise bildirim sistemi normal şekilde çalışır.
+      if (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient') {
+        console.log('Push bildirimleri Expo Go geliştirme ortamında atlandı.');
+        return;
+      }
+
+      const Notifications = require('expo-notifications');
+
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false
+        })
+      });
+
+      const permissions = await Notifications.getPermissionsAsync();
+      let finalStatus = permissions.status;
+
+      if (finalStatus !== 'granted') {
+        finalStatus = (await Notifications.requestPermissionsAsync()).status;
+      }
+
+      if (finalStatus !== 'granted') {
+        console.log('Bildirim izni verilmedi.');
+        return;
+      }
+
+      if (Notifications.setNotificationChannelAsync) {
+        await Notifications.setNotificationChannelAsync('cay-takip', {
+          name: 'Çay Takip Bildirimleri',
+          importance: Notifications.AndroidImportance?.HIGH ?? 4
+        });
+      }
+
+      const projectId = process.env.EXPO_PUBLIC_PROJECT_ID || undefined;
+
+      const tokenResponse = await Notifications.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined
+      );
+
+      const token = tokenResponse?.data;
+
+      if (token) {
+        await fetchWithTimeout(`${API_URL}/notifications/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${user.token}`
+          },
+          body: JSON.stringify({ token })
+        });
+      }
+    } catch (e) {
+      console.log('Bildirim kurulumu atlandı:', e);
+    }
+  };
+
+  const scheduleDueNotifications = async (items: HarvestRecord[]) => {
+    if (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient') {
+      return;
+    }
+
+    try {
+      const Notifications = require('expo-notifications');
+      const permissions = await Notifications.getPermissionsAsync();
+      if (permissions.status !== 'granted') return;
+      const now = new Date();
+      if (Notifications.cancelAllScheduledNotificationsAsync) await Notifications.cancelAllScheduledNotificationsAsync();
+      for (const h of items) {
+        if (!h.isVadeli || !h.vadeTarihi) continue;
+        const raw = String(h.vadeTarihi);
+        const m = raw.match(/^(\d{4})[-.](\d{1,2})(?:[-.](\d{1,2}))?/);
+        if (!m) continue;
+        const due = new Date(Number(m[1]), Number(m[2])-1, Number(m[3] || 1), 9, 0, 0);
+        const reminder = new Date(due.getTime() - 24*60*60*1000);
+        if (reminder <= now || due <= now) continue;
+        await Notifications.scheduleNotificationAsync({ content:{ title:'⏰ Çay Takip - Vade Yaklaşıyor', body:`${h.firma || 'Fabrika'} için ${h.uretici || h.producerName || 'üretici'} kaydının vadesi ${formatDisplayDate(h.vadeTarihi)}.`, data:{type:'vade',harvestId:h._id}, sound:'default' }, trigger: reminder });
+      }
+    } catch (e) { console.log('Vade bildirimi planlanamadı:', e); }
+  };
+
   const fetchData = async () => {
     if (!currentUser?.token) return;
     setLoading(true);
@@ -241,16 +295,56 @@ export default function App() {
       ]);
       const parse = async (r: PromiseSettledResult<Response>) => r.status === 'fulfilled' && r.value.ok ? r.value.json() : [];
       const [rawH, rawE, rawG, rawP, rawA] = await Promise.all(results.map(parse));
+      const allRequestsSucceeded = results.every((r) => r.status === 'fulfilled' && r.value.ok);
+      const allRequestsFailed = results.every((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok));
+
+      if (allRequestsFailed) {
+        const snapshot = await getDataSnapshot(currentUser.userId);
+        if (snapshot) {
+          setHarvests(snapshot.harvests as HarvestRecord[]);
+          setExpenses(snapshot.expenses as ExpenseRecord[]);
+          setGardens(snapshot.gardens as GardenRecord[]);
+          setFactoryPrices(snapshot.factoryPrices as FactoryPriceRecord[]);
+          setAds(snapshot.ads as AdRecord[]);
+          Alert.alert('Çevrimdışı Mod', 'Son senkronize edilen veriler gösteriliyor. Yeni kayıtlar bağlantı geldiğinde gönderilecek.');
+          return;
+        }
+      }
+
       setHarvests(rawH || []); setExpenses(rawE || []); setGardens(rawG || []); setFactoryPrices(rawP || []); setAds(rawA || []);
-      if (results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok))) console.warn('Bazı veriler güncellenemedi.');
+      if (allRequestsSucceeded) {
+        await saveDataSnapshot(currentUser.userId, {
+          harvests: rawH || [], expenses: rawE || [], gardens: rawG || [], factoryPrices: rawP || [], ads: rawA || []
+        });
+      }
+      await scheduleDueNotifications(rawH || []);
+      const failedSources = results.map((r, i) => (r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)) ? ['hasatlar','giderler','bahçeler','fabrika fiyatları','reklamlar'][i] : null).filter(Boolean);
+      if (failedSources.length === results.length) { Alert.alert('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.'); }
     } catch (err: any) { Alert.alert('Bağlantı Kurulamadı', err.message); }
     finally { setLoading(false); }
   };
 
   useEffect(() => {
     if (currentUser) {
+      setupNotifications(currentUser);
+      refreshPendingSyncCount();
+      syncOfflineQueue().then((result) => {
+        if (result.synced > 0) fetchData();
+      });
       fetchData();
     }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) {
+        syncOfflineQueue().then((result) => {
+          if (result.synced > 0) fetchData();
+        });
+      }
+    });
+    return unsubscribe;
   }, [currentUser]);
 
   // DİNAMİK HESAPLAMALAR
@@ -459,19 +553,22 @@ export default function App() {
         kg: parseFloat(hForm.kg) || 0,
         weight: parseFloat(hForm.kg) || 0,
         firma: hForm.firma ? hForm.firma.trim() : '',
-        fiyat: parseFloat(hForm.fiyat) || 0,
-        tahsilat: parseFloat(hForm.tahsilat) || 0,
+        fiyat: parseMoney(hForm.fiyat),
+        tahsilat: parseMoney(hForm.tahsilat),
         aciklama: hForm.aciklama ? hForm.aciklama.trim() : '',
         bahce: hForm.garden ? hForm.garden.trim() : '',
         isVadeli: hForm.isVadeli,
         vadeTarihi: hForm.isVadeli ? hForm.vadeTarihi : ''
       };
 
-      const res = await authFetch(`${API_URL}/harvests`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload)
-      });
+      const result = await postOrQueue('/harvests', payload);
+      if (result.queued) {
+        Alert.alert('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        setHForm({ date: new Date().toISOString().split('T')[0], surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '' });
+        setActiveTab('dashboard');
+        return;
+      }
+      const res = result.response;
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Hasat kaydı eklendi.');
@@ -509,7 +606,7 @@ export default function App() {
       Alert.alert('Eksik Bilgi', 'Lütfen tahsilat düşülecek satışı seçin.');
       return;
     }
-    const amount = Number(String(payAmount).replace(',', '.'));
+    const amount = parseMoney(payAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert('Eksik Bilgi', 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.');
       return;
@@ -532,16 +629,18 @@ export default function App() {
 
     setLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/payments`, {
-        method: 'POST',
-        headers: { ...getAuthHeaders(), 'Idempotency-Key': `payment-${payHarvestId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
-        body: JSON.stringify({
-          harvestId: payHarvestId,
-          tutar: amount,
-          aciklama: payDesc.trim(),
-          tarih: new Date().toISOString().split('T')[0]
-        })
+      const result = await postOrQueue('/payments', {
+        harvestId: payHarvestId,
+        tutar: amount,
+        aciklama: payDesc.trim(),
+        tarih: new Date().toISOString().split('T')[0]
       });
+      if (result.queued) {
+        Alert.alert('Çevrimdışı Kaydedildi', 'Tahsilat telefonda saklandı; internet gelince otomatik gönderilecek.');
+        setPayHarvestId(''); setPayAmount(''); setPayDesc('');
+        return;
+      }
+      const res = result.response;
 
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -563,7 +662,7 @@ export default function App() {
   // Fabrika fiyatı kaydet
   const handleSaveFactoryPrice = async () => {
     if (!isAdmin) { Alert.alert('Yetki Yok', 'Bu işlemi sadece yönetici yapabilir.'); return; }
-    const fiyat = Number(String(priceForm.fiyat).replace(',', '.'));
+    const fiyat = parseMoney(priceForm.fiyat);
     const tarih = toServerDate(priceForm.tarih);
     const gecerlilikBaslangic = toServerDate(priceForm.gecerlilikBaslangic);
     if (!priceForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0 || !tarih) {
@@ -571,7 +670,13 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/factory-prices`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ ...priceForm, firma: priceForm.firma.trim(), fiyat, tarih, gecerlilikBaslangic, vadeGun: Number(priceForm.vadeGun) || 0 }) });
+      const result = await postOrQueue('/factory-prices', { ...priceForm, firma: priceForm.firma.trim(), fiyat, tarih, gecerlilikBaslangic, vadeGun: Number(priceForm.vadeGun) || 0 });
+      if (result.queued) {
+        Alert.alert('Çevrimdışı Kaydedildi', 'Fabrika fiyatı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        setPriceForm({ ...priceForm, fiyat: '', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
+        return;
+      }
+      const res = result.response;
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         Alert.alert('Başarılı', 'Fabrika fiyatı kaydedildi.');
@@ -589,11 +694,13 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/ads`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ ...adForm, firma: adForm.firma.trim(), baslik: adForm.baslik.trim() })
-      });
+      const result = await postOrQueue('/ads', { ...adForm, firma: adForm.firma.trim(), baslik: adForm.baslik.trim() });
+      if (result.queued) {
+        Alert.alert('Çevrimdışı Kaydedildi', 'Reklam kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        setAdForm({ ...adForm, firma: '', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', baslangic: '', bitis: '' });
+        return;
+      }
+      const res = result.response;
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         Alert.alert('Başarılı', 'Reklam alanı yayına alındı.');
@@ -610,7 +717,7 @@ export default function App() {
   };
 
   // Tahsilat Düzenleme Modalı Aç
-  const openEditModal = (harvestItem: any) => {
+  const openEditModal = (harvestItem: HarvestRecord) => {
     setEditingHarvest(harvestItem);
     setEditTahsilatVal(String(harvestItem.tahsilat || 0));
     setEditModalVisible(true);
@@ -618,7 +725,7 @@ export default function App() {
 
   const handleUpdateCollection = async () => {
     if (!editingHarvest) return;
-    const newTahsilat = parseFloat(editTahsilatVal);
+    const newTahsilat = parseMoney(editTahsilatVal);
     if (isNaN(newTahsilat) || newTahsilat < 0) {
       Alert.alert('Hata', 'Lütfen geçerli bir tutar girin.');
       return;
@@ -656,15 +763,17 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/gardens`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          name: gForm.name.trim(),
-          adaParsel: gForm.adaParsel.trim(),
-          alan: gForm.alan.trim()
-        })
+      const result = await postOrQueue('/gardens', {
+        name: gForm.name.trim(),
+        adaParsel: gForm.adaParsel.trim(),
+        alan: gForm.alan.trim()
       });
+      if (result.queued) {
+        Alert.alert('Çevrimdışı Kaydedildi', 'Bahçe kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        setGForm({ name: '', adaParsel: '', alan: '' });
+        return;
+      }
+      const res = result.response;
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Bahçe eklendi.');
@@ -689,16 +798,18 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/expenses`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          tarih: eForm.date || new Date().toISOString().split('T')[0],
-          kategori: eForm.kategori,
-          aciklama: eForm.aciklama ? eForm.aciklama.trim() : '',
-          tutar: parseFloat(eForm.tutar) || 0
-        })
+      const result = await postOrQueue('/expenses', {
+        tarih: eForm.date || new Date().toISOString().split('T')[0],
+        kategori: eForm.kategori,
+        aciklama: eForm.aciklama ? eForm.aciklama.trim() : '',
+        tutar: parseMoney(eForm.tutar)
       });
+      if (result.queued) {
+        Alert.alert('Çevrimdışı Kaydedildi', 'Gider kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        setEForm({ ...eForm, aciklama: '', tutar: '' });
+        return;
+      }
+      const res = result.response;
 
       if (res.ok) {
         Alert.alert('Başarılı', 'Gider eklendi.');
@@ -794,10 +905,13 @@ export default function App() {
         {/* HEADER */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle}>🍃 ÇAY ÜRETİCİSİ YÖNETİM SİSTEMİ</Text>
+            <Text style={styles.headerTitle}>🍃 Çay Takip</Text>
             <Text style={styles.headerSubtitle}>
               Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}
             </Text>
+            {pendingSyncCount > 0 && (
+              <Text style={styles.headerSubtitle}>⏳ {pendingSyncCount} kayıt senkronizasyon bekliyor</Text>
+            )}
           </View>
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
             <Text style={styles.logoutBtnText}>Çıkış</Text>
@@ -811,7 +925,7 @@ export default function App() {
               style={[styles.navItem, activeTab === 'dashboard' && styles.navItemActive]}
               onPress={() => setActiveTab('dashboard')}
             >
-              <Text style={[styles.navText, activeTab === 'dashboard' && styles.navTextActive]}>📊 Özet</Text>
+              <Text style={[styles.navText, activeTab === 'dashboard' && styles.navTextActive]}>🏠 Ana Sayfa</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -825,21 +939,21 @@ export default function App() {
               style={[styles.navItem, activeTab === 'collections' && styles.navItemActive]}
               onPress={() => setActiveTab('collections')}
             >
-              <Text style={[styles.navText, activeTab === 'collections' && styles.navTextActive]}>💵 Tahsilat</Text>
+              <Text style={[styles.navText, activeTab === 'collections' && styles.navTextActive]}>💳 Ödeme Al</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.navItem, activeTab === 'receivables' && styles.navItemActive]}
               onPress={() => setActiveTab('receivables')}
             >
-              <Text style={[styles.navText, activeTab === 'receivables' && styles.navTextActive]}>⏳ Vadeli Alacaklar</Text>
+              <Text style={[styles.navText, activeTab === 'receivables' && styles.navTextActive]}>⏳ Alacaklar</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.navItem, activeTab === 'expense' && styles.navItemActive]}
               onPress={() => setActiveTab('expense')}
             >
-              <Text style={[styles.navText, activeTab === 'expense' && styles.navTextActive]}>📉 Giderler</Text>
+              <Text style={[styles.navText, activeTab === 'expense' && styles.navTextActive]}>🧾 Gider Ekle</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -853,7 +967,14 @@ export default function App() {
               style={[styles.navItem, activeTab === 'prices' && styles.navItemActive]}
               onPress={() => setActiveTab('prices')}
             >
-              <Text style={[styles.navText, activeTab === 'prices' && styles.navTextActive]}>🏭 Fabrika Fiyatları</Text>
+              <Text style={[styles.navText, activeTab === 'prices' && styles.navTextActive]}>🏭 Fiyatlar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'reports' && styles.navItemActive]}
+              onPress={() => setActiveTab('reports')}
+            >
+              <Text style={[styles.navText, activeTab === 'reports' && styles.navTextActive]}>📊 Raporlar</Text>
             </TouchableOpacity>
 
             {/* ADMIN SEKMESİ */}
@@ -873,598 +994,115 @@ export default function App() {
           style={styles.content}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} colors={['#1b4332']} />}
         >
-          {/* DASHBOARD TABI */}
           {activeTab === 'dashboard' && (
-            <View>
-              <Text style={styles.sectionTitle}>GENEL ÖZET PANELİ</Text>
-              {ads.filter(a => a.slot === 'dashboard_top' || a.slot === 'dashboard_middle').slice(0, 2).map((ad, i) => (
-                <View key={ad._id || i} style={styles.adCard}>
-                  <Text style={styles.adLabel}>SPONSORLU • {ad.kategori || 'REKLAM'}</Text>
-                  <Text style={styles.adTitle}>{ad.baslik}</Text>
-                  <Text style={styles.adText}>{ad.aciklama || ''}</Text>
-                  <Text style={styles.adCompany}>📣 {ad.firma}{ad.telefon ? ` • ${ad.telefon}` : ''}</Text>
-                </View>
-              ))}
-
-              <View style={styles.statsGrid}>
-                <View style={[styles.statCard, { borderLeftColor: '#2a9d8f' }]}>
-                  <Text style={styles.statTitle}>Toplam Hasat</Text>
-                  <Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR')} KG</Text>
-                </View>
-
-                <View style={[styles.statCard, { borderLeftColor: '#e76f51' }]}>
-                  <Text style={styles.statTitle}>Toplam Satış Tutarı</Text>
-                  <Text style={styles.statValue}>{formatTL(totalSales)}</Text>
-                </View>
-
-                <View style={[styles.statCard, { borderLeftColor: '#38b000' }]}>
-                  <Text style={styles.statTitle}>Yapılan Tahsilat</Text>
-                  <Text style={styles.statValue}>{formatTL(totalPay)}</Text>
-                </View>
-
-                <View style={[styles.statCard, { borderLeftColor: '#d62828' }]}>
-                  <Text style={styles.statTitle}>Kalan Alacak / Bekleyen</Text>
-                  <Text style={[styles.statValue, { color: pendingCollection > 0 ? '#d62828' : '#2b9348' }]}>
-                    {formatTL(pendingCollection)}
-                  </Text>
-                </View>
-
-                <View style={[styles.statCard, { borderLeftColor: '#f4a261' }]}>
-                  <Text style={styles.statTitle}>Toplam Gider</Text>
-                  <Text style={styles.statValue}>{formatTL(totalExp)}</Text>
-                </View>
-
-                <View style={[styles.statCard, { borderLeftColor: '#1d3557' }]}>
-                  <Text style={styles.statTitle}>Net Kar / Bakiye</Text>
-                  <Text style={[styles.statValue, { color: netProfit >= 0 ? '#2b9348' : '#d62828' }]}>
-                    {formatTL(netProfit)}
-                  </Text>
-                </View>
-              </View>
-{/* RECENT HARVESTS LIST */}
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>SON HASAT KAYITLARI</Text>
-              {harvests.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz kaydedilmiş bir hasat yok.</Text>
-              ) : (
-                harvests.slice(0, 10).map((item, index) => {
-                  const saleVal = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
-                  const payVal = Number(item.tahsilat) || 0;
-                  const remaining = saleVal - payVal;
-
-                  return (
-                    <View key={item._id || index} style={styles.listItem}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.listTitle}>
-                          {item.uretici || item.producerName || 'Bilinmeyen Üretici'} ({item.surum || '1. Sürüm'})
-                        </Text>
-                        <Text style={styles.listSubText}>
-                          📅 {item.tarih || 'Tarih Yok'} | ⚖️ {item.kg || item.weight || 0} KG | 💵 Fiyat: {item.fiyat || 0} TL
-                        </Text>
-                        {item.bahce ? <Text style={styles.listSubText}>🏡 Bahçe: {item.bahce}</Text> : null}
-                        {item.isVadeli ? <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text> : null}
-                        <Text style={styles.listSubText}>
-                          💰 Toplam: {formatTL(saleVal)} | 🟢 Ödenen: {formatTL(payVal)}
-                        </Text>
-                        <Text style={{ color: remaining > 0 ? '#d62828' : '#2b9348', fontWeight: 'bold', marginTop: 2 }}>
-                          {remaining > 0 ? `🔴 Kalan Borç: ${formatTL(remaining)}` : '🟢 Tamamı Ödendi'}
-                        </Text>
-                      </View>
-                      <View style={{ gap: 5 }}>
-                        <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
-                          <Text style={styles.actionBtnText}>✏️ Ödeme</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('harvests', item._id, 'Hasat')}>
-                          <Text style={styles.actionBtnText}>🗑️ Sil</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
+            <DashboardScreen
+              ads={ads}
+              harvests={harvests}
+              totalKg={totalKg}
+              totalSales={totalSales}
+              totalPay={totalPay}
+              pendingCollection={pendingCollection}
+              totalExp={totalExp}
+              netProfit={netProfit}
+              openEditModal={openEditModal}
+              handleDelete={handleDelete}
+              onNavigate={setActiveTab}
+            />
           )}
 
           {/* HASAT EKLE TABI */}
           {activeTab === 'harvest' && (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>🌱 YENİ HASAT / SATIŞ KAYDI</Text>
-
-              <Text style={styles.label}>Tarih</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.date}
-                onChangeText={(t) => setHForm({ ...hForm, date: t })}
-                placeholder="GÜN.AY.YIL (Örn: 10.08.2026)"
-              />
-
-              <Text style={styles.label}>Sürüm Seçimi</Text>
-              <View style={styles.rowBtnGroup}>
-                {['1. Sürüm', '2. Sürüm', '3. Sürüm', '4. Sürüm'].map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    style={[styles.groupBtn, hForm.surum === s && styles.groupBtnActive]}
-                    onPress={() => setHForm({ ...hForm, surum: s })}
-                  >
-                    <Text style={[styles.groupBtnText, hForm.surum === s && styles.groupBtnTextActive]}>{s}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={styles.label}>Üretici Adı</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.producer}
-                onChangeText={(t) => setHForm({ ...hForm, producer: t })}
-                placeholder={currentUser?.name || "Üretici Adı"}
-              />
-
-              <Text style={styles.label}>Miktar (KG) *</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.kg}
-                onChangeText={(t) => setHForm({ ...hForm, kg: t })}
-                placeholder="Örn: 1000"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.label}>Firma / Alıcı</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.firma}
-                onChangeText={(t) => setHForm({ ...hForm, firma: t })}
-                placeholder="Örn: ÇAYKUR / Özel Fabrika"
-              />
-
-              <Text style={styles.label}>Birim Fiyat (TL)</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.fiyat}
-                onChangeText={(t) => setHForm({ ...hForm, fiyat: t })}
-                placeholder="Örn: 20"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.label}>Tahsil Edilen Peşinat Tutar (TL)</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.tahsilat}
-                onChangeText={(t) => setHForm({ ...hForm, tahsilat: t })}
-                placeholder="Örn: 0"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.label}>Bahçe</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.garden}
-                onChangeText={(t) => setHForm({ ...hForm, garden: t })}
-                placeholder="Örn: Arka Bahçe"
-              />
-
-              {/* VADELİ SATIŞ OPSİYONU */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 10 }}>
-                <Text style={{ fontWeight: 'bold', color: '#1b4332' }}>Vadeli Satış mı?</Text>
-                <Switch
-                  value={hForm.isVadeli}
-                  onValueChange={(val) => setHForm({ ...hForm, isVadeli: val })}
-                  trackColor={{ false: '#767577', true: '#2a9d8f' }}
-                />
-              </View>
-
-              {/* Tarih Formatı Etiket Güncellemesi (Madde 3) */}
-              {hForm.isVadeli && (
-                <View>
-                  <Text style={styles.label}>Vade Tarihi (Örn: GÜN.AY.YIL veya 15.09.2026)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={hForm.vadeTarihi}
-                    onChangeText={(t) => setHForm({ ...hForm, vadeTarihi: t })}
-                    placeholder="GÜN.AY.YIL (Örn: 15.09.2026)"
-                  />
-                </View>
-              )}
-
-              <Text style={styles.label}>Açıklama</Text>
-              <TextInput
-                style={styles.input}
-                value={hForm.aciklama}
-                onChangeText={(t) => setHForm({ ...hForm, aciklama: t })}
-                placeholder="Notlar..."
-              />
-
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveHarvest}>
-                <Text style={styles.submitBtnText}>💾 HASAT KAYDINI KAYDET</Text>
-              </TouchableOpacity>
-            </View>
+            <HarvestScreen
+              currentUser={currentUser}
+              hForm={hForm}
+              handleSaveHarvest={handleSaveHarvest}
+              setHForm={setHForm}
+            />
           )}
 
-          {/* TAHSİLAT TABI (Toplu Tahsilat Alanı Kaldırıldı - Madde 4) */}
+          {/* TAHSİLAT TABI */}
           {activeTab === 'collections' && (
-            <View>
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>🎯 ÇAY SATIŞINA ÖZEL TAHSİLAT</Text>
-                <Text style={{ color: '#666', marginBottom: 10, fontSize: 13 }}>
-                  Ödemenin düşülmesini istediğiniz çay satışını doğrudan seçin.
-                </Text>
-
-                <Text style={styles.label}>Ödeme Yapılacak Satışı Seçin</Text>
-                <ScrollView style={{ maxHeight: 200, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 5, marginBottom: 10 }}>
-                  {harvests.filter(h => ((Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0) - (Number(h.tahsilat) || 0)) > 0).length === 0 ? (
-                    <Text style={{ padding: 10, color: '#888' }}>Bekleyen ödemesi olan satış yok.</Text>
-                  ) : (
-                    harvests
-                      .filter(h => ((Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0) - (Number(h.tahsilat) || 0)) > 0)
-                      .map((h) => {
-                        const kalan = (Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0) - (Number(h.tahsilat) || 0);
-                        const isSelected = payHarvestId === h._id;
-                        return (
-                          <TouchableOpacity
-                            key={h._id}
-                            style={{
-                              padding: 10,
-                              backgroundColor: isSelected ? '#1b4332' : '#f8f9fa',
-                              borderRadius: 6,
-                              marginBottom: 5
-                            }}
-                            onPress={() => setPayHarvestId(h._id)}
-                          >
-                            <Text style={{ color: isSelected ? '#fff' : '#333', fontWeight: 'bold' }}>
-                              {h.tarih || ''} - {h.firma || 'Firma Yok'} ({h.kg || h.weight} KG) {h.bahce ? `- ${h.bahce}` : ''}
-                            </Text>
-                            <Text style={{ color: isSelected ? '#e0e0e0' : '#666', fontSize: 12 }}>
-                              Kalan Borç: {formatTL(kalan)}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })
-                  )}
-                </ScrollView>
-
-                <Text style={styles.label}>Tahsilat Tutarı (TL)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Örn: 5000"
-                  keyboardType="numeric"
-                  value={payAmount}
-                  onChangeText={setPayAmount}
-                />
-
-                <Text style={styles.label}>Açıklama / Dekont Notu</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Örn: Banka havalesi"
-                  value={payDesc}
-                  onChangeText={setPayDesc}
-                 autoCorrect={false} />
-
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSpecificHarvestPayment}>
-                  <Text style={styles.submitBtnText}>💳 SEÇİLİ SATIŞTAN DÜŞ VE KAYDET</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            <CollectionsScreen
+              handleSpecificHarvestPayment={handleSpecificHarvestPayment}
+              harvests={harvests}
+              payAmount={payAmount}
+              payDesc={payDesc}
+              payHarvestId={payHarvestId}
+              setPayAmount={setPayAmount}
+              setPayDesc={setPayDesc}
+              setPayHarvestId={setPayHarvestId}
+            />
           )}
 
           {/* VADELİ ALACAKLAR TABI - AYLIK GÖRÜNÜM */}
           {activeTab === 'receivables' && (
-            <View>
-              <Text style={styles.sectionTitle}>⏳ VADELİ ALACAKLAR • AYLIK TAKİP</Text>
-              <View style={[styles.statCard, { borderLeftColor: '#d62828', marginBottom: 15 }]}>
-                <Text style={styles.statTitle}>Toplam Bekleyen Vadeli / Açık Alacak</Text>
-                <Text style={[styles.statValue, { color: '#d62828' }]}>{formatTL(totalReceivables)}</Text>
-              </View>
-
-              {getReceivablesByMonth().length === 0 ? (
-                <Text style={styles.emptyText}>Bekleyen vadeli alacak kaydı bulunmuyor.</Text>
-              ) : (
-                getReceivablesByMonth().map(([month, items]: any) => {
-                  const monthTotal = items.reduce((sum: number, item: any) => {
-                    const total = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
-                    return sum + Math.max(0, total - (Number(item.tahsilat) || 0));
-                  }, 0);
-                  return (
-                    <View key={month} style={styles.monthCard}>
-                      <View style={styles.monthHeader}>
-                        <Text style={styles.monthTitle}>📅 {month}</Text>
-                        <Text style={styles.monthTotal}>{formatTL(monthTotal)}</Text>
-                      </View>
-                      {items.map((item: any, index: number) => {
-                        const saleVal = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
-                        const payVal = Number(item.tahsilat) || 0;
-                        const remaining = Math.max(0, saleVal - payVal);
-                        return (
-                          <View key={item._id || index} style={styles.listItem}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.listTitle}>🏭 {item.firma || 'Firma Belirtilmedi'}</Text>
-                              <Text style={styles.listSubText}>
-                                📅 Satış: {formatDisplayDate(item.tarih)} | ⚖️ {item.kg || item.weight || 0} KG | 💵 {item.fiyat || 0} TL/KG
-                              </Text>
-                              <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text>
-                              <Text style={styles.listSubText}>
-                                Toplam: {formatTL(saleVal)} | Tahsilat: {formatTL(payVal)}
-                              </Text>
-                              <Text style={{ color: '#d62828', fontWeight: 'bold', marginTop: 2 }}>
-                                🔴 Kalan: {formatTL(remaining)}
-                              </Text>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  );
-                })
-              )}
-            </View>
+            <ReceivablesScreen
+              getReceivablesByMonth={getReceivablesByMonth}
+              totalReceivables={totalReceivables}
+            />
           )}
 
           {/* GİDERLER TABI */}
           {activeTab === 'expense' && (
-            <View>
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>📉 GİDER EKLE</Text>
-
-                <Text style={styles.label}>Tarih</Text>
-                <TextInput
-                  style={styles.input}
-                  value={eForm.date}
-                  onChangeText={(t) => setEForm({ ...eForm, date: t })}
-                  placeholder="GÜN.AY.YIL"
-                />
-
-                <Text style={styles.label}>Kategori</Text>
-                <View style={styles.rowBtnGroup}>
-                  {['İşçilik', 'Gübre', 'Nakliye', 'Diğer'].map((kat) => (
-                    <TouchableOpacity
-                      key={kat}
-                      style={[styles.groupBtn, eForm.kategori === kat && styles.groupBtnActive]}
-                      onPress={() => setEForm({ ...eForm, kategori: kat })}
-                    >
-                      <Text style={[styles.groupBtnText, eForm.kategori === kat && styles.groupBtnTextActive]}>{kat}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Tutar (TL) *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={eForm.tutar}
-                  onChangeText={(t) => setEForm({ ...eForm, tutar: t })}
-                  placeholder="Örn: 1500"
-                  keyboardType="numeric"
-                />
-
-                <Text style={styles.label}>Açıklama</Text>
-                <TextInput
-                  style={styles.input}
-                  value={eForm.aciklama}
-                  onChangeText={(t) => setEForm({ ...eForm, aciklama: t })}
-                  placeholder="Gider detayları..."
-                />
-
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveExpense}>
-                  <Text style={styles.submitBtnText}>💾 GİDERİ KAYDET</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>GİDER LİSTESİ</Text>
-              {expenses.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz kaydedilmiş bir gider yok.</Text>
-              ) : (
-                expenses.map((item, index) => (
-                  <View key={item._id || index} style={styles.listItem}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>
-                        {item.kategori || 'Diğer'} - {formatTL(item.tutar)}
-                      </Text>
-                      <Text style={styles.listSubText}>📅 {item.tarih || 'Tarih Yok'}</Text>
-                      {item.aciklama ? <Text style={styles.listSubText}>📝 {item.aciklama}</Text> : null}
-                    </View>
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('expenses', item._id, 'Gider')}>
-                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </View>
+            <ExpenseScreen
+              eForm={eForm}
+              expenses={expenses}
+              handleDelete={handleDelete}
+              handleSaveExpense={handleSaveExpense}
+              setEForm={setEForm}
+            />
           )}
 
           {/* FABRİKA FİYATLARI TABI */}
           {activeTab === 'prices' && (
-            <View>
-              <Text style={styles.sectionTitle}>🏭 FABRİKA ÇAY FİYATLARI & POLİTİKA TAKİBİ</Text>
-
-              {isAdmin && <View style={styles.formCard}>
-                <Text style={styles.formTitle}>➕ Yeni Fiyat / Politika Kaydı</Text>
-                <Text style={styles.label}>Fabrika</Text>
-                <TextInput style={styles.input} value={priceForm.firma} onChangeText={(t) => setPriceForm({ ...priceForm, firma: t })} autoCorrect={false} autoCapitalize="characters" keyboardType="default" placeholder="ÇAYKUR / EFOR / DOĞUŞ..." />
-                <Text style={styles.label}>Fiyat (TL/KG)</Text>
-                <TextInput style={styles.input} value={priceForm.fiyat} onChangeText={(t) => setPriceForm({ ...priceForm, fiyat: t })} keyboardType="decimal-pad" placeholder="Örn: 35,00" />
-                <Text style={styles.label}>Fiyat Türü</Text>
-                <View style={styles.rowBtnGroup}>
-                  {['Haftalık','Aylık','Peşin','Vadeli'].map((tur) => <TouchableOpacity key={tur} style={[styles.groupBtn, priceForm.fiyatTuru === tur && styles.groupBtnActive]} onPress={() => setPriceForm({ ...priceForm, fiyatTuru: tur })}><Text style={[styles.groupBtnText, priceForm.fiyatTuru === tur && styles.groupBtnTextActive]}>{tur}</Text></TouchableOpacity>)}
-                </View>
-                {priceForm.fiyatTuru === 'Vadeli' && <><Text style={styles.label}>Vade (Gün)</Text><TextInput style={styles.input} value={priceForm.vadeGun} onChangeText={(t) => setPriceForm({ ...priceForm, vadeGun: t })} keyboardType="numeric" placeholder="Örn: 30" /></>}
-                <Text style={styles.label}>Fiyat Tarihi</Text>
-                <TextInput style={styles.input} value={priceForm.tarih} onChangeText={(t) => setPriceForm({ ...priceForm, tarih: t })} placeholder="GG.AA.YYYY" keyboardType="default" />
-                <Text style={styles.label}>Geçerlilik Başlangıcı (opsiyonel)</Text>
-                <TextInput style={styles.input} value={priceForm.gecerlilikBaslangic} onChangeText={(t) => setPriceForm({ ...priceForm, gecerlilikBaslangic: t })} placeholder="GG.AA.YYYY" keyboardType="default" />
-                <Text style={styles.label}>Fiyat Politikası / Açıklama</Text>
-                <TextInput style={styles.input} value={priceForm.politika} onChangeText={(t) => setPriceForm({ ...priceForm, politika: t })} autoCorrect={false} placeholder="Prim, vade, kampanya, kota vb." />
-                <Text style={styles.label}>Kaynak</Text>
-                <TextInput style={styles.input} value={priceForm.kaynak} onChangeText={(t) => setPriceForm({ ...priceForm, kaynak: t })} autoCorrect={false} placeholder="Firma duyurusu / WhatsApp / telefon..." />
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><Text style={styles.submitBtnText}>💾 FİYATI KAYDET</Text></TouchableOpacity>
-              </View>} 
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>FABRİKALAR</Text>
-              <View style={styles.rowBtnGroup}>
-                {Array.from(new Set(factoryPrices.map((p: any) => String(p.firma || '').trim()).filter(Boolean))).map((firma) => <TouchableOpacity key={firma} style={[styles.groupBtn, selectedFactory === firma && styles.groupBtnActive]} onPress={() => setSelectedFactory(selectedFactory === firma ? null : firma)}><Text style={[styles.groupBtnText, selectedFactory === firma && styles.groupBtnTextActive]}>{firma}</Text></TouchableOpacity>)}
-              </View>
-              {selectedFactory && <>
-                <View style={styles.rowBtnGroup}>
-                  {['Tümü','Haftalık','Aylık','Peşin','Vadeli'].map((tur: any) => <TouchableOpacity key={tur} style={[styles.groupBtn, factoryFilter === tur && styles.groupBtnActive]} onPress={() => setFactoryFilter(tur)}><Text style={[styles.groupBtnText, factoryFilter === tur && styles.groupBtnTextActive]}>{tur}</Text></TouchableOpacity>)}
-                </View>
-                <Text style={styles.sectionTitle}>🏭 {selectedFactory} • FİYAT GEÇMİŞİ</Text>
-              </>}
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>GÜNCEL / SON KAYITLAR</Text>
-              {factoryPrices.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz fabrika fiyatı eklenmedi.</Text>
-              ) : (
-                factoryPrices
-                  .filter((p: any) => !selectedFactory || String(p.firma || '').trim() === selectedFactory)
-                  .filter((p: any) => factoryFilter === 'Tümü' || String(p.fiyatTuru || 'Peşin') === factoryFilter)
-                  .map((p: any, index: number) => (
-                    <View key={p._id || index} style={styles.priceCard}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.listTitle}>🏭 {p.firma}</Text>
-                        <Text style={styles.priceValue}>{formatTL(Number(p.fiyat) || 0)} / KG</Text>
-                        <Text style={styles.listSubText}>📌 {p.fiyatTuru || 'Peşin'}{p.vadeGun ? ` • ${p.vadeGun} Gün` : ''} • 📅 {formatDisplayDate(p.tarih)}</Text>
-                        {p.gecerlilikBaslangic ? <Text style={styles.listSubText}>⏱️ Geçerlilik başlangıcı: {formatDisplayDate(p.gecerlilikBaslangic)}</Text> : null}
-                        {p.politika ? <Text style={styles.listSubText}>📝 {p.politika}</Text> : null}
-                        {p.kaynak ? <Text style={styles.listSubText}>🔎 Kaynak: {p.kaynak}</Text> : null}
-                      </View>
-                      {isAdmin && <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('factory-prices', p._id, 'Fiyat')}><Text style={styles.actionBtnText}>🗑️</Text></TouchableOpacity>}
-                    </View>
-                  ))
-              )}
-
-              <View style={styles.infoCard}>
-                <Text style={styles.infoTitle}>ℹ️ Takip Mantığı</Text>
-                <Text style={styles.infoText}>ÇAYKUR, EFOR, DOĞUŞ ve diğer alıcıların fiyatlarını ve fiyat politikalarını tarihleriyle kaydedin. Böylece Haziran–Temmuz–Ağustos dönemlerinde hangi firmanın hangi fiyatı uyguladığını karşılaştırabilirsiniz.</Text>
-              </View>
-            </View>
+            <FactoryPricesScreen
+              factoryFilter={factoryFilter}
+              factoryPrices={factoryPrices}
+              handleDelete={handleDelete}
+              handleSaveFactoryPrice={handleSaveFactoryPrice}
+              isAdmin={isAdmin}
+              priceForm={priceForm}
+              selectedFactory={selectedFactory}
+              setFactoryFilter={setFactoryFilter}
+              setPriceForm={setPriceForm}
+              setSelectedFactory={setSelectedFactory}
+            />
           )}
 
-          {/* BAHÇELER TABI (Dinamik Bahçe Toplamları Entegre Edildi - Madde 1) */}
+          {/* BAHÇELER TABI */}
           {activeTab === 'gardens' && (
-            <View>
-              <Text style={styles.sectionTitle}>📊 BAHÇE BAZLI TOPLAM TOPLAMA VE KAZANÇ</Text>
-              {calculatedGardenSummaries.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz bahçelerden yapılmış bir hasat verisi bulunamadı.</Text>
-              ) : (
-                calculatedGardenSummaries.map((g, idx) => (
-                  <View key={idx} style={[styles.listItem, { borderLeftWidth: 4, borderLeftColor: '#1b4332' }]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏡 {g.name}</Text>
-                      <Text style={styles.listSubText}>⚖️ Toplam Hasat: {g.toplamKg.toLocaleString('tr-TR')} KG</Text>
-                      <Text style={styles.listSubText}>💰 Toplam Kazanç: {formatTL(g.toplamKazanc)}</Text>
-                      <Text style={styles.listSubText}>💵 Toplam Tahsilat: {formatTL(g.toplamTahsilat)}</Text>
-                    </View>
-                  </View>
-                ))
-              )}
+            <GardensScreen
+              gForm={gForm}
+              gardens={gardens}
+              calculatedGardenSummaries={calculatedGardenSummaries}
+              handleDelete={handleDelete}
+              handleSaveGarden={handleSaveGarden}
+              setGForm={setGForm}
+            />
+          )}
 
-              <View style={[styles.formCard, { marginTop: 20 }]}>
-                <Text style={styles.formTitle}>🏡 YENİ BAHÇE TANIMLA</Text>
-
-                <Text style={styles.label}>Bahçe Adı</Text>
-                <TextInput
-                  style={styles.input}
-                  value={gForm.name}
-                  onChangeText={(t) => setGForm({ ...gForm, name: t })}
-                  placeholder="Örn: Arka Bahçe"
-                />
-
-                <Text style={styles.label}>Ada / Parsel</Text>
-                <TextInput
-                  style={styles.input}
-                  value={gForm.adaParsel}
-                  onChangeText={(t) => setGForm({ ...gForm, adaParsel: t })}
-                  placeholder="Örn: 101/12"
-                />
-
-                <Text style={styles.label}>Alan (Dönüm / m²)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={gForm.alan}
-                  onChangeText={(t) => setGForm({ ...gForm, alan: t })}
-                  placeholder="Örn: 5 Dönüm"
-                />
-
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveGarden}>
-                  <Text style={styles.submitBtnText}>💾 BAHÇEYİ KAYDET</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>KAYITLI BAHÇE LİSTESİ</Text>
-              {gardens.length === 0 ? (
-                <Text style={styles.emptyText}>Henüz kaydedilmiş bir bahçe yok.</Text>
-              ) : (
-                gardens.map((item, index) => (
-                  <View key={item._id || index} style={styles.listItem}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏡 {item.name || 'İsimsiz Bahçe'}</Text>
-                      {item.adaParsel ? <Text style={styles.listSubText}>📍 Ada/Parsel: {item.adaParsel}</Text> : null}
-                      {item.alan ? <Text style={styles.listSubText}>📐 Alan: {item.alan}</Text> : null}
-                    </View>
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('gardens', item._id, 'Bahçe')}>
-                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </View>
+          {activeTab === 'reports' && (
+            <ReportsScreen
+              harvests={harvests}
+              expenses={expenses}
+              currentUser={currentUser}
+            />
           )}
 
           {/* ADMIN PANELİ TABI */}
           {activeTab === 'admin' && isAdmin && (
-            <View>
-              <Text style={styles.sectionTitle}>📢 REKLAM YÖNETİMİ</Text>
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>Yeni Reklam Alanı</Text>
-                <Text style={styles.label}>Reklam Veren Firma</Text>
-                <TextInput style={styles.input} value={adForm.firma} onChangeText={(t) => setAdForm({ ...adForm, firma: t })} placeholder="Örn: Çay Gübre Ltd." />
-                <Text style={styles.label}>Kategori</Text>
-                <TextInput style={styles.input} value={adForm.kategori} onChangeText={(t) => setAdForm({ ...adForm, kategori: t })} placeholder="Çay firması / Gübre / Motor..." />
-                <Text style={styles.label}>Reklam Başlığı</Text>
-                <TextInput style={styles.input} value={adForm.baslik} onChangeText={(t) => setAdForm({ ...adForm, baslik: t })} placeholder="Kısa reklam başlığı" />
-                <Text style={styles.label}>Reklam Metni</Text>
-                <TextInput style={styles.input} value={adForm.aciklama} onChangeText={(t) => setAdForm({ ...adForm, aciklama: t })} placeholder="Kampanya / ürün / iletişim bilgisi" />
-                <Text style={styles.label}>Telefon</Text>
-                <TextInput style={styles.input} value={adForm.telefon} onChangeText={(t) => setAdForm({ ...adForm, telefon: t })} keyboardType="phone-pad" placeholder="05..." />
-                <Text style={styles.label}>Görsel URL (opsiyonel)</Text>
-                <TextInput style={styles.input} value={adForm.gorselUrl} onChangeText={(t) => setAdForm({ ...adForm, gorselUrl: t })} placeholder="https://..." />
-                <TouchableOpacity style={styles.submitBtn} onPress={handleSaveAd}>
-                  <Text style={styles.submitBtnText}>📢 REKLAMI YAYINA AL</Text>
-                </TouchableOpacity>
-              </View>
-
-              {ads.map((ad, index) => (
-                <View key={ad._id || index} style={styles.adCard}>
-                  <Text style={styles.adLabel}>{ad.kategori || 'REKLAM'}</Text>
-                  <Text style={styles.adTitle}>{ad.baslik}</Text>
-                  <Text style={styles.adText}>{ad.aciklama || ''}</Text>
-                  <Text style={styles.adCompany}>📣 {ad.firma}{ad.telefon ? ` • ${ad.telefon}` : ''}</Text>
-                  <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('ads', ad._id, 'Reklam')}>
-                    <Text style={styles.actionBtnText}>🗑️ Reklamı Kaldır</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-
-              <Text style={styles.sectionTitle}>👑 ÜRETİCİ BAZLI GENEL ÖZET</Text>
-              {getAdminProducerSummary().length === 0 ? (
-                <Text style={styles.emptyText}>Gösterilecek üretici verisi bulunamadı.</Text>
-              ) : (
-                getAdminProducerSummary().map((p, idx) => {
-                  const rem = p.totalSales - p.totalPay;
-                  return (
-                    <View key={idx} style={styles.listItem}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.listTitle}>👤 {p.name}</Text>
-                        <Text style={styles.listSubText}>
-                          📦 Toplam Hasat Sayısı: {p.count} | ⚖️ {p.totalKg.toLocaleString('tr-TR')} KG
-                        </Text>
-                        <Text style={styles.listSubText}>
-                          💵 Satış: {formatTL(p.totalSales)} | 🟢 Tahsilat: {formatTL(p.totalPay)}
-                        </Text>
-                        <Text style={{ color: rem > 0 ? '#d62828' : '#2b9348', fontWeight: 'bold', marginTop: 2 }}>
-                          {rem > 0 ? `🔴 Kalan Bakiye: ${formatTL(rem)}` : '🟢 Borcu Yok'}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
+            <AdminScreen
+              adForm={adForm}
+              ads={ads}
+              getAdminProducerSummary={getAdminProducerSummary}
+              handleDelete={handleDelete}
+              handleSaveAd={handleSaveAd}
+              setAdForm={setAdForm}
+              totalKg={totalKg}
+              totalPay={totalPay}
+              totalSales={totalSales}
+              currentUser={currentUser}
+            />
           )}
         </ScrollView>
 
@@ -1507,383 +1145,3 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
-
-// ==========================================
-// STYLES
-// ==========================================
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f4f6f8'
-  },
-  authCard: {
-    backgroundColor: '#ffffff',
-    padding: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5
-  },
-  authTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 8
-  },
-  authSubTitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 20
-  },
-  label: {
-    alignSelf: 'flex-start',
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-    marginTop: 8
-  },
-  input: {
-    width: '100%',
-    backgroundColor: '#f8f9fa',
-    borderWidth: 1,
-    borderColor: '#dde2e5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 6
-  },
-  submitBtn: {
-    width: '100%',
-    backgroundColor: '#1b4332',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 18
-  },
-  submitBtnText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 15
-  },
-  header: {
-    backgroundColor: '#1b4332',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  headerTitle: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 16
-  },
-  headerSubtitle: {
-    color: '#b7e4c7',
-    fontSize: 12,
-    marginTop: 2
-  },
-  logoutBtn: {
-    backgroundColor: '#d62828',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6
-  },
-  logoutBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: 'bold'
-  },
-  navBar: {
-    backgroundColor: '#2d6a4f',
-    paddingVertical: 8,
-    paddingHorizontal: 8
-  },
-  navItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 6
-  },
-  navItemActive: {
-    backgroundColor: '#ffffff'
-  },
-  navItemActiveAdmin: {
-    backgroundColor: '#ffb703'
-  },
-  navText: {
-    color: '#d8f3dc',
-    fontWeight: '600',
-    fontSize: 13
-  },
-  navTextActive: {
-    color: '#1b4332',
-    fontWeight: 'bold'
-  },
-  navTextActiveAdmin: {
-    color: '#000000',
-    fontWeight: 'bold'
-  },
-  content: {
-    flex: 1,
-    padding: 16
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 12
-  },
-  statsGrid: {
-    gap: 10
-  },
-  statCard: {
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderRadius: 10,
-    borderLeftWidth: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2
-  },
-  statTitle: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600'
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#212529',
-    marginTop: 4
-  },
-  adCard: {
-    backgroundColor: '#fff8e6',
-    borderWidth: 1,
-    borderColor: '#f4c95d',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 12
-  },
-  adLabel: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#9a6700',
-    marginBottom: 4
-  },
-  adTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b4332'
-  },
-  adText: {
-    fontSize: 12,
-    color: '#555',
-    marginTop: 5
-  },
-  adCompany: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#6c4f00',
-    marginTop: 8
-  },
-  monthCard: {
-    backgroundColor: '#eef7f1',
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 14
-  },
-  monthHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8
-  },
-  monthTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b4332'
-  },
-  monthTotal: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#d62828'
-  },
-  priceCard: {
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderLeftWidth: 4,
-    borderLeftColor: '#2a9d8f'
-  },
-  priceValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginVertical: 3
-  },
-  infoCard: {
-    backgroundColor: '#eaf4ff',
-    padding: 14,
-    borderRadius: 10,
-    marginTop: 16
-  },
-  infoTitle: {
-    fontWeight: 'bold',
-    color: '#1d3557',
-    marginBottom: 5
-  },
-  infoText: {
-    color: '#4a5568',
-    fontSize: 12,
-    lineHeight: 18
-  },
-  emptyText: {
-    color: '#888',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginVertical: 20
-  },
-  listItem: {
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1
-  },
-  listTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#1b4332'
-  },
-  listSubText: {
-    fontSize: 12,
-    color: '#555',
-    marginTop: 2
-  },
-  editBtn: {
-    backgroundColor: '#ffb703',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6
-  },
-  deleteBtn: {
-    backgroundColor: '#e63946',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6
-  },
-  actionBtnText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: 'bold'
-  },
-  formCard: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2
-  },
-  formTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 12
-  },
-  rowBtnGroup: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginVertical: 6
-  },
-  groupBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    backgroundColor: '#f8f9fa'
-  },
-  groupBtnActive: {
-    backgroundColor: '#1b4332',
-    borderColor: '#1b4332'
-  },
-  groupBtnText: {
-    fontSize: 12,
-    color: '#333'
-  },
-  groupBtnTextActive: {
-    color: '#ffffff',
-    fontWeight: 'bold'
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
-  },
-  modalContent: {
-    width: '100%',
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 5
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 12
-  },
-  modalBtnGroup: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 16
-  },
-  modalCancelBtn: {
-    backgroundColor: '#6c757d',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8
-  },
-  modalSaveBtn: {
-    backgroundColor: '#1b4332',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8
-  },
-  modalBtnText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 13
-  }
-});

@@ -16,10 +16,14 @@
       "supportsTablet": true
     },
     "android": {
+      "permissions": [
+        "CAMERA"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.cryptomarsis.CayUreticisiV2"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -27,7 +31,17 @@
     "plugins": [
       "expo-router",
       "@react-native-community/datetimepicker",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Fişteki hasat bilgilerini okuyup formu doldurmak için kameranıza erişim gerekir.",
+          "photosPermission": "Fiş fotoğrafını seçip hasat formunu doldurmak için fotoğraflarınıza erişim gerekir.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store"
     ]
   }
 }

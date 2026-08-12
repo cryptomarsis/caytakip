@@ -3,11 +3,40 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const OpenAI = require('openai');
 
 const app = express();
+const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Mobil istemciler Origin başlığı göndermez; web sürümünde yalnızca açıkça
+    // izin verilen alan adları kabul edilir. Geliştirme ortamında eski davranış korunur.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (process.env.NODE_ENV !== 'production' && allowedOrigins.length === 0) return callback(null, true);
+    return callback(new Error('Bu web alan adına API erişim izni verilmedi.'));
+  }
+};
 
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 // Veritabanı adresi (.env yoksa varsayılan lokal adresi kullanır)
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/cay_takip';
@@ -23,6 +52,25 @@ const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_SECRET || 'cay-takip-change-this-secret';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const RECEIPT_MAX_BYTES = 6 * 1024 * 1024;
+const acceptedReceiptTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const receiptUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: RECEIPT_MAX_BYTES, files: 1 },
+  fileFilter: (req, file, callback) => {
+    if (!acceptedReceiptTypes.has(file.mimetype)) return callback(new Error('Sadece JPEG, PNG veya WEBP fiş fotoğrafı yükleyin.'));
+    callback(null, true);
+  }
+});
+const uploadReceipt = (req, res, next) => receiptUpload.single('receipt')(req, res, (error) => {
+  if (!error) return next();
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'Fiş fotoğrafı en fazla 6 MB olabilir.' });
+  }
+  return res.status(400).json({ error: error.message || 'Fiş fotoğrafı yüklenemedi.' });
+});
 
 const base64url = (value) => Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 const fromBase64url = (value) => Buffer.from(String(value).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
@@ -132,7 +180,8 @@ const UserProfileSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   phone: { type: String, required: true, unique: true },
   name: { type: String, required: true },
-  role: { type: String, enum: ['admin', 'user'], default: 'user' }
+  role: { type: String, enum: ['admin', 'user'], default: 'user' },
+  active: { type: Boolean, default: true }
 }, { timestamps: true });
 
 const SessionSchema = new mongoose.Schema({
@@ -143,6 +192,19 @@ const SessionSchema = new mongoose.Schema({
 }, { timestamps: true });
 SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 const Session = mongoose.model('Session', SessionSchema);
+
+// Mobil uygulamanın çevrimdışı kuyruğu aynı isteği bağlantı koptuğunda yeniden
+// gönderebilir. Bu kayıt, aynı Idempotency-Key ile oluşabilecek çift kayıtları engeller.
+const IdempotencySchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  key: { type: String, required: true },
+  method: { type: String, required: true },
+  path: { type: String, required: true },
+  status: { type: Number, required: true },
+  body: { type: mongoose.Schema.Types.Mixed, required: true }
+}, { timestamps: true });
+IdempotencySchema.index({ userId: 1, key: 1, method: 1, path: 1 }, { unique: true });
+const IdempotencyRecord = mongoose.model('IdempotencyRecord', IdempotencySchema);
 
 const AdSchema = new mongoose.Schema({
   slot: { type: String, enum: ['dashboard_top', 'dashboard_middle', 'prices_top'], default: 'dashboard_middle' },
@@ -194,6 +256,126 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+const publicRateWindows = new Map();
+const limitPublicUsage = (scope, maxRequests, windowMs) => (req, res, next) => {
+  const key = `${req.ip || 'unknown'}:${scope}`;
+  const now = Date.now();
+  const current = publicRateWindows.get(key);
+  const active = current && current.resetAt > now ? current : { count: 0, resetAt: now + windowMs };
+  if (active.count >= maxRequests) {
+    return res.status(429).json({ error: 'Çok fazla deneme yapıldı. Lütfen biraz sonra tekrar deneyin.' });
+  }
+  active.count += 1;
+  publicRateWindows.set(key, active);
+  next();
+};
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of publicRateWindows.entries()) if (value.resetAt <= now) publicRateWindows.delete(key);
+}, 60 * 60 * 1000).unref();
+
+// Yapay zekâ isteklerini kullanıcı bazında sınırlıyoruz. Bu bellek içi sınır,
+// tek sunucu çalıştıran mevcut Render kurulumu için yeterlidir; çoklu sunucuya
+// geçildiğinde Redis gibi paylaşılan bir rate-limit deposuna taşınmalıdır.
+const aiRateWindows = new Map();
+const limitAiUsage = (scope, maxRequests, windowMs) => (req, res, next) => {
+  const key = `${req.auth?.userId || 'anonymous'}:${scope}`;
+  const now = Date.now();
+  const current = aiRateWindows.get(key);
+  const active = current && current.resetAt > now ? current : { count: 0, resetAt: now + windowMs };
+  if (active.count >= maxRequests) {
+    const minutes = Math.max(1, Math.ceil((active.resetAt - now) / 60000));
+    return res.status(429).json({ error: `Bu özellik için kullanım sınırına ulaştınız. ${minutes} dakika sonra tekrar deneyin.` });
+  }
+  active.count += 1;
+  aiRateWindows.set(key, active);
+  next();
+};
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of aiRateWindows.entries()) if (value.resetAt <= now) aiRateWindows.delete(key);
+}, 60 * 60 * 1000).unref();
+
+const receiptSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    date: { type: 'string' },
+    kg: { type: 'number' },
+    firma: { type: 'string' },
+    fiyat: { type: 'number' },
+    tahsilat: { type: 'number' },
+    aciklama: { type: 'string' },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] }
+  },
+  required: ['date', 'kg', 'firma', 'fiyat', 'tahsilat', 'aciklama', 'confidence']
+};
+
+const reportInsightSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    summary: { type: 'string' },
+    insights: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { title: { type: 'string' }, detail: { type: 'string' } },
+        required: ['title', 'detail']
+      }
+    },
+    disclaimer: { type: 'string' }
+  },
+  required: ['summary', 'insights', 'disclaimer']
+};
+
+const runStructuredAi = async (name, schema, input) => {
+  if (!openai) {
+    const error = new Error('Yapay zekâ henüz etkin değil. Sunucunun OPENAI_API_KEY ayarını ekleyin.');
+    error.status = 503;
+    throw error;
+  }
+  const response = await openai.responses.create({
+    model: OPENAI_MODEL,
+    input,
+    text: { format: { type: 'json_schema', name, strict: true, schema } }
+  });
+  if (!response.output_text) throw new Error('Yapay zekâ yanıtı alınamadı.');
+  return JSON.parse(response.output_text);
+};
+
+const numeric = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const yearFromDate = (value) => {
+  const raw = String(value || '').trim();
+  const iso = raw.match(/^(\d{4})[-./]/);
+  if (iso) return Number(iso[1]);
+  const tr = raw.match(/^\d{1,2}[-./]\d{1,2}[-./](\d{4})$/);
+  if (tr) return Number(tr[1]);
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+};
+
+const idempotencyMiddleware = async (req, res, next) => {
+  const key = String(req.headers['idempotency-key'] || '').trim();
+  if (!key || !req.auth?.userId) return next();
+  const identity = { userId: req.auth.userId, key, method: req.method, path: req.path };
+  try {
+    const existing = await IdempotencyRecord.findOne(identity).lean();
+    if (existing) return res.status(existing.status).json(existing.body);
+    const originalJson = res.json.bind(res);
+    res.json = (body) => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        IdempotencyRecord.create({ ...identity, status: res.statusCode, body }).catch((error) => console.error('Idempotency kaydı yazılamadı:', error.message));
+      }
+      return originalJson(body);
+    };
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 const buildUserFilter = (req) => {
   const auth = getAuthUser(req);
   if (!auth?.userId) return { _id: null };
@@ -237,7 +419,7 @@ const findLegacyUser = async (phone) => {
   return null;
 };
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', limitPublicUsage('login', 10, 15 * 60 * 1000), async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
     if (!phone || phone.length !== 11) return res.status(400).json({ error: 'Geçerli telefon numarası zorunludur.' });
@@ -248,6 +430,7 @@ app.post('/api/auth/login', async (req, res) => {
       const name = String(legacy.producerName || legacy.ureticici || legacy.uretici || legacy.name || 'Üretici').trim();
       profile = await UserProfile.create({ userId: `usr_${phone}`, phone, name: name || 'Üretici', role: phone === ADMIN_PHONE ? 'admin' : 'user' });
     }
+    if (profile.active === false) return res.status(403).json({ error: 'Kullanıcı hesabı pasif durumda.' });
     const tokens = await issueTokens(profile);
     res.json(tokens);
   } catch (err) {
@@ -290,7 +473,7 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/users/profile', async (req, res) => {
+app.post('/api/users/profile', limitPublicUsage('profile', 10, 15 * 60 * 1000), async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
     const name = String(req.body.name || '').trim();
@@ -310,6 +493,95 @@ app.post('/api/users/profile', async (req, res) => {
   }
 });
 
+// Fiş görseli yalnızca bu istek boyunca bellekte tutulur; veritabanına veya diske yazılmaz.
+// Modelin döndürdüğü alanlar, mobil uygulamada kullanıcı onayı olmadan kayıt oluşturmaz.
+app.post('/api/receipts/analyze', requireAuth, uploadReceipt, limitAiUsage('receipt', 20, 24 * 60 * 60 * 1000), async (req, res) => {
+  try {
+    if (!req.file?.buffer) return res.status(400).json({ error: 'Okunacak fiş fotoğrafı bulunamadı.' });
+
+    const imageUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    const extracted = await runStructuredAi('tea_receipt', receiptSchema, [{
+      role: 'developer',
+      content: 'Sen Türkiye’deki yaş çay alım fişlerinden alan çıkaran dikkatli bir asistansın. Sadece fişte açıkça görünen bilgileri çıkar. Tarihi YYYY-AA-GG formatına çevir. kg alanına yaş çay kilogramını, firma alanına alıcı/fabrika adını, fiyat alanına kilogram başına TL fiyatını, tahsilat alanına fişte açıkça ödenmiş TL tutarını yaz. Birim fiyat fişte yoksa ancak toplam tutar ve kilogram açıkça görünüyorsa hesaplayabilirsin. Görünmeyen metin alanlarını boş string, sayısal alanları 0 yap. Tahmin etme; fiş hasat fişi değilse tüm alanları boş/0 yap ve confidence low seç. Kişisel bilgileri çıkarma.'
+    }, {
+      role: 'user',
+      content: [
+        { type: 'input_text', text: 'Bu fişi incele ve hasat formu alanlarını döndür.' },
+        { type: 'input_image', image_url: imageUrl, detail: 'high' }
+      ]
+    }]);
+
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(String(extracted.date || '')) ? extracted.date : null;
+    const fields = {
+      date: validDate,
+      kg: numeric(extracted.kg) > 0 ? numeric(extracted.kg) : null,
+      firma: String(extracted.firma || '').trim() || null,
+      fiyat: numeric(extracted.fiyat) > 0 ? numeric(extracted.fiyat) : null,
+      tahsilat: numeric(extracted.tahsilat) > 0 ? numeric(extracted.tahsilat) : null,
+      aciklama: String(extracted.aciklama || '').trim() || null
+    };
+    res.json({ fields, confidence: extracted.confidence });
+  } catch (err) {
+    console.error('RECEIPT ANALYZE ERROR:', err.message);
+    res.status(err.status || 502).json({ error: err.status ? err.message : 'Fiş okunurken bir sorun oluştu. Fotoğrafı daha net çekip tekrar deneyin.' });
+  } finally {
+    if (req.file?.buffer) req.file.buffer.fill(0);
+  }
+});
+
+app.post('/api/ai/report-insights', requireAuth, limitAiUsage('report', 12, 60 * 60 * 1000), async (req, res) => {
+  try {
+    const year = Number(req.body?.year);
+    if (!Number.isInteger(year) || year < 2020 || year > 2100) return res.status(400).json({ error: 'Geçerli bir rapor yılı seçin.' });
+
+    const filter = buildUserFilter(req);
+    const [allHarvests, allExpenses] = await Promise.all([
+      Harvest.find(filter).lean(),
+      Expense.find(filter).lean()
+    ]);
+    const harvests = allHarvests.filter((item) => yearFromDate(item.tarih) === year);
+    const expenses = allExpenses.filter((item) => yearFromDate(item.tarih) === year);
+    const totalKg = harvests.reduce((sum, item) => sum + numeric(item.kg ?? item.weight), 0);
+    const totalSales = harvests.reduce((sum, item) => sum + numeric(item.kg ?? item.weight) * numeric(item.fiyat), 0);
+    const totalPaid = harvests.reduce((sum, item) => sum + numeric(item.tahsilat), 0);
+    const totalExpenses = expenses.reduce((sum, item) => sum + numeric(item.tutar), 0);
+    const factories = new Map();
+    harvests.forEach((item) => {
+      const name = String(item.firma || 'Belirtilmeyen alıcı').trim();
+      const current = factories.get(name) || { name, kg: 0, sales: 0 };
+      current.kg += numeric(item.kg ?? item.weight);
+      current.sales += numeric(item.kg ?? item.weight) * numeric(item.fiyat);
+      factories.set(name, current);
+    });
+    const byFactory = [...factories.values()].sort((a, b) => b.kg - a.kg).slice(0, 5);
+
+    const reportData = {
+      year,
+      harvestRecordCount: harvests.length,
+      totalKg: Math.round(totalKg * 100) / 100,
+      totalSales: Math.round(totalSales * 100) / 100,
+      totalPaid: Math.round(totalPaid * 100) / 100,
+      receivable: Math.round(Math.max(0, totalSales - totalPaid) * 100) / 100,
+      totalExpenses: Math.round(totalExpenses * 100) / 100,
+      netAfterExpenses: Math.round((totalSales - totalExpenses) * 100) / 100,
+      averageSalePrice: totalKg > 0 ? Math.round((totalSales / totalKg) * 100) / 100 : 0,
+      factories: byFactory
+    };
+
+    const insight = await runStructuredAi('tea_report_insights', reportInsightSchema, [{
+      role: 'developer',
+      content: 'Sen çay üreticileri için sade Türkçe rapor yorumları hazırlayan bir asistansın. Yalnızca sana verilen sayısal özet veriden çıkarım yap; eksik veriyi uydurma. En fazla 3 kısa, uygulanabilir gözlem yaz. Finansal veya hukuki tavsiye verme; yorumların karar yerine geçmediğini belirt. Teknik terim kullanma ve üreticinin anlayacağı yalın Türkçe kullan.'
+    }, {
+      role: 'user',
+      content: `Yıllık anonim çay üretim özeti: ${JSON.stringify(reportData)}`
+    }]);
+    res.json(insight);
+  } catch (err) {
+    console.error('AI REPORT ERROR:', err.message);
+    res.status(err.status || 502).json({ error: err.status ? err.message : 'Yapay zekâ raporu hazırlanırken bir sorun oluştu.' });
+  }
+});
+
 // HARVEST ROUTES
 app.get('/api/harvests', requireAuth, async (req, res) => {
   try {
@@ -323,7 +595,7 @@ app.get('/api/harvests', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/harvests', requireAuth, async (req, res) => {
+app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -421,7 +693,7 @@ app.delete('/api/harvests/:id', requireAuth, async (req, res) => {
 // --- YENİ RAPOR VE TAKİP ROTALARI ---
 
 // 1. Belirli satışa tahsilat ekle
-app.post('/api/payments', requireAuth, async (req, res) => {
+app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
     const { harvestId, tutar, tarih, aciklama } = req.body;
@@ -574,7 +846,7 @@ app.get('/api/factory-prices', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/factory-prices', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/factory-prices', requireAuth, requireAdmin, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
@@ -626,7 +898,7 @@ app.get('/api/ads', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/ads', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/ads', requireAuth, requireAdmin, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
     if (!userId && !userPhone) return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
@@ -669,7 +941,7 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/expenses', requireAuth, async (req, res) => {
+app.post('/api/expenses', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -715,7 +987,7 @@ app.get('/api/gardens', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/gardens', requireAuth, async (req, res) => {
+app.post('/api/gardens', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -748,6 +1020,59 @@ app.delete('/api/gardens/:id', requireAuth, async (req, res) => {
 });
 
 // ADMIN ROUTES
+// ADMIN / PRODUCER MANAGEMENT
+app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await UserProfile.find().sort({ name: 1 }).lean();
+    const [harvests, payments] = await Promise.all([Harvest.find().lean(), Payment.find().lean()]);
+    const summary = users.map(u => {
+      const hs = harvests.filter(h => h.userId === u.userId || h.userPhone === u.phone);
+      const ps = payments.filter(p => p.userId === u.userId || p.userPhone === u.phone);
+      const totalKg = hs.reduce((s,h)=>s+(Number(h.kg)||0),0);
+      const totalSales = hs.reduce((s,h)=>s+(Number(h.toplamTutar)||((Number(h.kg)||0)*(Number(h.fiyat)||0))),0);
+      const totalPaid = hs.reduce((s,h)=>s+(Number(h.tahsilat)||0),0) + ps.reduce((s,p)=>s+(Number(p.tutar)||0),0);
+      return { ...u, totalKg, totalSales, totalPaid, remaining: Math.max(0,totalSales-totalPaid), harvestCount: hs.length };
+    });
+    res.json(summary);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/admin/users/:id/status', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const active = Boolean(req.body.active);
+    const user = await UserProfile.findOneAndUpdate({ _id: req.params.id }, { $set: { active } }, { returnDocument: 'after' });
+    if (!user) return res.status(404).json({ error: 'Üretici bulunamadı.' });
+    res.json(user);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [users, harvests, payments, expenses, gardens, factoryPrices, ads] = await Promise.all([
+      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean()
+    ]);
+    res.json({ version: 'V16.6', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const models = [
+      [UserProfile, body.users], [Harvest, body.harvests], [Payment, body.payments], [Expense, body.expenses], [Garden, body.gardens], [FactoryPrice, body.factoryPrices], [Ad, body.ads]
+    ];
+    let restored = 0;
+    for (const [Model, rows] of models) {
+      if (!Array.isArray(rows)) continue;
+      for (const row of rows) {
+        const copy = { ...row }; delete copy._id; delete copy.__v;
+        try { await Model.create(copy); restored++; } catch {}
+      }
+    }
+    res.json({ ok: true, restored });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
   try {
     const [harvests, expenses, gardens, factoryPrices, ads] = await Promise.all([
@@ -760,6 +1085,22 @@ app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
     res.json({ harvests, expenses, gardens, factoryPrices, ads });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+
+const runAutomaticBackup = async () => {
+  try {
+    const dir = process.env.BACKUP_DIR || path.join(process.cwd(), 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const [users, harvests, payments, expenses, gardens, factoryPrices, ads] = await Promise.all([
+      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean()
+    ]);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(dir, `cay-takip-${stamp}.json`), JSON.stringify({ version:'V16.6', exportedAt:new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads }));
+    console.log('💾 Otomatik yedek oluşturuldu.');
+  } catch (err) { console.error('Otomatik yedek hatası:', err.message); }
+};
+setTimeout(runAutomaticBackup, 15000);
+setInterval(runAutomaticBackup, 24 * 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda dinleniyor...`));
