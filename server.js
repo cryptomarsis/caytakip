@@ -201,7 +201,11 @@ const HarvestSchema = new mongoose.Schema({
   weight: Number,
   firma: String,
   fiyat: Number,
-  toplamTutar: Number,     // kg * fiyat
+  brutTutar: Number,       // kg * brüt birim fiyat
+  gelirVergisiOrani: Number,
+  gelirVergisiKesintisi: Number,
+  kesintiTutar: Number,
+  toplamTutar: Number,     // Net alacak (brüt - stopaj)
   tahsilat: Number,        // Toplam yapılan tahsilat
   kalanBakiye: Number,     // toplamTutar - tahsilat
   aciklama: String,
@@ -377,6 +381,19 @@ setInterval(() => {
 }, 60 * 60 * 1000).unref();
 
 const numeric = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const HARVEST_WITHHOLDING_RATE = 2;
+const calculateHarvestAmounts = (kg, fiyat) => {
+  const brutTutar = Math.max(0, numeric(kg) * numeric(fiyat));
+  const gelirVergisiKesintisi = brutTutar * HARVEST_WITHHOLDING_RATE / 100;
+  const kesintiTutar = Math.min(brutTutar, gelirVergisiKesintisi);
+  return {
+    brutTutar,
+    gelirVergisiOrani: HARVEST_WITHHOLDING_RATE,
+    gelirVergisiKesintisi,
+    kesintiTutar,
+    netTutar: Math.max(0, brutTutar - kesintiTutar)
+  };
+};
 
 const idempotencyMiddleware = async (req, res, next) => {
   const key = String(req.headers['idempotency-key'] || '').trim();
@@ -701,7 +718,8 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
-    const toplam = kgVal * fiyatVal;
+    const amounts = calculateHarvestAmounts(kgVal, fiyatVal);
+    const toplam = amounts.netTutar;
     if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
     const kalan = toplam - tahsilatVal;
 
@@ -720,6 +738,10 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       weight: kgVal,
       firma: String(req.body.firma || '').trim(),
       fiyat: fiyatVal,
+      brutTutar: amounts.brutTutar,
+      gelirVergisiOrani: amounts.gelirVergisiOrani,
+      gelirVergisiKesintisi: amounts.gelirVergisiKesintisi,
+      kesintiTutar: amounts.kesintiTutar,
       tahsilat: tahsilatVal,
       aciklama: String(req.body.aciklama || '').trim(),
       bahce: String(req.body.bahce || req.body.garden || '').trim(),
@@ -750,7 +772,8 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
     const tarih = req.body.tarih === undefined ? existing.tarih : normalizeCalendarDate(req.body.tarih);
     const isVadeli = req.body.isVadeli === undefined ? Boolean(existing.isVadeli) : (req.body.isVadeli === true || req.body.isVadeli === 'true');
     const vadeTarihi = !isVadeli ? '' : req.body.vadeTarihi === undefined ? existing.vadeTarihi : normalizeCalendarDate(req.body.vadeTarihi);
-    const toplam = kgVal * fiyatVal;
+    const amounts = calculateHarvestAmounts(kgVal, fiyatVal);
+    const toplam = amounts.netTutar;
     if (kgVal <= 0 || !Number.isFinite(kgVal)) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
     if (fiyatVal < 0 || !Number.isFinite(fiyatVal)) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (tahsilatVal < 0 || !Number.isFinite(tahsilatVal)) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
@@ -772,6 +795,10 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
       weight: kgVal,
       firma: req.body.firma === undefined ? existing.firma : String(req.body.firma || '').trim(),
       fiyat: fiyatVal,
+      brutTutar: amounts.brutTutar,
+      gelirVergisiOrani: amounts.gelirVergisiOrani,
+      gelirVergisiKesintisi: amounts.gelirVergisiKesintisi,
+      kesintiTutar: amounts.kesintiTutar,
       tahsilat: tahsilatVal,
       aciklama: req.body.aciklama === undefined ? existing.aciklama : String(req.body.aciklama || '').trim(),
       bahce: req.body.bahce === undefined ? existing.bahce : String(req.body.bahce || '').trim(),
@@ -832,7 +859,8 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
       return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
     }
 
-    const toplam = (Number(harvest.kg || harvest.weight) || 0) * (Number(harvest.fiyat) || 0);
+    const amounts = calculateHarvestAmounts(harvest.kg || harvest.weight, harvest.fiyat);
+    const toplam = amounts.netTutar;
     const mevcutTahsilat = Number(harvest.tahsilat) || 0;
     const kalan = toplam - mevcutTahsilat;
 
@@ -843,6 +871,10 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
 
     const yeniTahsilat = mevcutTahsilat + ödemeTutar;
     harvest.tahsilat = yeniTahsilat;
+    harvest.brutTutar = amounts.brutTutar;
+    harvest.gelirVergisiOrani = amounts.gelirVergisiOrani;
+    harvest.gelirVergisiKesintisi = amounts.gelirVergisiKesintisi;
+    harvest.kesintiTutar = amounts.kesintiTutar;
     harvest.toplamTutar = toplam;
     harvest.kalanBakiye = Math.max(0, toplam - yeniTahsilat);
     harvest.odemeDurumu = harvest.kalanBakiye <= 0.01 ? 'Ödendi' : 'Kısmi Ödendi';
@@ -884,7 +916,7 @@ app.get('/api/gardens/summary', requireAuth, async (req, res) => {
         $group: {
           _id: "$bahce",
           toplamKg: { $sum: { $ifNull: ["$kg", "$weight"] } },
-          toplamKazanc: { $sum: { $multiply: [{ $ifNull: ["$kg", "$weight"] }, { $ifNull: ["$fiyat", 0] }] } },
+          toplamKazanc: { $sum: { $multiply: [{ $multiply: [{ $ifNull: ["$kg", "$weight"] }, { $ifNull: ["$fiyat", 0] }] }, 0.98] } },
           toplamTahsilat: { $sum: { $ifNull: ["$tahsilat", 0] } },
           toplamKayıt: { $sum: 1 }
         }
@@ -909,7 +941,7 @@ app.get('/api/reports/receivables', requireAuth, async (req, res) => {
       ...filter,
       $expr: {
         $gt: [
-          { $subtract: [{ $multiply: [{ $ifNull: ["$kg", "$weight"] }, { $ifNull: ["$fiyat", 0] }] }, { $ifNull: ["$tahsilat", 0] }] },
+          { $subtract: [{ $multiply: [{ $multiply: [{ $ifNull: ["$kg", "$weight"] }, { $ifNull: ["$fiyat", 0] }] }, 0.98] }, { $ifNull: ["$tahsilat", 0] }] },
           0
         ]
       }
@@ -918,7 +950,8 @@ app.get('/api/reports/receivables', requireAuth, async (req, res) => {
     const pendingHarvests = await Harvest.find(query).sort({ vadeTarihi: 1, tarih: 1 });
 
     const detaylar = pendingHarvests.map(h => {
-      const toplam = (h.kg || h.weight || 0) * (h.fiyat || 0);
+      const amounts = calculateHarvestAmounts(h.kg || h.weight || 0, h.fiyat || 0);
+      const toplam = amounts.netTutar;
       const kalan = toplam - (h.tahsilat || 0);
       return {
         _id: h._id,
@@ -928,6 +961,10 @@ app.get('/api/reports/receivables', requireAuth, async (req, res) => {
         bahce: h.bahce,
         kg: h.kg || h.weight,
         fiyat: h.fiyat,
+        brutTutar: amounts.brutTutar,
+        gelirVergisiOrani: amounts.gelirVergisiOrani,
+        gelirVergisiKesintisi: amounts.gelirVergisiKesintisi,
+        kesintiTutar: amounts.kesintiTutar,
         toplamTutar: toplam,
         tahsilat: h.tahsilat || 0,
         kalanAlacak: kalan,
@@ -1146,7 +1183,7 @@ app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
         { $group: {
           _id: '$userId',
           totalKg: { $sum: { $ifNull: ['$kg', '$weight'] } },
-          totalSales: { $sum: { $ifNull: ['$toplamTutar', { $multiply: [{ $ifNull: ['$kg', '$weight'] }, { $ifNull: ['$fiyat', 0] }] }] } },
+          totalSales: { $sum: { $multiply: [{ $multiply: [{ $ifNull: ['$kg', '$weight'] }, { $ifNull: ['$fiyat', 0] }] }, 0.98] } },
           totalPaid: { $sum: { $ifNull: ['$tahsilat', 0] } },
           harvestCount: { $sum: 1 }
         } }

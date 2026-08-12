@@ -1,21 +1,28 @@
 import React, { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, Switch } from 'react-native';
 import { styles } from '../styles/styles';
+import { calculateAgriculturalDeductions, formatTL } from '../utils/format';
 
 export default function HarvestScreen(props: any) {
   const { currentUser, hForm, handleSaveHarvest, setHForm } = props;
   const [showDetails, setShowDetails] = useState(false);
+  const amounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat);
 
   return <View style={styles.formCard}>
     <Text style={styles.formTitle}>Yeni Hasat Kaydı</Text>
-    <Text style={styles.formHelp}>Önce miktar, firma ve fiyatı yazın. Toplam tutar otomatik hesaplanır.</Text>
+    <Text style={styles.formHelp}>Brüt fiyatı yazın; %2 kesinti ve net alacak otomatik hesaplanır.</Text>
 
     <Text style={styles.label}>Miktar (KG) *</Text>
     <TextInput style={styles.input} value={hForm.kg} onChangeText={(t) => setHForm({ ...hForm, kg: t })} placeholder="Örn: 1000" keyboardType="decimal-pad" />
     <Text style={styles.label}>Firma / Alıcı *</Text>
     <TextInput style={styles.input} value={hForm.firma} onChangeText={(t) => setHForm({ ...hForm, firma: t })} placeholder="Örn: ÇAYKUR veya özel fabrika" />
-    <Text style={styles.label}>Birim Fiyat (TL) *</Text>
+    <Text style={styles.label}>Brüt Birim Fiyat (TL) *</Text>
     <TextInput style={styles.input} value={hForm.fiyat} onChangeText={(t) => setHForm({ ...hForm, fiyat: t })} placeholder="Örn: 35,00" keyboardType="decimal-pad" />
+    <View style={{ backgroundColor: '#edf7f0', borderRadius: 10, padding: 12, marginBottom: 6 }}>
+      <Text style={[styles.listSubText, { color: '#24553c' }]}>Brüt tutar: {formatTL(amounts.brutTutar)}</Text>
+      <Text style={[styles.listSubText, { color: '#24553c' }]}>%2 kesinti: {formatTL(amounts.gelirVergisiKesintisi)}</Text>
+      <Text style={{ color: '#1b4332', fontWeight: '800', marginTop: 3 }}>Net alacak: {formatTL(amounts.netTutar)}</Text>
+    </View>
 
     <TouchableOpacity style={styles.detailsToggle} onPress={() => setShowDetails(!showDetails)}>
       <Text style={styles.detailsToggleText}>{showDetails ? '− Ek bilgileri gizle' : '+ Tarih, bahçe ve vade ekle'}</Text>

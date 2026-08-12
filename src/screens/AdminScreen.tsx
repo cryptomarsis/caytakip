@@ -39,7 +39,7 @@ export default function AdminScreen(props: any) {
     <View style={styles.statsGrid}>
       <View style={styles.statCard}><Text style={styles.statValue}>{users.length}</Text><Text style={styles.statLabel}>Üretici</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Toplam KG</Text></View>
-      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalSales)}</Text><Text style={styles.statLabel}>Toplam Satış</Text></View>
+      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalSales)}</Text><Text style={styles.statLabel}>Net Satış</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalPay)}</Text><Text style={styles.statLabel}>Tahsilat</Text></View>
     </View>
 

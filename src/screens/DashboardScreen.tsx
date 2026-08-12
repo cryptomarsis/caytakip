@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, View, TouchableOpacity } from 'react-native';
 import { SymbolView } from 'expo-symbols';
-import { formatTL, formatDisplayDate } from '../utils/format';
+import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
 
 type DashboardProps = {
@@ -78,7 +78,7 @@ export default function DashboardScreen({
         </View>
 
         <View style={[styles.statCard, { borderLeftColor: '#e76f51' }]}>
-          <Text style={styles.statTitle}>Tahakkuk Eden Satış</Text>
+          <Text style={styles.statTitle}>Net Satış / Alacak</Text>
           <Text style={styles.statValue}>{formatTL(totalSales)}</Text>
         </View>
 
@@ -112,9 +112,11 @@ export default function DashboardScreen({
         <Text style={styles.emptyText}>Henüz kaydedilmiş bir hasat yok.</Text>
       ) : (
         harvests.slice(0, 10).map((item, index) => {
-          const saleVal = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
+          const grossVal = grossTotalOf(item);
+          const deductionVal = deductionTotalOf(item);
+          const saleVal = netTotalOf(item);
           const payVal = Number(item.tahsilat) || 0;
-          const remaining = saleVal - payVal;
+          const remaining = remainingTotalOf(item);
 
           return (
             <View key={item._id || index} style={styles.listItem}>
@@ -128,7 +130,10 @@ export default function DashboardScreen({
                 {item.bahce ? <Text style={styles.listSubText}>🏡 Bahçe: {item.bahce}</Text> : null}
                 {item.isVadeli ? <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text> : null}
                 <Text style={styles.listSubText}>
-                  💰 Toplam: {formatTL(saleVal)} | 🟢 Ödenen: {formatTL(payVal)}
+                  Brüt: {formatTL(grossVal)} | %2 kesinti: {formatTL(deductionVal)}
+                </Text>
+                <Text style={styles.listSubText}>
+                  Net alacak: {formatTL(saleVal)} | Ödenen: {formatTL(payVal)}
                 </Text>
                 <Text style={{ color: remaining > 0 ? '#d62828' : '#2b9348', fontWeight: 'bold', marginTop: 2 }}>
                   {remaining > 0 ? `🔴 Kalan Borç: ${formatTL(remaining)}` : '🟢 Tamamı Ödendi'}

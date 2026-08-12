@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, View, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import { styles } from '../styles/styles';
-import { formatTL, formatDisplayDate } from '../utils/format';
+import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
 
 export default function ReceivablesScreen(props: any) {
   const { getReceivablesByMonth, totalReceivables } = props;
@@ -19,8 +19,7 @@ export default function ReceivablesScreen(props: any) {
               ) : (
                 getReceivablesByMonth().map(([month, items]: any) => {
                   const monthTotal = items.reduce((sum: number, item: any) => {
-                    const total = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
-                    return sum + Math.max(0, total - (Number(item.tahsilat) || 0));
+                    return sum + remainingTotalOf(item);
                   }, 0);
                   return (
                     <View key={month} style={styles.monthCard}>
@@ -29,9 +28,11 @@ export default function ReceivablesScreen(props: any) {
                         <Text style={styles.monthTotal}>{formatTL(monthTotal)}</Text>
                       </View>
                       {items.map((item: any, index: number) => {
-                        const saleVal = (Number(item.kg || item.weight) || 0) * (Number(item.fiyat) || 0);
+                        const grossVal = grossTotalOf(item);
+                        const deductionVal = deductionTotalOf(item);
+                        const saleVal = netTotalOf(item);
                         const payVal = Number(item.tahsilat) || 0;
-                        const remaining = Math.max(0, saleVal - payVal);
+                        const remaining = remainingTotalOf(item);
                         return (
                           <View key={item._id || index} style={styles.listItem}>
                             <View style={{ flex: 1 }}>
@@ -41,7 +42,10 @@ export default function ReceivablesScreen(props: any) {
                               </Text>
                               <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text>
                               <Text style={styles.listSubText}>
-                                Toplam: {formatTL(saleVal)} | Tahsilat: {formatTL(payVal)}
+                                Brüt: {formatTL(grossVal)} | %2 kesinti: {formatTL(deductionVal)}
+                              </Text>
+                              <Text style={styles.listSubText}>
+                                Net alacak: {formatTL(saleVal)} | Tahsilat: {formatTL(payVal)}
                               </Text>
                               <Text style={{ color: '#d62828', fontWeight: 'bold', marginTop: 2 }}>
                                 🔴 Kalan: {formatTL(remaining)}

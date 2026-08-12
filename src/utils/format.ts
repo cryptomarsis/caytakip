@@ -32,6 +32,45 @@ export const parseMoney = (value: unknown) => {
   return Number.isFinite(number) ? number : 0;
 };
 
+export const grossTotalOf = (record: any) =>
+  parseMoney(record?.kg ?? record?.weight ?? 0) * parseMoney(record?.fiyat ?? 0);
+
+export const AGRICULTURAL_WITHHOLDING_RATE = 2;
+
+export const deductionTotalOf = (record: any) => {
+  const savedDeduction = record?.kesintiTutar ?? record?.deductionAmount;
+  if (savedDeduction !== undefined && savedDeduction !== null && String(savedDeduction).trim() !== '') {
+    return Math.max(0, parseMoney(savedDeduction));
+  }
+  const rate = parseMoney(record?.gelirVergisiOrani ?? AGRICULTURAL_WITHHOLDING_RATE);
+  return grossTotalOf(record) * Math.max(0, rate) / 100;
+};
+
+export const netTotalOf = (record: any) =>
+  Math.max(0, grossTotalOf(record) - deductionTotalOf(record));
+
+export const remainingTotalOf = (record: any) =>
+  Math.max(0, netTotalOf(record) - parseMoney(record?.tahsilat ?? 0));
+
+// Uygulamadaki yaş çay hesaplaması için brüt bedelden sabit %2 gelir vergisi
+// stopajı düşülür. BAĞ-KUR veya başka bir prim kesintisi dahil edilmez.
+export const calculateAgriculturalDeductions = (
+  kg: unknown,
+  price: unknown,
+) => {
+  const brutTutar = Math.max(0, parseMoney(kg) * parseMoney(price));
+  const gelirVergisiOrani = AGRICULTURAL_WITHHOLDING_RATE;
+  const gelirVergisiKesintisi = brutTutar * gelirVergisiOrani / 100;
+  const kesintiTutar = Math.min(brutTutar, gelirVergisiKesintisi);
+  return {
+    brutTutar,
+    gelirVergisiOrani,
+    gelirVergisiKesintisi,
+    kesintiTutar,
+    netTutar: Math.max(0, brutTutar - kesintiTutar),
+  };
+};
+
 export const formatDisplayDate = (value: unknown) => {
   const s = String(value || '').trim();
   const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Share, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { formatTL, formatDisplayDate, parseMoney } from '../utils/format';
+import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, parseMoney, remainingTotalOf } from '../utils/format';
 import { HarvestRecord, ExpenseRecord } from '../types';
 import { styles } from '../styles/styles';
 type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: unknown };
@@ -19,7 +19,9 @@ const yearOf = (v?: string) => dateOf(v)?.getFullYear() || null;
 const monthOf = (v?: string) => dateOf(v)?.getMonth() ?? null;
 const kgOf = (h: HarvestRecord) => parseMoney(h.kg ?? h.weight ?? 0);
 const priceOf = (h: HarvestRecord) => parseMoney(h.fiyat ?? 0);
-const saleOf = (h: HarvestRecord) => kgOf(h) * priceOf(h);
+const grossOf = (h: HarvestRecord) => grossTotalOf(h);
+const deductionOf = (h: HarvestRecord) => deductionTotalOf(h);
+const saleOf = (h: HarvestRecord) => netTotalOf(h);
 const paidOf = (h: HarvestRecord) => parseMoney(h.tahsilat ?? 0);
 
 export default function ReportsScreen({ harvests, expenses }: Props) {
@@ -37,7 +39,7 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
   const totalSales = selected.reduce((s,h) => s + saleOf(h), 0);
   const totalPaid = selected.reduce((s,h) => s + paidOf(h), 0);
   const totalExpenses = selectedExpenses.reduce((s,e) => s + parseMoney(e.tutar ?? 0), 0);
-  const receivable = Math.max(0, totalSales - totalPaid);
+  const receivable = selected.reduce((s, h) => s + remainingTotalOf(h), 0);
   const monthly = Array.from({length:12}, (_, i) => {
     const hs = selected.filter(h => monthOf(h.tarih) === i);
     return { month:i, kg:hs.reduce((s,h)=>s+kgOf(h),0), sales:hs.reduce((s,h)=>s+saleOf(h),0) };
@@ -68,7 +70,7 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       const name = String(h.firma || 'Belirtilmeyen Fabrika').trim();
       const row = map.get(name) || {name,kg:0,sales:0,paid:0,remaining:0};
       row.kg += kgOf(h); row.sales += saleOf(h); row.paid += paidOf(h);
-      row.remaining += Math.max(0, saleOf(h)-paidOf(h)); map.set(name,row);
+      row.remaining += remainingTotalOf(h); map.set(name,row);
     });
     return [...map.values()].sort((a,b)=>b.kg-a.kg);
   }, [selected]);
@@ -89,8 +91,8 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
   const exportCSV = async () => {
     const esc = (v:unknown) => `"${String(v ?? '').replace(/"/g,'""')}"`;
     const rows = [
-      ['Tarih','Sürüm','Üretici','KG','Fabrika','Fiyat','Satış','Tahsilat','Kalan','Bahçe','Vade Tarihi'],
-      ...selected.map(h => [formatDisplayDate(h.tarih), h.surum, h.producerName || h.uretici, kgOf(h), h.firma, priceOf(h), saleOf(h), paidOf(h), Math.max(0,saleOf(h)-paidOf(h)), h.garden || h.bahce, formatDisplayDate(h.vadeTarihi)])
+      ['Tarih','Sürüm','Üretici','KG','Fabrika','Brüt Birim Fiyat','Brüt Satış','%2 Kesinti','Net Satış','Tahsilat','Kalan','Bahçe','Vade Tarihi'],
+      ...selected.map(h => [formatDisplayDate(h.tarih), h.surum, h.producerName || h.uretici, kgOf(h), h.firma, priceOf(h), grossOf(h), deductionOf(h), saleOf(h), paidOf(h), remainingTotalOf(h), h.garden || h.bahce, formatDisplayDate(h.vadeTarihi)])
     ];
     try { await Share.share({message: rows.map(r=>r.map(esc).join(';')).join('\n'), title:`CayTakip_${year}.csv`}); }
     catch { Alert.alert('CSV','Paylaşım ekranı açılamadı.'); }
@@ -102,14 +104,14 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       const Sharing = require('expo-sharing') as typeof import('expo-sharing');
       const rows = selected.map(h => ({
         Tarih: formatDisplayDate(h.tarih), Sürüm: h.surum || '', Üretici: h.producerName || h.uretici || '', KG: kgOf(h),
-        Fabrika: h.firma || '', 'Birim Fiyat': priceOf(h), Satış: saleOf(h), Tahsilat: paidOf(h),
-        Kalan: Math.max(0, saleOf(h)-paidOf(h)), Bahçe: h.garden || h.bahce || '', 'Vade Tarihi': formatDisplayDate(h.vadeTarihi)
+        Fabrika: h.firma || '', 'Brüt Birim Fiyat': priceOf(h), 'Brüt Satış': grossOf(h), '%2 Kesinti': deductionOf(h), 'Net Satış': saleOf(h), Tahsilat: paidOf(h),
+        Kalan: remainingTotalOf(h), Bahçe: h.garden || h.bahce || '', 'Vade Tarihi': formatDisplayDate(h.vadeTarihi)
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
       const gardenWs = XLSX.utils.json_to_sheet(gardenHarvests.map(g => ({
         Bahçe: g.name,
         'Toplam Hasat (KG)': g.kg,
-        'Toplam Satış (TL)': g.sales
+        'Net Satış (TL)': g.sales
       })));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Hasatlar');
@@ -132,7 +134,7 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       const monthRows = monthly.map(x => `<tr><td>${months[x.month]}</td><td>${x.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(x.sales)}</td></tr>`).join('');
       const factoryRows = factorySales.map(f => `<tr><td>${f.name}</td><td>${f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(f.sales)}</td></tr>`).join('');
       const gardenRows = gardenHarvests.map(g => `<tr><td>${g.name}</td><td>${g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(g.sales)}</td></tr>`).join('');
-      const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px;color:#1b4332}h1,h2{color:#1b4332}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#e9f5ee}.cards{display:flex;flex-wrap:wrap;gap:10px}.card{border:1px solid #ddd;padding:10px;width:45%}</style></head><body><h1>Çaylık Raporu - ${year}</h1><div class="cards"><div class="card">Toplam Hasat<br><b>${totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</b></div><div class="card">Toplam Satış<br><b>${formatTL(totalSales)}</b></div><div class="card">Toplam Tahsilat<br><b>${formatTL(totalPaid)}</b></div><div class="card">Vadeli Alacak<br><b>${formatTL(receivable)}</b></div><div class="card">Toplam Gider<br><b>${formatTL(totalExpenses)}</b></div></div><h2>Sürüm Bazlı Hasat</h2><table><tr><th>Sürüm</th><th>Toplam KG</th></tr>${versionRows}</table><h2>Bahçe Bazında Hasat</h2><table><tr><th>Bahçe</th><th>Toplam KG</th><th>Toplam Satış</th></tr>${gardenRows}</table><h2>Aylık Hasat</h2><table><tr><th>Ay</th><th>KG</th><th>Satış</th></tr>${monthRows}</table><h2>Fabrika Bazında Satış</h2><table><tr><th>Fabrika</th><th>KG</th><th>Satış</th></tr>${factoryRows}</table></body></html>`;
+      const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px;color:#1b4332}h1,h2{color:#1b4332}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#e9f5ee}.cards{display:flex;flex-wrap:wrap;gap:10px}.card{border:1px solid #ddd;padding:10px;width:45%}</style></head><body><h1>Çaylık Raporu - ${year}</h1><div class="cards"><div class="card">Toplam Hasat<br><b>${totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</b></div><div class="card">Net Satış<br><b>${formatTL(totalSales)}</b></div><div class="card">Toplam Tahsilat<br><b>${formatTL(totalPaid)}</b></div><div class="card">Bekleyen Alacak<br><b>${formatTL(receivable)}</b></div><div class="card">Toplam Gider<br><b>${formatTL(totalExpenses)}</b></div></div><h2>Sürüm Bazlı Hasat</h2><table><tr><th>Sürüm</th><th>Toplam KG</th></tr>${versionRows}</table><h2>Bahçe Bazında Hasat</h2><table><tr><th>Bahçe</th><th>Toplam KG</th><th>Net Satış</th></tr>${gardenRows}</table><h2>Aylık Hasat</h2><table><tr><th>Ay</th><th>KG</th><th>Net Satış</th></tr>${monthRows}</table><h2>Fabrika Bazında Satış</h2><table><tr><th>Fabrika</th><th>KG</th><th>Net Satış</th></tr>${factoryRows}</table></body></html>`;
       const pdf = await Print.printToFileAsync({ html, base64: true });
       if (!pdf.base64 || !FileSystem.cacheDirectory) throw new Error('PDF dosyası hazırlanamadı.');
 
@@ -160,7 +162,7 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
 
     <View style={styles.statsGrid}>
       <View style={styles.statCard}><Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text><Text style={styles.statLabel}>Toplam Hasat</Text></View>
-      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalSales)}</Text><Text style={styles.statLabel}>Toplam Satış</Text></View>
+      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalSales)}</Text><Text style={styles.statLabel}>Net Satış</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalPaid)}</Text><Text style={styles.statLabel}>Toplam Tahsilat</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(receivable)}</Text><Text style={styles.statLabel}>Vadeli Alacak</Text></View>
       <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalExpenses)}</Text><Text style={styles.statLabel}>Toplam Gider</Text></View>

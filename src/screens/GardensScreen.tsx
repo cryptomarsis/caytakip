@@ -17,7 +17,7 @@ export default function GardensScreen(props: any) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.listTitle}>🏡 {g.name}</Text>
                       <Text style={styles.listSubText}>⚖️ Toplam Hasat: {g.toplamKg.toLocaleString('tr-TR')} KG</Text>
-                      <Text style={styles.listSubText}>💰 Toplam Kazanç: {formatTL(g.toplamKazanc)}</Text>
+                      <Text style={styles.listSubText}>💰 Net Alacak: {formatTL(g.toplamKazanc)}</Text>
                       <Text style={styles.listSubText}>💵 Toplam Tahsilat: {formatTL(g.toplamTahsilat)}</Text>
                     </View>
                   </View>

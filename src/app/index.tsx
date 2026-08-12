@@ -7,7 +7,7 @@ import { API_URL, fetchWithTimeout } from '../services/api';
 import { saveSession, getSession, clearSession } from '../services/session';
 import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
 import { UserSession, HarvestRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
-import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate } from '../utils/format';
+import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate, calculateAgriculturalDeductions, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
@@ -368,11 +368,10 @@ export default function App() {
         map[gName] = { name: gName, toplamKg: 0, toplamKazanc: 0, toplamTahsilat: 0 };
       }
       const kg = Number(h.kg || h.weight) || 0;
-      const fiyat = Number(h.fiyat) || 0;
       const pay = Number(h.tahsilat) || 0;
 
       map[gName].toplamKg += kg;
-      map[gName].toplamKazanc += kg * fiyat;
+      map[gName].toplamKazanc += netTotalOf(h);
       map[gName].toplamTahsilat += pay;
     });
 
@@ -393,18 +392,8 @@ export default function App() {
   };
 
   const getReceivables = () => {
-    const list = harvests.filter((h) => {
-      const totalSale = (Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0);
-      const pay = Number(h.tahsilat) || 0;
-      const remaining = totalSale - pay;
-      return h.isVadeli || remaining > 0;
-    });
-
-    const totalReceivables = list.reduce((acc, h) => {
-      const totalSale = (Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0);
-      const pay = Number(h.tahsilat) || 0;
-      return acc + (totalSale - pay);
-    }, 0);
+    const list = harvests.filter((h) => remainingTotalOf(h) > 0.01);
+    const totalReceivables = list.reduce((acc, h) => acc + remainingTotalOf(h), 0);
 
     return { totalReceivables, list };
   };
@@ -420,9 +409,7 @@ export default function App() {
   };
 
   const receivablesSafe = (items: any[]) => (items || []).filter((h: any) => {
-    const total = (Number(h.kg || h.weight) || 0) * (Number(h.fiyat) || 0);
-    const pay = Number(h.tahsilat) || 0;
-    return h.isVadeli || total - pay > 0;
+    return remainingTotalOf(h) > 0.01;
   });
 
   // Giriş Yap / Kayıt Ol İşlemleri
@@ -538,10 +525,10 @@ export default function App() {
 
   // Genel Hesaplamalar
   const totalKg = (harvests || []).reduce((acc, c) => acc + (Number(c.kg || c.weight) || 0), 0);
-  const totalSales = (harvests || []).reduce((acc, c) => acc + ((Number(c.kg || c.weight) || 0) * (Number(c.fiyat) || 0)), 0);
+  const totalSales = (harvests || []).reduce((acc, c) => acc + netTotalOf(c), 0);
   const totalPay = (harvests || []).reduce((acc, c) => acc + (Number(c.tahsilat) || 0), 0);
   const totalExp = (expenses || []).reduce((acc, c) => acc + (Number(c.tutar) || 0), 0);
-  const pendingCollection = totalSales - totalPay;
+  const pendingCollection = (harvests || []).reduce((acc, c) => acc + remainingTotalOf(c), 0);
   const netProfit = totalSales - totalExp;
 
   // Admin Paneli İçin Üretici Bazlı Gruplama
@@ -556,11 +543,10 @@ export default function App() {
         summaryMap[key] = { name: pName, totalKg: 0, totalSales: 0, totalPay: 0, count: 0 };
       }
       const kg = Number(h.kg || h.weight) || 0;
-      const fiyat = Number(h.fiyat) || 0;
       const pay = Number(h.tahsilat) || 0;
 
       summaryMap[key].totalKg += kg;
-      summaryMap[key].totalSales += kg * fiyat;
+      summaryMap[key].totalSales += netTotalOf(h);
       summaryMap[key].totalPay += pay;
       summaryMap[key].count += 1;
     });
@@ -609,6 +595,12 @@ export default function App() {
     }
     if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
     if (hForm.isVadeli && !vadeTarihi) { Alert.alert('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.'); return; }
+    const amounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat);
+    const tahsilat = parseMoney(hForm.tahsilat);
+    if (tahsilat > amounts.netTutar + 0.01) {
+      Alert.alert('Tahsilat Hatası', `Tahsilat net alacaktan fazla olamaz. Net alacak: ${formatTL(amounts.netTutar)}`);
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -620,7 +612,11 @@ export default function App() {
         weight: parseMoney(hForm.kg),
         firma: hForm.firma ? hForm.firma.trim() : '',
         fiyat: parseMoney(hForm.fiyat),
-        tahsilat: parseMoney(hForm.tahsilat),
+        brutTutar: amounts.brutTutar,
+        gelirVergisiOrani: amounts.gelirVergisiOrani,
+        gelirVergisiKesintisi: amounts.gelirVergisiKesintisi,
+        kesintiTutar: amounts.kesintiTutar,
+        tahsilat,
         aciklama: hForm.aciklama ? hForm.aciklama.trim() : '',
         bahce: hForm.garden ? hForm.garden.trim() : '',
         isVadeli: hForm.isVadeli,
@@ -684,9 +680,8 @@ export default function App() {
       return;
     }
 
-    const saleTotal = (Number(selected.kg || selected.weight) || 0) * (Number(selected.fiyat) || 0);
-    const currentPay = Number(selected.tahsilat) || 0;
-    const remaining = saleTotal - currentPay;
+    const saleTotal = netTotalOf(selected);
+    const remaining = remainingTotalOf(selected);
 
     if (amount > remaining + 0.01) {
       Alert.alert('Hata', `Tahsilat kalan borçtan fazla olamaz. Kalan: ${formatTL(remaining)}`);
@@ -814,14 +809,15 @@ export default function App() {
     const kg = parseMoney(editHarvestForm.kg);
     const fiyat = parseMoney(editHarvestForm.fiyat);
     const tahsilat = parseMoney(editHarvestForm.tahsilat);
+    const amounts = calculateAgriculturalDeductions(kg, fiyat);
     if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
     if (editHarvestForm.isVadeli && !vadeTarihi) { Alert.alert('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.'); return; }
     if (!Number.isFinite(kg) || kg <= 0 || !editHarvestForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0) {
       Alert.alert('Eksik Bilgi', 'KG, firma ve birim fiyat alanlarını geçerli şekilde doldurun.');
       return;
     }
-    if (!Number.isFinite(tahsilat) || tahsilat < 0 || tahsilat > kg * fiyat + 0.01) {
-      Alert.alert('Tahsilat Hatası', 'Tahsilat tutarı toplam satış tutarından fazla olamaz.');
+    if (!Number.isFinite(tahsilat) || tahsilat < 0 || tahsilat > amounts.netTutar + 0.01) {
+      Alert.alert('Tahsilat Hatası', 'Tahsilat tutarı net alacak tutarından fazla olamaz.');
       return;
     }
     const producerName = isAdmin ? (editHarvestForm.producer.trim() || editingHarvest.producerName || editingHarvest.uretici || currentUser?.name || 'Üretici') : (editingHarvest.producerName || editingHarvest.uretici || currentUser?.name || 'Üretici');
@@ -833,6 +829,8 @@ export default function App() {
         body: JSON.stringify({
           tarih, surum: editHarvestForm.surum, uretici: producerName, producerName,
           kg, weight: kg, firma: editHarvestForm.firma.trim(), fiyat, tahsilat,
+          brutTutar: amounts.brutTutar, gelirVergisiOrani: amounts.gelirVergisiOrani,
+          gelirVergisiKesintisi: amounts.gelirVergisiKesintisi, kesintiTutar: amounts.kesintiTutar,
           aciklama: editHarvestForm.aciklama.trim(), bahce: editHarvestForm.garden.trim(),
           isVadeli: editHarvestForm.isVadeli, vadeTarihi
         })
@@ -1240,8 +1238,8 @@ export default function App() {
               <Text style={styles.modalTitle}>✏️ Tahsilat Düzenle</Text>
               {editingHarvest && (
                 <Text style={{ color: '#555', marginBottom: 10 }}>
-                  {editingHarvest.uretici || editingHarvest.producerName} - Toplam Tutar:{' '}
-                  {formatTL((Number(editingHarvest.kg || editingHarvest.weight) || 0) * (Number(editingHarvest.fiyat) || 0))}
+                  {editingHarvest.uretici || editingHarvest.producerName} - Net alacak:{' '}
+                  {formatTL(netTotalOf(editingHarvest))}
                 </Text>
               )}
               <Text style={styles.label}>Yeni Tahsilat Tutarı (TL)</Text>
@@ -1288,8 +1286,9 @@ export default function App() {
                 <TextInput style={styles.input} value={editHarvestForm.kg} onChangeText={(kg) => setEditHarvestForm({ ...editHarvestForm, kg })} placeholder="Örn: 1000" keyboardType="decimal-pad" />
                 <Text style={styles.label}>Firma / Alıcı</Text>
                 <TextInput style={styles.input} value={editHarvestForm.firma} onChangeText={(firma) => setEditHarvestForm({ ...editHarvestForm, firma })} placeholder="ÇAYKUR veya özel fabrika" />
-                <Text style={styles.label}>Birim Fiyat (TL)</Text>
+                <Text style={styles.label}>Brüt Birim Fiyat (TL)</Text>
                 <TextInput style={styles.input} value={editHarvestForm.fiyat} onChangeText={(fiyat) => setEditHarvestForm({ ...editHarvestForm, fiyat })} placeholder="Örn: 35,00" keyboardType="decimal-pad" />
+                <Text style={styles.formHelp}>%2 kesinti: {formatTL(calculateAgriculturalDeductions(editHarvestForm.kg, editHarvestForm.fiyat).gelirVergisiKesintisi)} · Net alacak: {formatTL(calculateAgriculturalDeductions(editHarvestForm.kg, editHarvestForm.fiyat).netTutar)}</Text>
                 <Text style={styles.label}>Alınan Ödeme (TL)</Text>
                 <TextInput style={styles.input} value={editHarvestForm.tahsilat} onChangeText={(tahsilat) => setEditHarvestForm({ ...editHarvestForm, tahsilat })} placeholder="Ödeme yoksa 0" keyboardType="decimal-pad" />
                 <Text style={styles.label}>Bahçe</Text>
