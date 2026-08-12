@@ -36,6 +36,8 @@ export const formatDisplayDate = (value: unknown) => {
   const s = String(value || '').trim();
   const m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
   if (m) return `${m[3].padStart(2,'0')}.${m[2].padStart(2,'0')}.${m[1]}`;
+  const monthOnly = s.match(/^(\d{4})[-./](\d{1,2})$/);
+  if (monthOnly) return `${monthOnly[2].padStart(2,'0')}.${monthOnly[1]}`;
   const tr = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
   if (tr) return `${tr[1].padStart(2,'0')}.${tr[2].padStart(2,'0')}.${tr[3]}`;
   return s || '-';
@@ -43,7 +45,18 @@ export const formatDisplayDate = (value: unknown) => {
 
 export const toServerDate = (value: string) => {
   const s = String(value || '').trim();
-  const m = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
-  return s;
+  const tr = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+  const iso = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
+  const year = Number(tr?.[3] || iso?.[1]);
+  const month = Number(tr?.[2] || iso?.[2]);
+  const day = Number(tr?.[1] || iso?.[3]);
+  if (!year || !month || !day) return '';
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return '';
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+};
+
+export const todayDisplayDate = () => {
+  const now = new Date();
+  return `${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth() + 1).padStart(2,'0')}.${now.getFullYear()}`;
 };

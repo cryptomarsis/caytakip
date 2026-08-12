@@ -12,12 +12,12 @@ export default function ExpenseScreen(props: any) {
                 <Text style={styles.formTitle}>🧾 Gider Ekle</Text>
                 <Text style={styles.formHelp}>Gider türünü ve tutarı yazıp kaydedin.</Text>
 
-                <Text style={styles.label}>Tarih</Text>
+                <Text style={styles.label}>Tarih (GG.AA.YYYY)</Text>
                 <TextInput
                   style={styles.input}
                   value={eForm.date}
                   onChangeText={(t) => setEForm({ ...eForm, date: t })}
-                  placeholder="GÜN.AY.YIL"
+                  placeholder="12.08.2026"
                 />
 
                 <Text style={styles.label}>Kategori</Text>
@@ -65,7 +65,7 @@ export default function ExpenseScreen(props: any) {
                       <Text style={styles.listTitle}>
                         {item.kategori || 'Diğer'} - {formatTL(item.tutar)}
                       </Text>
-                      <Text style={styles.listSubText}>📅 {item.tarih || 'Tarih Yok'}</Text>
+                      <Text style={styles.listSubText}>📅 {formatDisplayDate(item.tarih)}</Text>
                       {item.aciklama ? <Text style={styles.listSubText}>📝 {item.aciklama}</Text> : null}
                     </View>
                     <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('expenses', item._id, 'Gider')}>

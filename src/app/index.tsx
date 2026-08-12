@@ -7,7 +7,7 @@ import { API_URL, fetchWithTimeout } from '../services/api';
 import { saveSession, getSession, clearSession } from '../services/session';
 import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
 import { UserSession, HarvestRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
-import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney } from '../utils/format';
+import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate } from '../utils/format';
 import { styles } from '../styles/styles';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
@@ -50,7 +50,7 @@ export default function App() {
   const [factoryFilter, setFactoryFilter] = useState<'Tümü' | 'Haftalık' | 'Aylık' | 'Peşin' | 'Vadeli'>('Tümü');
   const [ads, setAds] = useState<AdRecord[]>([]);
 
-  const todayTR = (() => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; })();
+  const todayTR = todayDisplayDate();
   const [priceForm, setPriceForm] = useState({ firma: 'ÇAYKUR', fiyat: '', tarih: todayTR, fiyatTuru: 'Peşin', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
 
   const [adForm, setAdForm] = useState({
@@ -68,7 +68,7 @@ export default function App() {
 
   // Form State'leri
   const [hForm, setHForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: todayTR,
     surum: '1. Sürüm',
     producer: '',
     kg: '',
@@ -82,7 +82,7 @@ export default function App() {
   });
 
   const [eForm, setEForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: todayTR,
     kategori: 'İşçilik',
     aciklama: '',
     tutar: ''
@@ -94,6 +94,10 @@ export default function App() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingHarvest, setEditingHarvest] = useState<HarvestRecord | null>(null);
   const [editTahsilatVal, setEditTahsilatVal] = useState('');
+  const [harvestEditModalVisible, setHarvestEditModalVisible] = useState(false);
+  const [editHarvestForm, setEditHarvestForm] = useState({
+    date: '', surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: ''
+  });
 
   // Özel Tahsilat Ekleme Formu State'leri (Belirli Hasada Ödeme Yapma)
   const [payHarvestId, setPayHarvestId] = useState('');
@@ -597,14 +601,18 @@ export default function App() {
   // Hasat Kaydetme
   const handleSaveHarvest = async () => {
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
+    const tarih = toServerDate(hForm.date);
+    const vadeTarihi = hForm.isVadeli ? toServerDate(hForm.vadeTarihi) : '';
     if (!hForm.kg.trim() || !hForm.firma.trim() || !hForm.fiyat.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen miktar, firma ve birim fiyat alanlarını doldurun.');
       return;
     }
+    if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
+    if (hForm.isVadeli && !vadeTarihi) { Alert.alert('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.'); return; }
     setLoading(true);
     try {
       const payload = {
-        tarih: hForm.date || new Date().toISOString().split('T')[0],
+        tarih,
         surum: hForm.surum || '1. Sürüm',
         uretici: producerName,
         producerName: producerName,
@@ -616,13 +624,13 @@ export default function App() {
         aciklama: hForm.aciklama ? hForm.aciklama.trim() : '',
         bahce: hForm.garden ? hForm.garden.trim() : '',
         isVadeli: hForm.isVadeli,
-        vadeTarihi: hForm.isVadeli ? hForm.vadeTarihi : ''
+        vadeTarihi
       };
 
       const result = await postOrQueue('/harvests', payload);
       if (result.queued) {
         Alert.alert('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
-        setHForm({ date: new Date().toISOString().split('T')[0], surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '' });
+        setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '' });
         setActiveTab('dashboard');
         return;
       }
@@ -632,7 +640,7 @@ export default function App() {
         Alert.alert('Başarılı', 'Hasat kaydı eklendi.');
         // Form Temizleme Mantığı Düzeltildi (Madde 5)
         setHForm({
-          date: new Date().toISOString().split('T')[0],
+          date: todayDisplayDate(),
           surum: '1. Sürüm',
           producer: '',
           kg: '',
@@ -691,7 +699,7 @@ export default function App() {
         harvestId: payHarvestId,
         tutar: amount,
         aciklama: payDesc.trim(),
-        tarih: new Date().toISOString().split('T')[0]
+        tarih: toServerDate(todayDisplayDate())
       });
       if (result.queued) {
         Alert.alert('Çevrimdışı Kaydedildi', 'Tahsilat telefonda saklandı; internet gelince otomatik gönderilecek.');
@@ -781,6 +789,67 @@ export default function App() {
     setEditModalVisible(true);
   };
 
+  const openHarvestEditModal = (harvestItem: HarvestRecord) => {
+    setEditingHarvest(harvestItem);
+    setEditHarvestForm({
+      date: formatDisplayDate(harvestItem.tarih),
+      surum: harvestItem.surum || '1. Sürüm',
+      producer: harvestItem.producerName || harvestItem.uretici || currentUser?.name || '',
+      kg: String(harvestItem.kg ?? harvestItem.weight ?? ''),
+      firma: harvestItem.firma || '',
+      fiyat: String(harvestItem.fiyat ?? ''),
+      tahsilat: String(harvestItem.tahsilat ?? 0),
+      aciklama: harvestItem.aciklama || '',
+      garden: harvestItem.garden || harvestItem.bahce || '',
+      isVadeli: Boolean(harvestItem.isVadeli),
+      vadeTarihi: formatDisplayDate(harvestItem.vadeTarihi)
+    });
+    setHarvestEditModalVisible(true);
+  };
+
+  const handleUpdateHarvest = async () => {
+    if (!editingHarvest) return;
+    const tarih = toServerDate(editHarvestForm.date);
+    const vadeTarihi = editHarvestForm.isVadeli ? toServerDate(editHarvestForm.vadeTarihi) : '';
+    const kg = parseMoney(editHarvestForm.kg);
+    const fiyat = parseMoney(editHarvestForm.fiyat);
+    const tahsilat = parseMoney(editHarvestForm.tahsilat);
+    if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
+    if (editHarvestForm.isVadeli && !vadeTarihi) { Alert.alert('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.'); return; }
+    if (!Number.isFinite(kg) || kg <= 0 || !editHarvestForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0) {
+      Alert.alert('Eksik Bilgi', 'KG, firma ve birim fiyat alanlarını geçerli şekilde doldurun.');
+      return;
+    }
+    if (!Number.isFinite(tahsilat) || tahsilat < 0 || tahsilat > kg * fiyat + 0.01) {
+      Alert.alert('Tahsilat Hatası', 'Tahsilat tutarı toplam satış tutarından fazla olamaz.');
+      return;
+    }
+    const producerName = isAdmin ? (editHarvestForm.producer.trim() || editingHarvest.producerName || editingHarvest.uretici || currentUser?.name || 'Üretici') : (editingHarvest.producerName || editingHarvest.uretici || currentUser?.name || 'Üretici');
+    setLoading(true);
+    try {
+      const response = await authFetch(`${API_URL}/harvests/${editingHarvest._id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          tarih, surum: editHarvestForm.surum, uretici: producerName, producerName,
+          kg, weight: kg, firma: editHarvestForm.firma.trim(), fiyat, tahsilat,
+          aciklama: editHarvestForm.aciklama.trim(), bahce: editHarvestForm.garden.trim(),
+          isVadeli: editHarvestForm.isVadeli, vadeTarihi
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Hasat kaydı güncellenemedi.');
+      setHarvestEditModalVisible(false);
+      setEditingHarvest(null);
+      Alert.alert('Başarılı', 'Hasat kaydı güncellendi.');
+      await fetchData();
+    } catch (error: any) {
+      Alert.alert('Hasat Düzenleme', error?.message || 'Hasat kaydı güncellenemedi.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUpdateCollection = async () => {
     if (!editingHarvest) return;
     const newTahsilat = parseMoney(editTahsilatVal);
@@ -854,10 +923,12 @@ export default function App() {
       Alert.alert('Eksik Bilgi', 'Lütfen tutar girin.');
       return;
     }
+    const tarih = toServerDate(eForm.date);
+    if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
     setLoading(true);
     try {
       const result = await postOrQueue('/expenses', {
-        tarih: eForm.date || new Date().toISOString().split('T')[0],
+        tarih,
         kategori: eForm.kategori,
         aciklama: eForm.aciklama ? eForm.aciklama.trim() : '',
         tutar: parseMoney(eForm.tutar)
@@ -1051,6 +1122,7 @@ export default function App() {
               totalExp={totalExp}
               netProfit={netProfit}
               openEditModal={openEditModal}
+              openHarvestEditModal={openHarvestEditModal}
               handleDelete={handleDelete}
               onNavigate={setActiveTab}
             />
@@ -1188,6 +1260,49 @@ export default function App() {
                   <Text style={styles.modalBtnText}>Kaydet</Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* HASAT KAYDI DÜZENLEME MODALI */}
+        <Modal
+          visible={harvestEditModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setHarvestEditModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalTitle}>✏️ Hasat Kaydını Düzenle</Text>
+                <Text style={styles.formHelp}>Yanlış girilen bilgileri düzeltip kaydedin.</Text>
+
+                <Text style={styles.label}>Tarih (GG.AA.YYYY)</Text>
+                <TextInput style={styles.input} value={editHarvestForm.date} onChangeText={(date) => setEditHarvestForm({ ...editHarvestForm, date })} placeholder="12.08.2026" />
+
+                <Text style={styles.label}>Sürüm</Text>
+                <View style={styles.rowBtnGroup}>{['1. Sürüm', '2. Sürüm', '3. Sürüm', '4. Sürüm'].map((surum) => <TouchableOpacity key={surum} style={[styles.groupBtn, editHarvestForm.surum === surum && styles.groupBtnActive]} onPress={() => setEditHarvestForm({ ...editHarvestForm, surum })}><Text style={[styles.groupBtnText, editHarvestForm.surum === surum && styles.groupBtnTextActive]}>{surum}</Text></TouchableOpacity>)}</View>
+
+                {isAdmin && <><Text style={styles.label}>Üretici Adı</Text><TextInput style={styles.input} value={editHarvestForm.producer} onChangeText={(producer) => setEditHarvestForm({ ...editHarvestForm, producer })} placeholder="Üretici adı" /></>}
+                <Text style={styles.label}>Miktar (KG)</Text>
+                <TextInput style={styles.input} value={editHarvestForm.kg} onChangeText={(kg) => setEditHarvestForm({ ...editHarvestForm, kg })} placeholder="Örn: 1000" keyboardType="decimal-pad" />
+                <Text style={styles.label}>Firma / Alıcı</Text>
+                <TextInput style={styles.input} value={editHarvestForm.firma} onChangeText={(firma) => setEditHarvestForm({ ...editHarvestForm, firma })} placeholder="ÇAYKUR veya özel fabrika" />
+                <Text style={styles.label}>Birim Fiyat (TL)</Text>
+                <TextInput style={styles.input} value={editHarvestForm.fiyat} onChangeText={(fiyat) => setEditHarvestForm({ ...editHarvestForm, fiyat })} placeholder="Örn: 35,00" keyboardType="decimal-pad" />
+                <Text style={styles.label}>Alınan Ödeme (TL)</Text>
+                <TextInput style={styles.input} value={editHarvestForm.tahsilat} onChangeText={(tahsilat) => setEditHarvestForm({ ...editHarvestForm, tahsilat })} placeholder="Ödeme yoksa 0" keyboardType="decimal-pad" />
+                <Text style={styles.label}>Bahçe</Text>
+                <TextInput style={styles.input} value={editHarvestForm.garden} onChangeText={(garden) => setEditHarvestForm({ ...editHarvestForm, garden })} placeholder="Örn: Arka Bahçe" />
+                <View style={styles.switchRow}><Text style={styles.switchLabel}>Vadeli satış mı?</Text><Switch value={editHarvestForm.isVadeli} onValueChange={(isVadeli) => setEditHarvestForm({ ...editHarvestForm, isVadeli })} trackColor={{ false: '#767577', true: '#2a9d8f' }} /></View>
+                {editHarvestForm.isVadeli && <><Text style={styles.label}>Vade Tarihi (GG.AA.YYYY)</Text><TextInput style={styles.input} value={editHarvestForm.vadeTarihi} onChangeText={(vadeTarihi) => setEditHarvestForm({ ...editHarvestForm, vadeTarihi })} placeholder="15.09.2026" /></>}
+                <Text style={styles.label}>Açıklama</Text>
+                <TextInput style={styles.input} value={editHarvestForm.aciklama} onChangeText={(aciklama) => setEditHarvestForm({ ...editHarvestForm, aciklama })} placeholder="Notlar..." />
+                <View style={styles.modalBtnGroup}>
+                  <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setHarvestEditModalVisible(false)}><Text style={styles.modalBtnText}>İptal</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.modalSaveBtn} onPress={handleUpdateHarvest}><Text style={styles.modalBtnText}>Kaydet</Text></TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </View>
         </Modal>

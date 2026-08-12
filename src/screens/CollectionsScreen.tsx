@@ -34,7 +34,7 @@ export default function CollectionsScreen(props: any) {
                             onPress={() => setPayHarvestId(h._id)}
                           >
                             <Text style={{ color: isSelected ? '#fff' : '#333', fontWeight: 'bold' }}>
-                              {h.tarih || ''} - {h.firma || 'Firma Yok'} ({h.kg || h.weight} KG) {h.bahce ? `- ${h.bahce}` : ''}
+                              {formatDisplayDate(h.tarih)} - {h.firma || 'Firma Yok'} ({h.kg || h.weight} KG) {h.bahce ? `- ${h.bahce}` : ''}
                             </Text>
                             <Text style={{ color: isSelected ? '#e0e0e0' : '#666', fontSize: 12 }}>
                               Kalan Borç: {formatTL(kalan)}

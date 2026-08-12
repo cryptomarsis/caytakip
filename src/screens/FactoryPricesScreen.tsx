@@ -41,8 +41,8 @@ export default function FactoryPricesScreen(props: any) {
       <Text style={styles.label}>Fiyat Türü</Text>
       <View style={styles.rowBtnGroup}>{types.map(t=><TouchableOpacity key={t} style={[styles.groupBtn,priceForm.fiyatTuru===t&&styles.groupBtnActive]} onPress={()=>setPriceForm({...priceForm,fiyatTuru:t})}><Text style={[styles.groupBtnText,priceForm.fiyatTuru===t&&styles.groupBtnTextActive]}>{t}</Text></TouchableOpacity>)}</View>
       {priceForm.fiyatTuru==='Vadeli' && <><Text style={styles.label}>Vade (Gün)</Text><TextInput style={styles.input} value={priceForm.vadeGun} onChangeText={(t)=>setPriceForm({...priceForm,vadeGun:t})} keyboardType="numeric" placeholder="Örn: 30" /></>}
-      <Text style={styles.label}>Geçerlilik Başlangıcı</Text>
-      <TextInput style={styles.input} value={priceForm.gecerlilikBaslangic || priceForm.tarih} onChangeText={(t)=>setPriceForm({...priceForm,tarih:t,gecerlilikBaslangic:t})} placeholder="GG.AA.YYYY" />
+      <Text style={styles.label}>Geçerlilik Başlangıcı (GG.AA.YYYY)</Text>
+      <TextInput style={styles.input} value={priceForm.gecerlilikBaslangic || priceForm.tarih} onChangeText={(t)=>setPriceForm({...priceForm,tarih:t,gecerlilikBaslangic:t})} placeholder="12.08.2026" />
       <Text style={styles.label}>Açıklama</Text><TextInput style={styles.input} value={priceForm.politika} onChangeText={(t)=>setPriceForm({...priceForm,politika:t})} placeholder="Prim, vade, kampanya vb." />
       <Text style={styles.label}>Kaynak</Text><TextInput style={styles.input} value={priceForm.kaynak} onChangeText={(t)=>setPriceForm({...priceForm,kaynak:t})} placeholder="Firma duyurusu / telefon..." />
       <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><Text style={styles.submitBtnText}>Fiyatı Kaydet</Text></TouchableOpacity>

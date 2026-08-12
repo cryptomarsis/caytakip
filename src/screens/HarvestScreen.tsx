@@ -22,8 +22,8 @@ export default function HarvestScreen(props: any) {
     </TouchableOpacity>
 
     {showDetails && <>
-      <Text style={styles.label}>Tarih</Text>
-      <TextInput style={styles.input} value={hForm.date} onChangeText={(t) => setHForm({ ...hForm, date: t })} placeholder="2026-08-12" />
+      <Text style={styles.label}>Tarih (GG.AA.YYYY)</Text>
+      <TextInput style={styles.input} value={hForm.date} onChangeText={(t) => setHForm({ ...hForm, date: t })} placeholder="12.08.2026" />
       <Text style={styles.label}>Sürüm Seçimi</Text>
       <View style={styles.rowBtnGroup}>{['1. Sürüm', '2. Sürüm', '3. Sürüm', '4. Sürüm'].map((s) => <TouchableOpacity key={s} style={[styles.groupBtn, hForm.surum === s && styles.groupBtnActive]} onPress={() => setHForm({ ...hForm, surum: s })}><Text style={[styles.groupBtnText, hForm.surum === s && styles.groupBtnTextActive]}>{s}</Text></TouchableOpacity>)}</View>
       {currentUser?.role === 'admin' && <><Text style={styles.label}>Üretici Adı</Text><TextInput style={styles.input} value={hForm.producer} onChangeText={(t) => setHForm({ ...hForm, producer: t })} placeholder={currentUser?.name || 'Üretici Adı'} /></>}
@@ -32,7 +32,7 @@ export default function HarvestScreen(props: any) {
       <Text style={styles.label}>Bahçe</Text>
       <TextInput style={styles.input} value={hForm.garden} onChangeText={(t) => setHForm({ ...hForm, garden: t })} placeholder="Örn: Arka Bahçe" />
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Vadeli satış mı?</Text><Switch value={hForm.isVadeli} onValueChange={(val) => setHForm({ ...hForm, isVadeli: val })} trackColor={{ false: '#767577', true: '#2a9d8f' }} /></View>
-      {hForm.isVadeli && <><Text style={styles.label}>Vade Tarihi</Text><TextInput style={styles.input} value={hForm.vadeTarihi} onChangeText={(t) => setHForm({ ...hForm, vadeTarihi: t })} placeholder="2026-09-15" /></>}
+      {hForm.isVadeli && <><Text style={styles.label}>Vade Tarihi (GG.AA.YYYY)</Text><TextInput style={styles.input} value={hForm.vadeTarihi} onChangeText={(t) => setHForm({ ...hForm, vadeTarihi: t })} placeholder="15.09.2026" /></>}
       <Text style={styles.label}>Açıklama</Text>
       <TextInput style={styles.input} value={hForm.aciklama} onChangeText={(t) => setHForm({ ...hForm, aciklama: t })} placeholder="Notlar..." />
     </>}

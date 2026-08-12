@@ -48,6 +48,22 @@ const normalizePhone = (value) => {
   if (p.length === 10 && p.startsWith('5')) p = '0' + p;
   return p;
 };
+const normalizeCalendarDate = (value) => {
+  const raw = String(value || '').trim();
+  const tr = raw.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
+  const iso = raw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
+  const year = Number(tr?.[3] || iso?.[1]);
+  const month = Number(tr?.[2] || iso?.[2]);
+  const day = Number(tr?.[1] || iso?.[3]);
+  if (!year || !month || !day) return '';
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+const todayServerDate = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -677,9 +693,14 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     const kgVal = Number(String(req.body.kg ?? req.body.weight ?? '').replace(',', '.'));
     const fiyatVal = Number(String(req.body.fiyat ?? '').replace(',', '.'));
     const tahsilatVal = Number(String(req.body.tahsilat ?? '0').replace(',', '.'));
+    const tarih = normalizeCalendarDate(req.body.tarih) || (req.body.tarih ? '' : todayServerDate());
+    const isVadeli = req.body.isVadeli === true || req.body.isVadeli === 'true';
+    const vadeTarihi = isVadeli ? normalizeCalendarDate(req.body.vadeTarihi) : '';
     if (!Number.isFinite(kgVal) || kgVal <= 0) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
     if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
+    if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
+    if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     const toplam = kgVal * fiyatVal;
     if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
     const kalan = toplam - tahsilatVal;
@@ -689,13 +710,21 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     else if (tahsilatVal > 0) durum = 'Kısmi Ödendi';
 
     const payload = {
-      ...req.body,
       userId: req.auth.userId,
       userPhone: req.auth.phone,
+      tarih,
+      surum: String(req.body.surum || '1. Sürüm').trim(),
+      uretici: String(req.body.uretici || req.body.producerName || '').trim(),
+      producerName: String(req.body.producerName || req.body.uretici || '').trim(),
       kg: kgVal,
       weight: kgVal,
+      firma: String(req.body.firma || '').trim(),
       fiyat: fiyatVal,
       tahsilat: tahsilatVal,
+      aciklama: String(req.body.aciklama || '').trim(),
+      bahce: String(req.body.bahce || req.body.garden || '').trim(),
+      isVadeli,
+      vadeTarihi,
       toplamTutar: toplam,
       kalanBakiye: kalan,
       odemeDurumu: durum
@@ -715,14 +744,19 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
     const existing = await Harvest.findOne({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!existing) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
 
-    const kgVal = Number(req.body.kg ?? req.body.weight ?? existing.kg) || 0;
-    const fiyatVal = Number(req.body.fiyat ?? existing.fiyat) || 0;
-    const tahsilatVal = Number(req.body.tahsilat ?? existing.tahsilat) || 0;
+    const kgVal = Number(String(req.body.kg ?? req.body.weight ?? existing.kg).replace(',', '.')) || 0;
+    const fiyatVal = Number(String(req.body.fiyat ?? existing.fiyat).replace(',', '.')) || 0;
+    const tahsilatVal = Number(String(req.body.tahsilat ?? existing.tahsilat).replace(',', '.')) || 0;
+    const tarih = req.body.tarih === undefined ? existing.tarih : normalizeCalendarDate(req.body.tarih);
+    const isVadeli = req.body.isVadeli === undefined ? Boolean(existing.isVadeli) : (req.body.isVadeli === true || req.body.isVadeli === 'true');
+    const vadeTarihi = !isVadeli ? '' : req.body.vadeTarihi === undefined ? existing.vadeTarihi : normalizeCalendarDate(req.body.vadeTarihi);
     const toplam = kgVal * fiyatVal;
     if (kgVal <= 0 || !Number.isFinite(kgVal)) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
     if (fiyatVal < 0 || !Number.isFinite(fiyatVal)) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (tahsilatVal < 0 || !Number.isFinite(tahsilatVal)) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
     if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
+    if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
+    if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     const kalan = toplam - tahsilatVal;
 
     let durum = 'Bekliyor';
@@ -730,11 +764,19 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
     else if (tahsilatVal > 0) durum = 'Kısmi Ödendi';
 
     const updatePayload = {
-      ...req.body,
+      tarih,
+      surum: req.body.surum === undefined ? existing.surum : String(req.body.surum || '').trim(),
+      uretici: req.body.uretici === undefined ? existing.uretici : String(req.body.uretici || '').trim(),
+      producerName: req.body.producerName === undefined ? existing.producerName : String(req.body.producerName || '').trim(),
       kg: kgVal,
       weight: kgVal,
+      firma: req.body.firma === undefined ? existing.firma : String(req.body.firma || '').trim(),
       fiyat: fiyatVal,
       tahsilat: tahsilatVal,
+      aciklama: req.body.aciklama === undefined ? existing.aciklama : String(req.body.aciklama || '').trim(),
+      bahce: req.body.bahce === undefined ? existing.bahce : String(req.body.bahce || '').trim(),
+      isVadeli,
+      vadeTarihi,
       toplamTutar: toplam,
       kalanBakiye: kalan,
       odemeDurumu: durum
@@ -924,18 +966,16 @@ app.post('/api/factory-prices', requireAuth, requireAdmin, idempotencyMiddleware
 
     const firma = String(req.body.firma || '').trim();
     const fiyat = Number(String(req.body.fiyat ?? '').replace(',', '.'));
-    const tarihRaw = String(req.body.tarih || '').trim();
-    const tarihMatch = tarihRaw.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
-    const tarih = tarihMatch ? `${tarihMatch[3]}-${tarihMatch[2].padStart(2,'0')}-${tarihMatch[1].padStart(2,'0')}` : tarihRaw;
+    const tarih = normalizeCalendarDate(req.body.tarih);
     const gecerlilikRaw = String(req.body.gecerlilikBaslangic || '').trim();
-    const gecerlilikMatch = gecerlilikRaw.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
-    const gecerlilikBaslangic = gecerlilikMatch ? `${gecerlilikMatch[3]}-${gecerlilikMatch[2].padStart(2,'0')}-${gecerlilikMatch[1].padStart(2,'0')}` : gecerlilikRaw;
+    const gecerlilikBaslangic = gecerlilikRaw ? normalizeCalendarDate(gecerlilikRaw) : '';
     const fiyatTuru = ['Haftalık','Aylık','Peşin','Vadeli','Diğer'].includes(String(req.body.fiyatTuru)) ? String(req.body.fiyatTuru) : 'Peşin';
     const vadeGun = Number(req.body.vadeGun) || 0;
 
     if (!firma) return res.status(400).json({ error: 'Fabrika adı zorunludur.' });
     if (!Number.isFinite(fiyat) || fiyat < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
-    if (!tarih) return res.status(400).json({ error: 'Fiyat tarihi zorunludur.' });
+    if (!tarih) return res.status(400).json({ error: 'Fiyat tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
+    if (gecerlilikRaw && !gecerlilikBaslangic) return res.status(400).json({ error: 'Geçerlilik başlangıcı GG.AA.YYYY biçiminde geçerli olmalıdır.' });
 
     const item = await FactoryPrice.create({
       ...req.body,
@@ -1022,10 +1062,14 @@ app.post('/api/expenses', requireAuth, idempotencyMiddleware, async (req, res) =
       return res.status(400).json({ error: 'Kullanıcı doğrulama bilgisi bulunamadı.' });
     }
 
+    const tarih = normalizeCalendarDate(req.body.tarih) || (req.body.tarih ? '' : todayServerDate());
+    if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     const payload = {
-      ...req.body,
       userId: req.auth.userId,
       userPhone: req.auth.phone,
+      tarih,
+      kategori: String(req.body.kategori || 'Diğer').trim(),
+      aciklama: String(req.body.aciklama || '').trim(),
       tutar: Number(req.body.tutar) || 0
     };
 

@@ -14,6 +14,7 @@ type DashboardProps = {
   totalExp: number;
   netProfit: number;
   openEditModal: (item: any) => void;
+  openHarvestEditModal: (item: any) => void;
   handleDelete: (endpoint: string, id: string, label: string) => void;
   onNavigate: (tab: 'harvest' | 'collections' | 'expense' | 'prices' | 'reports') => void;
 };
@@ -28,6 +29,7 @@ export default function DashboardScreen({
   totalExp,
   netProfit,
   openEditModal,
+  openHarvestEditModal,
   handleDelete,
   onNavigate,
 }: DashboardProps) {
@@ -121,7 +123,7 @@ export default function DashboardScreen({
                   {item.uretici || item.producerName || 'Bilinmeyen Üretici'} ({item.surum || '1. Sürüm'})
                 </Text>
                 <Text style={styles.listSubText}>
-                  📅 {item.tarih || 'Tarih Yok'} | ⚖️ {item.kg || item.weight || 0} KG | 💵 Fiyat: {item.fiyat || 0} TL
+                  📅 {formatDisplayDate(item.tarih)} | ⚖️ {item.kg || item.weight || 0} KG | 💵 Fiyat: {item.fiyat || 0} TL
                 </Text>
                 {item.bahce ? <Text style={styles.listSubText}>🏡 Bahçe: {item.bahce}</Text> : null}
                 {item.isVadeli ? <Text style={styles.listSubText}>⏳ Vade: {formatDisplayDate(item.vadeTarihi)}</Text> : null}
@@ -133,6 +135,9 @@ export default function DashboardScreen({
                 </Text>
               </View>
               <View style={{ gap: 5 }}>
+                <TouchableOpacity style={styles.editBtn} onPress={() => openHarvestEditModal(item)}>
+                  <Text style={styles.actionBtnText}>✏️ Düzenle</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
                   <Text style={styles.actionBtnText}>✏️ Ödeme</Text>
                 </TouchableOpacity>
