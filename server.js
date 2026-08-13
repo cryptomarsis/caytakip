@@ -11,12 +11,16 @@ const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+// Çaylık'ın Windows sürümü, uygulamanın kendine ait güvenli Electron adresinden
+// bağlanır. Bu adres bir internet sitesi değildir; sadece paketlenmiş uygulama
+// tarafından kullanılır.
+const trustedDesktopOrigins = new Set(['caylik://app']);
 const corsOptions = {
   origin: (origin, callback) => {
     // Mobil istemciler Origin başlığı göndermez; web sürümünde yalnızca açıkça
     // izin verilen alan adları kabul edilir. Geliştirme ortamında eski davranış korunur.
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.includes(origin) || trustedDesktopOrigins.has(origin)) return callback(null, true);
     if (process.env.NODE_ENV !== 'production' && allowedOrigins.length === 0) return callback(null, true);
     return callback(new Error('Bu web alan adına API erişim izni verilmedi.'));
   }

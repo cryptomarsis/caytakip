@@ -32,6 +32,7 @@ export default function App() {
   const [authName, setAuthName] = useState('');
   const [authPin, setAuthPin] = useState('');
   const [authPinConfirm, setAuthPinConfirm] = useState('');
+  const [authFeedback, setAuthFeedback] = useState<{ title: string; message: string; type: 'error' | 'info' } | null>(null);
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
@@ -105,6 +106,13 @@ export default function App() {
   const [payDesc, setPayDesc] = useState('');
 
   const isAdmin = currentUser?.role === 'admin';
+
+  const showAuthFeedback = (title: string, message: string, type: 'error' | 'info' = 'error') => {
+    setAuthFeedback({ title, message, type });
+    // react-native-web'de Alert.alert boş bir fonksiyondur. Bilgisayarda
+    // mesajı doğrudan giriş ekranında gösteriyoruz; mobildeki uyarı korunur.
+    if (Platform.OS !== 'web') Alert.alert(title, message);
+  };
 
   // Ortak İstek Başlıklarını Oluşturan Yardımcı Fonksiyon (Madde 6)
   const getAuthHeaders = () => ({
@@ -448,15 +456,16 @@ export default function App() {
   const handleAuth = async () => {
     const cleanPhone = normalizePhone(authPhone);
     const cleanPin = authPin.replace(/\D/g, '');
-    if (!cleanPhone || cleanPhone.length !== 11) { Alert.alert('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.'); return; }
-    if (authMode === 'register' && !authName.trim()) { Alert.alert('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
-    if (!/^\d{6}$/.test(cleanPin)) { Alert.alert('Eksik Bilgi', 'Lütfen 6 haneli giriş şifrenizi belirleyin.'); return; }
-    if (authMode === 'register' && cleanPin !== authPinConfirm.replace(/\D/g, '')) { Alert.alert('Şifre Eşleşmiyor', 'Giriş şifreleri aynı olmalıdır.'); return; }
+    setAuthFeedback(null);
+    if (!cleanPhone || cleanPhone.length !== 11) { showAuthFeedback('Eksik Bilgi', 'Lütfen geçerli bir telefon numarası girin.'); return; }
+    if (authMode === 'register' && !authName.trim()) { showAuthFeedback('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
+    if (!/^\d{6}$/.test(cleanPin)) { showAuthFeedback('Eksik Bilgi', 'Lütfen 6 haneli giriş şifrenizi belirleyin.'); return; }
+    if (authMode === 'register' && cleanPin !== authPinConfirm.replace(/\D/g, '')) { showAuthFeedback('Şifre Eşleşmiyor', 'Giriş şifreleri aynı olmalıdır.'); return; }
     setLoading(true);
     try {
       const profile = authMode === 'register' ? await saveProfile(cleanPhone, authName, cleanPin) : await syncProfile(cleanPhone, cleanPin);
       if (!profile?.token) {
-        Alert.alert('Giriş Başarısız', authMode === 'login' ? 'Kayıt bulunamadı veya oturum oluşturulamadı.' : 'Profil kaydedildi ancak güvenli oturum oluşturulamadı.');
+        showAuthFeedback('Giriş Başarısız', authMode === 'login' ? 'Kayıt bulunamadı veya oturum oluşturulamadı.' : 'Profil kaydedildi ancak güvenli oturum oluşturulamadı.');
         return;
       }
       const userData: UserSession = {
@@ -468,15 +477,15 @@ export default function App() {
         refreshToken: profile.refreshToken
       };
       setCurrentUser(userData); await saveSession(userData);
-      Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
+      if (Platform.OS !== 'web') Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
     } catch (e: any) {
       if (e?.code === 'PIN_SETUP_REQUIRED') {
         setAuthMode('register');
         setAuthPin('');
         setAuthPinConfirm('');
-        Alert.alert('İlk Giriş Şifresi', 'Bu eski hesap için henüz giriş şifresi yok. Aşağıdaki kayıt ekranında aynı telefon numaranızı ve yeni 6 haneli şifrenizi girin.');
+        showAuthFeedback('İlk Giriş Şifresi', 'Bu eski hesap için henüz giriş şifresi yok. Aşağıdaki kayıt ekranında aynı telefon numaranızı ve yeni 6 haneli şifrenizi girin.', 'info');
       }
-      else Alert.alert('Profil Hatası', e?.message || 'Giriş işlemi başarısız.');
+      else showAuthFeedback('Giriş Yapılamadı', e?.message || 'Giriş işlemi başarısız.');
     }
     finally { setLoading(false); }
   };
@@ -973,6 +982,12 @@ export default function App() {
             <Text style={styles.authSubTitle}>
               {authMode === 'login' ? 'Telefon ve giriş şifrenizle devam edin' : 'Yeni üretici kaydı oluşturun'}
             </Text>
+            {authFeedback && (
+              <View style={{ width: '100%', marginBottom: 14, padding: 12, borderRadius: 10, backgroundColor: authFeedback.type === 'error' ? '#FDECEC' : '#E9F5EE', borderWidth: 1, borderColor: authFeedback.type === 'error' ? '#F2B8B5' : '#B7DCC7' }}>
+                <Text style={{ color: authFeedback.type === 'error' ? '#A0221D' : '#1B5E3C', fontWeight: '800', marginBottom: 3 }}>{authFeedback.title}</Text>
+                <Text style={{ color: '#39443E', lineHeight: 20 }}>{authFeedback.message}</Text>
+              </View>
+            )}
 
             {authMode === 'register' && (
               <View style={{ width: '100%' }}>
@@ -1021,13 +1036,13 @@ export default function App() {
               />
               <Text style={styles.formHelp}>Bu şifreyi not edin; telefon numaranızla birlikte girişte kullanacaksınız.</Text>
             </>}
-            <TouchableOpacity style={styles.submitBtn} onPress={handleAuth}>
-              <Text style={styles.submitBtnText}>{authMode === 'login' ? 'GİRİŞ YAP' : 'KAYIT OL VE GİRİŞ YAP'}</Text>
+            <TouchableOpacity disabled={loading} style={[styles.submitBtn, loading && { opacity: 0.7 }]} onPress={handleAuth}>
+              <Text style={styles.submitBtnText}>{loading ? 'LÜTFEN BEKLEYİN...' : authMode === 'login' ? 'GİRİŞ YAP' : 'KAYIT OL VE GİRİŞ YAP'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={{ marginTop: 15 }}
-              onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthPin(''); setAuthPinConfirm(''); }}
+              onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthPin(''); setAuthPinConfirm(''); setAuthFeedback(null); }}
             >
               <Text style={{ color: '#1b4332', fontWeight: 'bold', textDecorationLine: 'underline' }}>
                 {authMode === 'login'
