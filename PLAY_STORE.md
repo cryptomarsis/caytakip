@@ -42,7 +42,7 @@ Play Console'daki Veri Güvenliği formu, uygulamanın gerçek davranışına g�
 
 ## Grafikler
 
-- Uygulama simgesi: `assets/caylik-icon-v1.png`
+- Google Play uygulama simgesi (512 × 512, PNG): `assets/play-store-icon-512.png`
 - Google Play kapak görseli (1024 × 500, PNG): `assets/play-store-feature-v1.png`
 - Henüz hazırlanması gereken tek mağaza görseli: gerçek uygulama ekran görüntüleri. Android emülatörde en az Hasat Ekle, Ödeme Al, Raporlar ve Ayarlar ekranlarının temiz ekran görüntülerini alın.
 
@@ -53,3 +53,12 @@ Play Console'daki Veri Güvenliği formu, uygulamanın gerçek davranışına g�
 3. Mağaza metinlerini, kapak görselini, ekran görüntülerini, gizlilik politikası ve hesap silme bağlantılarını ekleyin.
 4. İç testte giriş, hasat ekleme, tahsilat, PDF/Excel, çevrimdışı kayıt ve hesap silmeyi deneyin.
 5. Yeni kişisel Play geliştirici hesabıysa kapalı testte en az 12 kişinin uygulamaya 14 gün kesintisiz katılması gerekir. Ardından üretim erişimine başvurun.
+
+## Bu sürümün teknik durumu
+
+- Yayın sürümü: `1.0.6` / Android `versionCode: 6`
+- Paket adı: `com.cryptomarsis.cayureticisi`
+- Telefon, mikrofon, kamera ve harici depolama izinleri istenmez.
+- SMS doğrulaması kullanılmaz. Telefon numarası + 6 haneli giriş şifresi kullanılır; aynı hesapta 5 hatalı denemeden sonra giriş 15 dakika kilitlenir.
+- Çalışan gizlilik politikası: `https://cay-ureticisi-takip.onrender.com/privacy`
+- Çalışan hesap silme sayfası: `https://cay-ureticisi-takip.onrender.com/delete-account`
