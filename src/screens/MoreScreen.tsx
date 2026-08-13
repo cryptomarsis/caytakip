@@ -3,10 +3,11 @@ import { Text, TouchableOpacity, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { styles } from '../styles/styles';
 
-type Tab = 'expense' | 'gardens' | 'prices' | 'reports' | 'settings';
+type Tab = 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings';
 type Props = { isAdmin: boolean; onNavigate: (tab: Tab | 'admin') => void };
 
 const items: Array<{ tab: Tab; label: string; detail: string; icon: string }> = [
+  { tab: 'history', label: 'Hasat Geçmişi', detail: 'Eski hasat kayıtlarını bulun ve düzeltin', icon: 'history' },
   { tab: 'expense', label: 'Giderler', detail: 'Masrafları ekleyin ve takip edin', icon: 'receipt_long' },
   { tab: 'gardens', label: 'Bahçeler', detail: 'Bahçelerinizi tanımlayın', icon: 'yard' },
   { tab: 'prices', label: 'Fabrika Fiyatları', detail: 'Güncel alım fiyatlarını karşılaştırın', icon: 'factory' },

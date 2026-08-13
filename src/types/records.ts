@@ -30,6 +30,7 @@ export interface PaymentRecord {
   tutar?: number | string;
   aciklama?: string;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ExpenseRecord {

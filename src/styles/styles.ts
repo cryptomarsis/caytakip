@@ -834,6 +834,66 @@ export const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: 6
   },
+  paymentHistoryActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 11
+  },
+  paymentEditBtn: {
+    backgroundColor: '#3E7C5D',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8
+  },
+  paymentDeleteBtn: {
+    backgroundColor: '#B44B4B',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8
+  },
+  paymentActionText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  historyCount: {
+    color: '#557064',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+    marginBottom: 10
+  },
+  historyActions: {
+    gap: 6,
+    minWidth: 78
+  },
+  historyPayBtn: {
+    backgroundColor: '#246548',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6
+  },
+  historyRemaining: {
+    fontWeight: '800',
+    marginTop: 4,
+    fontSize: 13
+  },
+  legacyPaymentEditBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 11,
+    borderWidth: 1,
+    borderColor: '#2E7654',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#FFFFFF'
+  },
+  legacyPaymentEditText: {
+    color: '#1F6847',
+    fontSize: 13,
+    fontWeight: '800'
+  },
   formCard: {
     backgroundColor: '#FFFFFF',
     padding: 18,

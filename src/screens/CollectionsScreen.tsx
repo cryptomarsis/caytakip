@@ -13,7 +13,7 @@ const recordTime = (value?: string) => {
 };
 
 export default function CollectionsScreen(props: any) {
-  const { handleSpecificHarvestPayment, harvests, payments, payAmount, payDesc, payHarvestId, setPayAmount, setPayDesc, setPayHarvestId } = props;
+  const { handleSpecificHarvestPayment, harvests, payments, handleDelete, openPaymentEditModal, prepareLegacyPaymentForEdit, payAmount, payDate, payDesc, payHarvestId, setPayAmount, setPayDate, setPayDesc, setPayHarvestId } = props;
   const scrollRef = useRef<ScrollView>(null);
   const { width } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -181,6 +181,14 @@ export default function CollectionsScreen(props: any) {
           </>
         )}
 
+        <Text style={styles.label}>Tahsilat Tarihi (GG.AA.YYYY)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="12.08.2026"
+          value={payDate}
+          onChangeText={setPayDate}
+        />
+
         <Text style={styles.label}>Alınan Tutar (TL)</Text>
         <TextInput
           style={styles.input}
@@ -234,6 +242,14 @@ export default function CollectionsScreen(props: any) {
                   </Text>
                 ) : <Text style={styles.paymentHistoryMeta}>Bağlı hasat kaydı silinmiş veya bulunamıyor.</Text>}
                 {!!payment.aciklama && <Text style={styles.paymentHistoryNote}>Not: {payment.aciklama}</Text>}
+                <View style={styles.paymentHistoryActions}>
+                  <TouchableOpacity style={styles.paymentEditBtn} onPress={() => openPaymentEditModal(payment)}>
+                    <Text style={styles.paymentActionText}>Düzenle</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.paymentDeleteBtn} onPress={() => handleDelete('payments', payment._id, 'Tahsilat')}>
+                    <Text style={styles.paymentActionText}>Sil</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           })}
@@ -247,6 +263,9 @@ export default function CollectionsScreen(props: any) {
                 <Text style={styles.paymentHistoryAmount}>+ {formatTL(amount)}</Text>
               </View>
               <Text style={styles.paymentHistoryMeta}>Bu tahsilat eski uygulama kaydında toplam olarak bulunuyor; tek tek ödeme tarihi/notu daha önce saklanmamış.</Text>
+              <TouchableOpacity style={styles.legacyPaymentEditBtn} onPress={() => prepareLegacyPaymentForEdit(harvest)}>
+                <Text style={styles.legacyPaymentEditText}>Düzenlemeye Aç</Text>
+              </TouchableOpacity>
             </View>
           ))}
           </>

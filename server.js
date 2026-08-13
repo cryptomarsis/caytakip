@@ -231,10 +231,12 @@ const PaymentSchema = new mongoose.Schema({
   harvestId: { type: mongoose.Schema.Types.ObjectId, ref: 'Harvest', required: true },
   tarih: String,
   tutar: Number,
-  aciklama: String
+  aciklama: String,
+  legacyDetail: { type: Boolean, default: false }
 }, { timestamps: true });
 PaymentSchema.index({ userId: 1, createdAt: -1 });
 PaymentSchema.index({ userPhone: 1, createdAt: -1 });
+PaymentSchema.index({ harvestId: 1, legacyDetail: 1 }, { unique: true, partialFilterExpression: { legacyDetail: true } });
 
 const ExpenseSchema = new mongoose.Schema({
   userId: { type: String, required: false },
@@ -385,6 +387,11 @@ setInterval(() => {
 }, 60 * 60 * 1000).unref();
 
 const numeric = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const paymentAmount = (value) => {
+  const parsed = Number(String(value ?? '').trim().replace(',', '.'));
+  return Number.isFinite(parsed) ? Math.round((parsed + Number.EPSILON) * 100) / 100 : NaN;
+};
+const roundedMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const HARVEST_WITHHOLDING_RATE = 2;
 const calculateHarvestAmounts = (kg, fiyat) => {
   const brutTutar = Math.max(0, numeric(kg) * numeric(fiyat));
@@ -698,7 +705,7 @@ app.get('/api/harvests', requireAuth, async (req, res) => {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
     const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 200) : 200;
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 500) : 200;
     const before = String(req.query.before || '').trim();
     if (before && mongoose.Types.ObjectId.isValid(before)) filter._id = { $lt: new mongoose.Types.ObjectId(before) };
     const data = await Harvest.find(filter).sort({ _id: -1 }).limit(limit);
@@ -763,6 +770,25 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
 
     const newHarvest = new Harvest(payload);
     await newHarvest.save();
+
+    // Eski uygulama sürümleri hasat oluştururken ilk tahsilatı aynı formdan
+    // girebiliyordu. Bu tutarı ayrıca geçmişe yazarak sonradan düzenlenebilir
+    // olmasını sağlıyoruz.
+    if (tahsilatVal > 0) {
+      try {
+        await Payment.create({
+          userId: req.auth.userId,
+          userPhone: req.auth.phone,
+          harvestId: newHarvest._id,
+          tarih,
+          tutar: tahsilatVal,
+          aciklama: 'Hasat eklenirken girilen ilk tahsilat.'
+        });
+      } catch (paymentError) {
+        await Harvest.deleteOne({ _id: newHarvest._id });
+        throw paymentError;
+      }
+    }
     res.status(201).json(newHarvest);
   } catch (err) {
     console.error('Hasat Ekleme Hatası:', err);
@@ -777,7 +803,13 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
 
     const kgVal = Number(String(req.body.kg ?? req.body.weight ?? existing.kg).replace(',', '.')) || 0;
     const fiyatVal = Number(String(req.body.fiyat ?? existing.fiyat).replace(',', '.')) || 0;
-    const tahsilatVal = Number(String(req.body.tahsilat ?? existing.tahsilat).replace(',', '.')) || 0;
+    const requestedTahsilat = req.body.tahsilat === undefined ? Number(existing.tahsilat) || 0 : paymentAmount(req.body.tahsilat);
+    // Tahsilat toplamı yalnızca tahsilat geçmişindeki tek tek kayıtlardan
+    // değişir. Böylece geçmiş ve kalan alacak birbirinden kopmaz.
+    if (!Number.isFinite(requestedTahsilat) || Math.abs(requestedTahsilat - (Number(existing.tahsilat) || 0)) > 0.01) {
+      return res.status(400).json({ error: 'Tahsilat tutarını Ödeme Al ekranındaki tahsilat geçmişinden düzenleyin.' });
+    }
+    const tahsilatVal = Number(existing.tahsilat) || 0;
     const tarih = req.body.tarih === undefined ? existing.tarih : normalizeCalendarDate(req.body.tarih);
     const isVadeli = req.body.isVadeli === undefined ? Boolean(existing.isVadeli) : (req.body.isVadeli === true || req.body.isVadeli === 'true');
     const vadeTarihi = !isVadeli ? '' : req.body.vadeTarihi === undefined ? existing.vadeTarihi : normalizeCalendarDate(req.body.vadeTarihi);
@@ -847,7 +879,7 @@ app.get('/api/payments', requireAuth, async (req, res) => {
     const filter = buildUserFilter(req);
     if (filter._id === null) return res.json([]);
     const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 300) : 300;
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 500) : 300;
     const data = await Payment.find(filter)
       .sort({ _id: -1 })
       .limit(limit)
@@ -870,7 +902,7 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
       return res.status(400).json({ error: 'Seçilen satış kaydının kimliği geçersiz.' });
     }
 
-    const ödemeTutar = Number(String(tutar ?? '').replace(',', '.'));
+    const ödemeTutar = paymentAmount(tutar);
     if (!Number.isFinite(ödemeTutar) || ödemeTutar <= 0) {
       return res.status(400).json({ error: 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.' });
     }
@@ -896,14 +928,14 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
       return res.status(400).json({ error: `Tahsilat kalan borçtan fazla olamaz. Kalan: ${kalan.toFixed(2)} TL` });
     }
 
-    const yeniTahsilat = mevcutTahsilat + ödemeTutar;
+    const yeniTahsilat = roundedMoney(mevcutTahsilat + ödemeTutar);
     harvest.tahsilat = yeniTahsilat;
     harvest.brutTutar = amounts.brutTutar;
     harvest.gelirVergisiOrani = amounts.gelirVergisiOrani;
     harvest.gelirVergisiKesintisi = amounts.gelirVergisiKesintisi;
     harvest.kesintiTutar = amounts.kesintiTutar;
     harvest.toplamTutar = toplam;
-    harvest.kalanBakiye = Math.max(0, toplam - yeniTahsilat);
+    harvest.kalanBakiye = Math.max(0, roundedMoney(toplam - yeniTahsilat));
     harvest.odemeDurumu = harvest.kalanBakiye <= 0.01 ? 'Ödendi' : 'Kısmi Ödendi';
     await harvest.save();
 
@@ -928,6 +960,142 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
   } catch (err) {
     console.error('Tahsilat Kaydetme Hatası:', err);
     res.status(500).json({ error: `Tahsilat kaydedilemedi: ${err.message}` });
+  }
+});
+
+// Eski sürümde yalnızca hasat toplamına yazılmış tahsilatı, düzenlenebilir bir
+// geçmiş kaydına dönüştürür. Hasadın toplamı değişmez; sadece eksik ayrıntı
+// kayda kavuşur.
+app.post('/api/payments/legacy', requireAuth, idempotencyMiddleware, async (req, res) => {
+  try {
+    const harvestId = String(req.body.harvestId || '').trim();
+    if (!mongoose.Types.ObjectId.isValid(harvestId)) return res.status(400).json({ error: 'Hasat kaydı bulunamadı.' });
+
+    const harvest = await Harvest.findOne({ _id: harvestId, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
+    if (!harvest) return res.status(404).json({ error: 'Hasat kaydı bulunamadı.' });
+
+    const alreadyPrepared = await Payment.findOne({ harvestId, legacyDetail: true, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
+    if (alreadyPrepared) return res.json({ message: 'Önceki tahsilat zaten düzenlemeye açık.', payment: alreadyPrepared });
+
+    const existingPayments = await Payment.find({ harvestId, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] }).lean();
+    const detailedTotal = existingPayments.reduce((sum, payment) => sum + (Number(payment.tutar) || 0), 0);
+    const legacyAmount = roundedMoney((Number(harvest.tahsilat) || 0) - detailedTotal);
+    if (legacyAmount <= 0.01) return res.status(400).json({ error: 'Bu hasat için düzenlemeye açılacak eski tahsilat kalmadı.' });
+
+    const payment = await Payment.create({
+      userId: req.auth.userId,
+      userPhone: req.auth.phone,
+      harvestId: harvest._id,
+      tarih: normalizeCalendarDate(harvest.tarih) || todayServerDate(),
+      tutar: legacyAmount,
+      aciklama: 'Önceki toplu tahsilat kaydı. Tarih, tutar ve not düzenlenebilir.',
+      legacyDetail: true
+    });
+    res.status(201).json({ message: 'Önceki tahsilat düzenlemeye açıldı.', payment });
+  } catch (err) {
+    res.status(500).json({ error: `Tahsilat geçmişi hazırlanamadı: ${err.message}` });
+  }
+});
+
+// Tahsilat tutarı, tarihi veya notu değiştirildiğinde bağlı hasadın toplam
+// tahsilatı ve kalan alacağı birlikte güncellenir.
+app.put('/api/payments/:id', requireAuth, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
+    if (!payment) return res.status(404).json({ error: 'Tahsilat kaydı bulunamadı.' });
+
+    const tutar = paymentAmount(req.body.tutar);
+    const tarih = normalizeCalendarDate(req.body.tarih);
+    if (!Number.isFinite(tutar) || tutar <= 0) return res.status(400).json({ error: 'Tahsilat tutarı 0’dan büyük olmalıdır.' });
+    if (!tarih) return res.status(400).json({ error: 'Tahsilat tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
+
+    const harvest = await Harvest.findOne({ _id: payment.harvestId, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
+    if (!harvest) return res.status(404).json({ error: 'Bağlı hasat kaydı bulunamadı.' });
+
+    const amounts = calculateHarvestAmounts(harvest.kg || harvest.weight, harvest.fiyat);
+    const currentPaid = Number(harvest.tahsilat) || 0;
+    const nextPaid = roundedMoney(currentPaid - (Number(payment.tutar) || 0) + tutar);
+    if (nextPaid < -0.01 || nextPaid > amounts.netTutar + 0.01) {
+      return res.status(400).json({ error: `Tahsilat net alacak tutarını aşamaz. Net alacak: ${amounts.netTutar.toFixed(2)} TL` });
+    }
+
+    const previousHarvest = {
+      tahsilat: harvest.tahsilat,
+      brutTutar: harvest.brutTutar,
+      gelirVergisiOrani: harvest.gelirVergisiOrani,
+      gelirVergisiKesintisi: harvest.gelirVergisiKesintisi,
+      kesintiTutar: harvest.kesintiTutar,
+      toplamTutar: harvest.toplamTutar,
+      kalanBakiye: harvest.kalanBakiye,
+      odemeDurumu: harvest.odemeDurumu
+    };
+
+    harvest.tahsilat = Math.max(0, nextPaid);
+    harvest.brutTutar = amounts.brutTutar;
+    harvest.gelirVergisiOrani = amounts.gelirVergisiOrani;
+    harvest.gelirVergisiKesintisi = amounts.gelirVergisiKesintisi;
+    harvest.kesintiTutar = amounts.kesintiTutar;
+    harvest.toplamTutar = amounts.netTutar;
+    harvest.kalanBakiye = Math.max(0, roundedMoney(amounts.netTutar - harvest.tahsilat));
+    harvest.odemeDurumu = harvest.kalanBakiye <= 0.01 ? 'Ödendi' : harvest.tahsilat > 0 ? 'Kısmi Ödendi' : 'Bekliyor';
+    await harvest.save();
+
+    try {
+      payment.tutar = tutar;
+      payment.tarih = tarih;
+      payment.aciklama = String(req.body.aciklama || '').trim();
+      await payment.save();
+      res.json({ message: 'Tahsilat güncellendi.', harvest, payment });
+    } catch (paymentError) {
+      Object.assign(harvest, previousHarvest);
+      await harvest.save();
+      throw paymentError;
+    }
+  } catch (err) {
+    res.status(500).json({ error: `Tahsilat güncellenemedi: ${err.message}` });
+  }
+});
+
+app.delete('/api/payments/:id', requireAuth, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
+    if (!payment) return res.status(404).json({ error: 'Tahsilat kaydı bulunamadı.' });
+
+    const harvest = await Harvest.findOne({ _id: payment.harvestId, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
+    if (!harvest) return res.status(404).json({ error: 'Bağlı hasat kaydı bulunamadı.' });
+
+    const amounts = calculateHarvestAmounts(harvest.kg || harvest.weight, harvest.fiyat);
+    const previousHarvest = {
+      tahsilat: harvest.tahsilat,
+      brutTutar: harvest.brutTutar,
+      gelirVergisiOrani: harvest.gelirVergisiOrani,
+      gelirVergisiKesintisi: harvest.gelirVergisiKesintisi,
+      kesintiTutar: harvest.kesintiTutar,
+      toplamTutar: harvest.toplamTutar,
+      kalanBakiye: harvest.kalanBakiye,
+      odemeDurumu: harvest.odemeDurumu
+    };
+    const nextPaid = Math.max(0, roundedMoney((Number(harvest.tahsilat) || 0) - (Number(payment.tutar) || 0)));
+    harvest.tahsilat = nextPaid;
+    harvest.brutTutar = amounts.brutTutar;
+    harvest.gelirVergisiOrani = amounts.gelirVergisiOrani;
+    harvest.gelirVergisiKesintisi = amounts.gelirVergisiKesintisi;
+    harvest.kesintiTutar = amounts.kesintiTutar;
+    harvest.toplamTutar = amounts.netTutar;
+    harvest.kalanBakiye = Math.max(0, roundedMoney(amounts.netTutar - nextPaid));
+    harvest.odemeDurumu = harvest.kalanBakiye <= 0.01 ? 'Ödendi' : nextPaid > 0 ? 'Kısmi Ödendi' : 'Bekliyor';
+    await harvest.save();
+
+    try {
+      await payment.deleteOne();
+      res.json({ message: 'Tahsilat kaydı silindi.', harvest });
+    } catch (paymentError) {
+      Object.assign(harvest, previousHarvest);
+      await harvest.save();
+      throw paymentError;
+    }
+  } catch (err) {
+    res.status(500).json({ error: `Tahsilat silinemedi: ${err.message}` });
   }
 });
 

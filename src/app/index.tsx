@@ -11,6 +11,7 @@ import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, 
 import { styles } from '../styles/styles';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
+import HarvestHistoryScreen from '../screens/HarvestHistoryScreen';
 import CollectionsScreen from '../screens/CollectionsScreen';
 import ReceivablesScreen from '../screens/ReceivablesScreen';
 import ExpenseScreen from '../screens/ExpenseScreen';
@@ -39,7 +40,7 @@ export default function App() {
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ endpoint: string; id: string; title: string; status: 'confirming' | 'deleting' | 'error'; message?: string } | null>(null);
 
   // Navigasyon ve Yüklenme State'leri
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'history' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
@@ -102,16 +103,23 @@ export default function App() {
   const [editHarvestForm, setEditHarvestForm] = useState({
     date: '', surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: ''
   });
+  // Tahsilat kaydı düzenleme formu. Tahsilat ayrı kayıt olduğu için yapılan
+  // değişiklik, bağlı hasadın kalan alacağını sunucuda otomatik günceller.
+  const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
+  const [paymentEditModalVisible, setPaymentEditModalVisible] = useState(false);
+  const [editPaymentForm, setEditPaymentForm] = useState({ date: '', amount: '', description: '' });
 
   // Özel Tahsilat Ekleme Formu State'leri (Belirli Hasada Ödeme Yapma)
   const [payHarvestId, setPayHarvestId] = useState('');
   const [payAmount, setPayAmount] = useState('');
   const [payDesc, setPayDesc] = useState('');
+  const [payDate, setPayDate] = useState(todayTR);
 
   const isAdmin = currentUser?.role === 'admin';
   const desktopMenuItems = [
     { group: 'GENEL', tab: 'dashboard' as const, icon: '⌂', label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
     { group: 'GENEL', tab: 'harvest' as const, icon: '＋', label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
+    { group: 'GENEL', tab: 'history' as const, icon: '☷', label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
     { group: 'ÖDEMELER', tab: 'collections' as const, icon: '₺', label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
     { group: 'ÖDEMELER', tab: 'receivables' as const, icon: '◷', label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
     { group: 'ÖDEMELER', tab: 'expense' as const, icon: '−', label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
@@ -333,14 +341,21 @@ export default function App() {
     try {
       const headers = getAuthHeaders();
       const results = await Promise.allSettled([
-        authFetch(`${API_URL}/harvests`, { headers }),
-        authFetch(`${API_URL}/payments?limit=300`, { headers }),
+        authFetch(`${API_URL}/harvests?limit=500`, { headers }),
+        authFetch(`${API_URL}/payments?limit=500`, { headers }),
         authFetch(`${API_URL}/expenses`, { headers }),
         authFetch(`${API_URL}/gardens`, { headers }),
         authFetch(`${API_URL}/factory-prices`, { headers }),
         authFetch(`${API_URL}/ads`, { headers })
       ]);
-      const parse = async (r: PromiseSettledResult<Response>) => r.status === 'fulfilled' && r.value.ok ? r.value.json() : [];
+      // Bir istek geçici olarak başarısız olursa o bölümdeki ekrandaki veriyi
+      // boş listeyle ezmeyelim. Kullanıcı bağlantı geri gelene kadar son doğru
+      // veriyi görmeye devam eder.
+      const parse = async (r: PromiseSettledResult<Response>) => {
+        if (r.status !== 'fulfilled' || !r.value.ok) return null;
+        const data = await r.value.json();
+        return Array.isArray(data) ? data : [];
+      };
       const [rawH, rawPayments, rawE, rawG, rawP, rawA] = await Promise.all(results.map(parse));
       const allRequestsSucceeded = results.every((r) => r.status === 'fulfilled' && r.value.ok);
       const allRequestsFailed = results.every((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok));
@@ -359,14 +374,23 @@ export default function App() {
         }
       }
 
-      setHarvests(rawH || []); setPayments(rawPayments || []); setExpenses(rawE || []); setGardens(rawG || []); setFactoryPrices(rawP || []); setAds(rawA || []);
+      const nextHarvests = rawH === null ? harvests : rawH as HarvestRecord[];
+      const nextPayments = rawPayments === null ? payments : rawPayments as PaymentRecord[];
+      const nextExpenses = rawE === null ? expenses : rawE as ExpenseRecord[];
+      const nextGardens = rawG === null ? gardens : rawG as GardenRecord[];
+      const nextFactoryPrices = rawP === null ? factoryPrices : rawP as FactoryPriceRecord[];
+      const nextAds = rawA === null ? ads : rawA as AdRecord[];
+      setHarvests(nextHarvests); setPayments(nextPayments); setExpenses(nextExpenses); setGardens(nextGardens); setFactoryPrices(nextFactoryPrices); setAds(nextAds);
       if (allRequestsSucceeded) {
         await saveDataSnapshot(currentUser.userId, {
-          harvests: rawH || [], payments: rawPayments || [], expenses: rawE || [], gardens: rawG || [], factoryPrices: rawP || [], ads: rawA || []
+          harvests: nextHarvests, payments: nextPayments, expenses: nextExpenses, gardens: nextGardens, factoryPrices: nextFactoryPrices, ads: nextAds
         });
       }
-      await scheduleDueNotifications(rawH || []);
+      if (rawH !== null) await scheduleDueNotifications(nextHarvests);
       const failedSources = results.map((r, i) => (r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)) ? ['hasatlar','tahsilatlar','giderler','bahçeler','fabrika fiyatları','reklamlar'][i] : null).filter(Boolean);
+      if (failedSources.length > 0 && failedSources.length < results.length) {
+        showOperationFeedback('Kısmi Güncelleme', `${failedSources.join(', ')} şu an güncellenemedi. Ekranda son kaydedilmiş bilgiler korunuyor.`, 'info');
+      }
       if (failedSources.length === results.length) { showOperationFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error'); }
     } catch (err: any) { showOperationFeedback('Bağlantı Kurulamadı', err.message || 'Sunucuya ulaşılamadı.', 'error'); }
     finally { setLoading(false); }
@@ -708,8 +732,13 @@ export default function App() {
       return;
     }
     const amount = parseMoney(payAmount);
+    const tarih = toServerDate(payDate);
     if (!Number.isFinite(amount) || amount <= 0) {
       showOperationFeedback('Eksik Bilgi', 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.', 'error');
+      return;
+    }
+    if (!tarih) {
+      showOperationFeedback('Tarih Hatası', 'Tahsilat tarihini GG.AA.YYYY biçiminde girin.', 'error');
       return;
     }
 
@@ -733,11 +762,11 @@ export default function App() {
         harvestId: payHarvestId,
         tutar: amount,
         aciklama: payDesc.trim(),
-        tarih: toServerDate(todayDisplayDate())
+        tarih
       });
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Tahsilat telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
-        setPayHarvestId(''); setPayAmount(''); setPayDesc('');
+        setPayHarvestId(''); setPayAmount(''); setPayDesc(''); setPayDate(todayDisplayDate());
         return;
       }
       const res = result.response;
@@ -748,6 +777,7 @@ export default function App() {
         setPayHarvestId('');
         setPayAmount('');
         setPayDesc('');
+        setPayDate(todayDisplayDate());
         await fetchData();
       } else {
         showOperationFeedback('Tahsilat Kaydedilemedi', data?.error || data?.message || `Sunucu hatası (${res.status}).`, 'error');
@@ -769,7 +799,72 @@ export default function App() {
     setPayHarvestId(harvest._id);
     setPayAmount('');
     setPayDesc('');
+    setPayDate(todayDisplayDate());
     setActiveTab('collections');
+  };
+
+  const openPaymentEditModal = (payment: PaymentRecord) => {
+    const rawDate = String(payment.tarih || payment.createdAt || '').slice(0, 10);
+    setEditingPayment(payment);
+    setEditPaymentForm({
+      date: formatDisplayDate(rawDate),
+      amount: String(payment.tutar ?? ''),
+      description: String(payment.aciklama || '')
+    });
+    setPaymentEditModalVisible(true);
+  };
+
+  const handleUpdatePayment = async () => {
+    if (!editingPayment?._id) return;
+    const tutar = parseMoney(editPaymentForm.amount);
+    const tarih = toServerDate(editPaymentForm.date);
+    if (!Number.isFinite(tutar) || tutar <= 0) {
+      showOperationFeedback('Tahsilat Hatası', '0’dan büyük geçerli bir tahsilat tutarı girin.', 'error');
+      return;
+    }
+    if (!tarih) {
+      showOperationFeedback('Tarih Hatası', 'Tahsilat tarihini GG.AA.YYYY biçiminde girin.', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await authFetch(`${API_URL}/payments/${editingPayment._id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ tarih, tutar, aciklama: editPaymentForm.description.trim() })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Tahsilat güncellenemedi.');
+      setPaymentEditModalVisible(false);
+      setEditingPayment(null);
+      showOperationFeedback('Başarılı', 'Tahsilat güncellendi; kalan alacak otomatik hesaplandı.', 'success');
+      await fetchData();
+    } catch (error: any) {
+      showOperationFeedback('Tahsilat Düzenleme', error?.message || 'Tahsilat güncellenemedi.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const prepareLegacyPaymentForEdit = async (harvest: HarvestRecord) => {
+    if (!harvest?._id) return;
+    setLoading(true);
+    try {
+      const response = await authFetch(`${API_URL}/payments/legacy`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Idempotency-Key': `legacy-payment-${harvest._id}-${Date.now()}` },
+        body: JSON.stringify({ harvestId: harvest._id })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Önceki tahsilat kaydı hazırlanamadı.');
+      const payment = data?.payment as PaymentRecord | undefined;
+      await fetchData();
+      if (payment) openPaymentEditModal(payment);
+    } catch (error: any) {
+      showOperationFeedback('Tahsilat Geçmişi', error?.message || 'Önceki tahsilat düzenlemeye açılamadı.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Fabrika fiyatı kaydet
@@ -1233,16 +1328,30 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'history' && (
+            <HarvestHistoryScreen
+              harvests={harvests}
+              openHarvestEditModal={openHarvestEditModal}
+              openPaymentForHarvest={openPaymentForHarvest}
+              handleDelete={handleDelete}
+            />
+          )}
+
           {/* TAHSİLAT TABI */}
           {activeTab === 'collections' && (
             <CollectionsScreen
               handleSpecificHarvestPayment={handleSpecificHarvestPayment}
               harvests={harvests}
               payments={payments}
+              handleDelete={handleDelete}
+              openPaymentEditModal={openPaymentEditModal}
+              prepareLegacyPaymentForEdit={prepareLegacyPaymentForEdit}
               payAmount={payAmount}
+              payDate={payDate}
               payDesc={payDesc}
               payHarvestId={payHarvestId}
               setPayAmount={setPayAmount}
+              setPayDate={setPayDate}
               setPayDesc={setPayDesc}
               setPayHarvestId={setPayHarvestId}
             />
@@ -1401,6 +1510,31 @@ export default function App() {
                   <TouchableOpacity style={styles.modalSaveBtn} onPress={handleUpdateHarvest}><Text style={styles.modalBtnText}>Kaydet</Text></TouchableOpacity>
                 </View>
               </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* TAHSİLAT DÜZENLEME MODALI */}
+        <Modal
+          visible={paymentEditModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => { setPaymentEditModalVisible(false); setEditingPayment(null); }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Tahsilatı Düzenle</Text>
+              <Text style={styles.formHelp}>Tutar değiştiğinde bağlı hasadın kalan alacağı otomatik güncellenir.</Text>
+              <Text style={styles.label}>Tahsilat Tarihi (GG.AA.YYYY)</Text>
+              <TextInput style={styles.input} value={editPaymentForm.date} onChangeText={(date) => setEditPaymentForm({ ...editPaymentForm, date })} placeholder="12.08.2026" />
+              <Text style={styles.label}>Alınan Tutar (TL)</Text>
+              <TextInput style={styles.input} value={editPaymentForm.amount} onChangeText={(amount) => setEditPaymentForm({ ...editPaymentForm, amount })} placeholder="Örn: 5000" keyboardType="decimal-pad" />
+              <Text style={styles.label}>Not</Text>
+              <TextInput style={styles.input} value={editPaymentForm.description} onChangeText={(description) => setEditPaymentForm({ ...editPaymentForm, description })} placeholder="Örn: Banka havalesi" />
+              <View style={styles.modalBtnGroup}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => { setPaymentEditModalVisible(false); setEditingPayment(null); }}><Text style={styles.modalBtnText}>İptal</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.modalSaveBtn} onPress={handleUpdatePayment}><Text style={styles.modalBtnText}>Kaydet</Text></TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
