@@ -75,7 +75,9 @@ const createWindow = () => {
     }
   });
 
-  void window.loadURL(`${APP_SCHEME}://app/index.html`);
+  // Expo Router, /index.html adresini bir uygulama sayfası olarak algılar.
+  // Kök adresten açıldığında hem yönlendirme hem de statik dosyalar doğru çalışır.
+  void window.loadURL(`${APP_SCHEME}://app/`);
 };
 
 app.setAppUserModelId('com.cryptomarsis.caylik.desktop');
