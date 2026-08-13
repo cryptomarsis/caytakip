@@ -1,10 +1,27 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Share, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, Share, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, parseMoney, remainingTotalOf } from '../utils/format';
 import { HarvestRecord, ExpenseRecord } from '../types';
 import { styles } from '../styles/styles';
 type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: unknown };
+
+type DesktopBridge = {
+  saveBase64File: (payload: {
+    defaultFileName: string;
+    base64: string;
+    filters: Array<{ name: string; extensions: string[] }>;
+  }) => Promise<{ canceled: boolean; filePath?: string }>;
+  printPdf: (payload: {
+    defaultFileName: string;
+    html: string;
+  }) => Promise<{ canceled: boolean; filePath?: string }>;
+};
+
+const getDesktopBridge = (): DesktopBridge | undefined => {
+  if (Platform.OS !== 'web') return undefined;
+  return (globalThis as typeof globalThis & { caylikDesktop?: DesktopBridge }).caylikDesktop;
+};
 
 const months = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const dateOf = (value?: string) => {
@@ -94,7 +111,24 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       ['Tarih','Sürüm','Üretici','KG','Fabrika','Brüt Birim Fiyat','Brüt Satış','%2 Kesinti','Net Satış','Tahsilat','Kalan','Bahçe','Vade Tarihi'],
       ...selected.map(h => [formatDisplayDate(h.tarih), h.surum, h.producerName || h.uretici, kgOf(h), h.firma, priceOf(h), grossOf(h), deductionOf(h), saleOf(h), paidOf(h), remainingTotalOf(h), h.garden || h.bahce, formatDisplayDate(h.vadeTarihi)])
     ];
-    try { await Share.share({message: rows.map(r=>r.map(esc).join(';')).join('\n'), title:`CayTakip_${year}.csv`}); }
+    const content = rows.map(r=>r.map(esc).join(';')).join('\n');
+    const desktop = getDesktopBridge();
+    if (desktop) {
+      try {
+        const result = await desktop.saveBase64File({
+          defaultFileName: `Caylik_${year}.csv`,
+          base64: globalThis.btoa(unescape(encodeURIComponent(content))),
+          filters: [{ name: 'CSV dosyası', extensions: ['csv'] }],
+        });
+        if (!result.canceled) Alert.alert('CSV Hazır', 'Dosya bilgisayarınıza kaydedildi.');
+        return;
+      } catch (error) {
+        console.error('CSV oluşturma hatası:', error);
+        Alert.alert('CSV', 'Dosya bilgisayara kaydedilemedi.');
+        return;
+      }
+    }
+    try { await Share.share({message: content, title:`CayTakip_${year}.csv`}); }
     catch { Alert.alert('CSV','Paylaşım ekranı açılamadı.'); }
   };
 
@@ -117,6 +151,16 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       XLSX.utils.book_append_sheet(wb, ws, 'Hasatlar');
       XLSX.utils.book_append_sheet(wb, gardenWs, 'Bahçe Özeti');
       const base64 = XLSX.write(wb, { bookType:'xlsx', type:'base64' });
+      const desktop = getDesktopBridge();
+      if (desktop) {
+        const result = await desktop.saveBase64File({
+          defaultFileName: `Caylik_${year}.xlsx`,
+          base64,
+          filters: [{ name: 'Excel dosyası', extensions: ['xlsx'] }],
+        });
+        if (!result.canceled) Alert.alert('Excel Hazır', 'Dosya bilgisayarınıza kaydedildi.');
+        return;
+      }
       const fileUri = `${FileSystem.cacheDirectory}Caylik_${year}.xlsx`;
       await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri, { mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle:`Çaylık ${year} Excel` });
@@ -135,6 +179,12 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       const factoryRows = factorySales.map(f => `<tr><td>${f.name}</td><td>${f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(f.sales)}</td></tr>`).join('');
       const gardenRows = gardenHarvests.map(g => `<tr><td>${g.name}</td><td>${g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(g.sales)}</td></tr>`).join('');
       const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px;color:#1b4332}h1,h2{color:#1b4332}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#e9f5ee}.cards{display:flex;flex-wrap:wrap;gap:10px}.card{border:1px solid #ddd;padding:10px;width:45%}</style></head><body><h1>Çaylık Raporu - ${year}</h1><div class="cards"><div class="card">Toplam Hasat<br><b>${totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</b></div><div class="card">Net Satış<br><b>${formatTL(totalSales)}</b></div><div class="card">Toplam Tahsilat<br><b>${formatTL(totalPaid)}</b></div><div class="card">Bekleyen Alacak<br><b>${formatTL(receivable)}</b></div><div class="card">Toplam Gider<br><b>${formatTL(totalExpenses)}</b></div></div><h2>Sürüm Bazlı Hasat</h2><table><tr><th>Sürüm</th><th>Toplam KG</th></tr>${versionRows}</table><h2>Bahçe Bazında Hasat</h2><table><tr><th>Bahçe</th><th>Toplam KG</th><th>Net Satış</th></tr>${gardenRows}</table><h2>Aylık Hasat</h2><table><tr><th>Ay</th><th>KG</th><th>Net Satış</th></tr>${monthRows}</table><h2>Fabrika Bazında Satış</h2><table><tr><th>Fabrika</th><th>KG</th><th>Net Satış</th></tr>${factoryRows}</table></body></html>`;
+      const desktop = getDesktopBridge();
+      if (desktop) {
+        const result = await desktop.printPdf({ defaultFileName: `Caylik_${year}.pdf`, html });
+        if (!result.canceled) Alert.alert('PDF Hazır', 'Dosya bilgisayarınıza kaydedildi.');
+        return;
+      }
       const pdf = await Print.printToFileAsync({ html, base64: true });
       if (!pdf.base64 || !FileSystem.cacheDirectory) throw new Error('PDF dosyası hazırlanamadı.');
 
