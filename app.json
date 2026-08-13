@@ -4,7 +4,7 @@
     "slug": "cay-ureticisi",
     "description": "Çaylık; çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
     "scheme": "cayureticisi",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "backgroundColor": "#F8F3E7",
     "icon": "./assets/caylik-icon-v1.png",
@@ -12,14 +12,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cryptomarsis.cayureticisi",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "config": {
         "usesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.cryptomarsis.cayureticisi",
-      "versionCode": 6,
+      "versionCode": 7,
       "backgroundColor": "#F8F3E7",
       "allowBackup": false,
       "blockedPermissions": [
