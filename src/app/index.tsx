@@ -299,7 +299,7 @@ export default function App() {
         return;
       }
 
-      if (Notifications.setNotificationChannelAsync) {
+      if (Platform.OS === 'android' && Notifications.setNotificationChannelAsync) {
         await Notifications.setNotificationChannelAsync('cay-takip', {
           name: 'Çay Takip Bildirimleri',
           importance: Notifications.AndroidImportance?.HIGH ?? 4
