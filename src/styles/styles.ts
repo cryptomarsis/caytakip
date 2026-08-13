@@ -3,29 +3,70 @@ import { StyleSheet } from 'react-native';
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7F2'
+    backgroundColor: '#F4F7F2'
+  },
+  authScreen: {
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 24
   },
   authCard: {
     backgroundColor: '#FFFFFF',
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
     padding: 24,
-    borderRadius: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#DCE9E0',
+    shadowColor: '#123D2C',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3
+    shadowOpacity: 0.09,
+    shadowRadius: 16,
+    elevation: 4
+  },
+  authBrand: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14
+  },
+  authBrandMark: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#174E3A'
+  },
+  authBrandImage: {
+    width: '100%',
+    height: '100%'
   },
   authTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1b4332',
-    marginBottom: 8
+    fontSize: 27,
+    fontWeight: '800',
+    color: '#174E3A'
+  },
+  authEyebrow: {
+    color: '#668273',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.9,
+    marginTop: 2
   },
   authSubTitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 20
+    width: '100%',
+    fontSize: 15,
+    lineHeight: 21,
+    color: '#52695A',
+    marginBottom: 14
+  },
+  authModeLink: {
+    color: '#1F6B4F',
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+    textAlign: 'center'
   },
   label: {
     alignSelf: 'flex-start',
@@ -40,28 +81,29 @@ export const styles = StyleSheet.create({
     backgroundColor: '#F8FAF7',
     borderWidth: 1,
     borderColor: '#D7E1D7',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 13,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     fontSize: 17,
     color: '#333',
     marginBottom: 6
   },
   submitBtn: {
     width: '100%',
-    backgroundColor: '#246548',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: '#1F6B4F',
+    minHeight: 54,
+    paddingVertical: 15,
+    borderRadius: 14,
     alignItems: 'center',
     marginTop: 18
   },
   submitBtnText: {
     color: '#ffffff',
     fontWeight: 'bold',
-    fontSize: 17
+    fontSize: 16
   },
   header: {
-    backgroundColor: '#1F513D',
+    backgroundColor: '#174E3A',
     paddingHorizontal: 16,
     paddingVertical: 16,
     flexDirection: 'row',
@@ -96,15 +138,22 @@ export const styles = StyleSheet.create({
     fontWeight: 'bold'
   },
   navBar: {
-    backgroundColor: '#276047',
-    paddingVertical: 10,
-    paddingHorizontal: 8
+    backgroundColor: '#174E3A',
+    paddingVertical: 9,
+    paddingHorizontal: 10
+  },
+  navBarContent: {
+    gap: 7,
+    paddingRight: 8
   },
   navItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-    borderRadius: 20,
-    marginRight: 6
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    minHeight: 42,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderRadius: 14
   },
   navItemActive: {
     backgroundColor: '#E8F1E8'
@@ -113,9 +162,9 @@ export const styles = StyleSheet.create({
     backgroundColor: '#ffb703'
   },
   navText: {
-    color: '#E3F0E5',
-    fontWeight: '600',
-    fontSize: 15
+    color: '#D9E9DE',
+    fontWeight: '700',
+    fontSize: 14
   },
   navTextActive: {
     color: '#1F513D',
@@ -322,37 +371,130 @@ export const styles = StyleSheet.create({
   quickActionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10
+    gap: 10,
+    marginBottom: 2
   },
   quickAction: {
     width: '48%',
-    minHeight: 118,
+    minHeight: 126,
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: '#DCE8DD',
-    padding: 16,
+    padding: 15,
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     elevation: 1,
-    shadowColor: '#000',
+    shadowColor: '#123D2C',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 4
   },
+  quickActionPrimary: {
+    width: '100%',
+    minHeight: 98,
+    backgroundColor: '#1F6B4F',
+    borderColor: '#1F6B4F',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 14,
+    shadowOpacity: 0.13,
+    elevation: 3
+  },
   quickActionIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 46,
+    height: 46,
+    borderRadius: 15,
     backgroundColor: '#E7F2E9',
     justifyContent: 'center',
     alignItems: 'center'
   },
+  quickActionPrimaryIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 18
+  },
+  quickActionCopy: {
+    flexShrink: 1
+  },
   quickActionText: {
     color: '#1F513D',
-    fontWeight: 'bold',
-    fontSize: 16,
-    textAlign: 'center'
+    fontWeight: '800',
+    fontSize: 15
+  },
+  quickActionSubText: {
+    color: '#667A6C',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3
+  },
+  quickActionPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 19
+  },
+  quickActionPrimarySubText: {
+    color: '#DCEDE3',
+    fontSize: 13
+  },
+  dashboardNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderRadius: 16,
+    backgroundColor: '#FFF6E4',
+    borderWidth: 1,
+    borderColor: '#F1D9A4',
+    padding: 13,
+    marginTop: 14
+  },
+  dashboardNoticePositive: {
+    backgroundColor: '#ECF7EF',
+    borderColor: '#C9E5D0'
+  },
+  dashboardNoticeIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#FCE8BD',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  dashboardNoticeIconPositive: {
+    backgroundColor: '#D9F0DF'
+  },
+  dashboardNoticeTitle: {
+    color: '#54401B',
+    fontSize: 15,
+    fontWeight: '800'
+  },
+  dashboardNoticeText: {
+    color: '#786342',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2
+  },
+  dashboardNoticeAction: {
+    color: '#8A5B14',
+    fontSize: 13,
+    fontWeight: '900'
+  },
+  dashboardSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 20,
+    marginBottom: 12
+  },
+  dashboardSectionLink: {
+    color: '#1F6B4F',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  dashboardRecordStatus: {
+    fontWeight: '800',
+    fontSize: 13,
+    marginTop: 5
   },
   statCard: {
     backgroundColor: '#FFFFFF',

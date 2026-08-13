@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, useWindowDimensions } from 'react-native';
+import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
+import { SymbolView } from 'expo-symbols';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { API_URL, fetchWithTimeout } from '../services/api';
@@ -117,18 +118,25 @@ export default function App() {
 
   const isAdmin = currentUser?.role === 'admin';
   const desktopMenuItems = [
-    { group: 'GENEL', tab: 'dashboard' as const, icon: '⌂', label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
-    { group: 'GENEL', tab: 'harvest' as const, icon: '＋', label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
-    { group: 'GENEL', tab: 'history' as const, icon: '☷', label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
-    { group: 'ÖDEMELER', tab: 'collections' as const, icon: '₺', label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
-    { group: 'ÖDEMELER', tab: 'receivables' as const, icon: '◷', label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
-    { group: 'ÖDEMELER', tab: 'expense' as const, icon: '−', label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
-    { group: 'TAKİP', tab: 'gardens' as const, icon: '♧', label: 'Bahçeler', helper: 'Bahçe bilgileri' },
-    { group: 'TAKİP', tab: 'prices' as const, icon: '◈', label: 'Fabrika Fiyatları', helper: 'Güncel fiyat karşılaştırması' },
-    { group: 'TAKİP', tab: 'reports' as const, icon: '▤', label: 'Raporlar', helper: 'PDF, Excel ve analizler' },
-    { group: 'HESAP', tab: 'more' as const, icon: '☰', label: 'Diğer', helper: 'Tüm bölümlere kısa yol' },
-    { group: 'HESAP', tab: 'settings' as const, icon: '⚙', label: 'Ayarlar', helper: 'Şifre ve hesap işlemleri' },
-    ...(isAdmin ? [{ group: 'YÖNETİM', tab: 'admin' as const, icon: '★', label: 'Yönetim', helper: 'Yönetici paneli' }] : []),
+    { group: 'GENEL', tab: 'dashboard' as const, icon: { ios: 'house.fill', android: 'home', web: 'home' }, label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
+    { group: 'GENEL', tab: 'harvest' as const, icon: { ios: 'leaf.fill', android: 'energy_savings_leaf', web: 'energy_savings_leaf' }, label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
+    { group: 'GENEL', tab: 'history' as const, icon: { ios: 'clock.arrow.circlepath', android: 'history', web: 'history' }, label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
+    { group: 'ÖDEMELER', tab: 'collections' as const, icon: { ios: 'creditcard.fill', android: 'payments', web: 'payments' }, label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
+    { group: 'ÖDEMELER', tab: 'receivables' as const, icon: { ios: 'calendar.badge.clock', android: 'event_note', web: 'event_note' }, label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
+    { group: 'ÖDEMELER', tab: 'expense' as const, icon: { ios: 'receipt', android: 'receipt_long', web: 'receipt_long' }, label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
+    { group: 'TAKİP', tab: 'gardens' as const, icon: { ios: 'tree.fill', android: 'yard', web: 'yard' }, label: 'Bahçeler', helper: 'Bahçe bilgileri' },
+    { group: 'TAKİP', tab: 'prices' as const, icon: { ios: 'building.2.fill', android: 'factory', web: 'factory' }, label: 'Fabrika Fiyatları', helper: 'Güncel fiyat karşılaştırması' },
+    { group: 'TAKİP', tab: 'reports' as const, icon: { ios: 'chart.bar.fill', android: 'bar_chart', web: 'bar_chart' }, label: 'Raporlar', helper: 'PDF, Excel ve analizler' },
+    { group: 'HESAP', tab: 'more' as const, icon: { ios: 'square.grid.2x2.fill', android: 'apps', web: 'apps' }, label: 'Diğer', helper: 'Tüm bölümlere kısa yol' },
+    { group: 'HESAP', tab: 'settings' as const, icon: { ios: 'gearshape.fill', android: 'settings', web: 'settings' }, label: 'Ayarlar', helper: 'Şifre ve hesap işlemleri' },
+    ...(isAdmin ? [{ group: 'YÖNETİM', tab: 'admin' as const, icon: { ios: 'person.badge.key.fill', android: 'admin_panel_settings', web: 'admin_panel_settings' }, label: 'Yönetim', helper: 'Yönetici paneli' }] : []),
+  ];
+  const mobileNavItems = [
+    { tab: 'dashboard' as const, label: 'Ana Sayfa', icon: { ios: 'house.fill', android: 'home', web: 'home' } },
+    { tab: 'harvest' as const, label: 'Hasat Ekle', icon: { ios: 'leaf.fill', android: 'energy_savings_leaf', web: 'energy_savings_leaf' } },
+    { tab: 'collections' as const, label: 'Ödeme Al', icon: { ios: 'creditcard.fill', android: 'payments', web: 'payments' } },
+    { tab: 'receivables' as const, label: 'Alacaklar', icon: { ios: 'calendar.badge.clock', android: 'event_note', web: 'event_note' } },
+    { tab: 'more' as const, label: 'Diğer', icon: { ios: 'square.grid.2x2.fill', android: 'apps', web: 'apps' } },
   ];
   const activeDesktopMenu = desktopMenuItems.find((item) => item.tab === activeTab);
 
@@ -1086,12 +1094,20 @@ export default function App() {
   if (!currentUser) {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 20 }]}>
+        <SafeAreaView style={[styles.container, styles.authScreen]}>
           <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
           <View style={styles.authCard}>
-            <Text style={styles.authTitle}>🍃 ÇAYLIK</Text>
+            <View style={styles.authBrand}>
+              <View style={styles.authBrandMark}>
+                <Image source={require('../../assets/caylik-icon-v1.png')} style={styles.authBrandImage} accessibilityLabel="Çaylık logosu" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.authTitle}>Çaylık</Text>
+                <Text style={styles.authEyebrow}>ÜRETİCİ TAKİP SİSTEMİ</Text>
+              </View>
+            </View>
             <Text style={styles.authSubTitle}>
-              {authMode === 'login' ? 'Telefon ve giriş şifrenizle devam edin' : 'Yeni üretici kaydı oluşturun'}
+              {authMode === 'login' ? 'Telefon numaranız ve 6 haneli şifrenizle güvenle giriş yapın.' : 'Bilgilerinizi girin, hesabınız hemen hazır olsun.'}
             </Text>
             {authFeedback && (
               <View style={{ width: '100%', marginBottom: 14, padding: 12, borderRadius: 10, backgroundColor: authFeedback.type === 'error' ? '#FDECEC' : '#E9F5EE', borderWidth: 1, borderColor: authFeedback.type === 'error' ? '#F2B8B5' : '#B7DCC7' }}>
@@ -1147,18 +1163,18 @@ export default function App() {
               />
               <Text style={styles.formHelp}>Bu şifreyi not edin; telefon numaranızla birlikte girişte kullanacaksınız.</Text>
             </>}
-            <TouchableOpacity disabled={loading} style={[styles.submitBtn, loading && { opacity: 0.7 }]} onPress={handleAuth}>
-              <Text style={styles.submitBtnText}>{loading ? 'LÜTFEN BEKLEYİN...' : authMode === 'login' ? 'GİRİŞ YAP' : 'KAYIT OL VE GİRİŞ YAP'}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={authMode === 'login' ? 'Giriş yap' : 'Kaydı tamamla'} disabled={loading} style={[styles.submitBtn, loading && { opacity: 0.7 }]} onPress={handleAuth}>
+              <Text style={styles.submitBtnText}>{loading ? 'Lütfen bekleyin…' : authMode === 'login' ? 'Giriş yap' : 'Kaydı tamamla'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={{ marginTop: 15 }}
               onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthPin(''); setAuthPinConfirm(''); setAuthFeedback(null); }}
             >
-              <Text style={{ color: '#1b4332', fontWeight: 'bold', textDecorationLine: 'underline' }}>
+              <Text style={styles.authModeLink}>
                 {authMode === 'login'
-                  ? 'Hesabınız yok mu? Telefonla Kayıt Olun'
-                  : 'Zaten hesabınız var mı? Giriş Yapın'}
+                  ? 'Hesabınız yok mu? Telefonla kayıt olun'
+                  : 'Zaten hesabınız var mı? Giriş yapın'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1200,7 +1216,9 @@ export default function App() {
                         style={[styles.desktopNavItem, active && styles.desktopNavItemActive]}
                         onPress={() => setActiveTab(item.tab)}
                       >
-                        <View style={[styles.desktopNavIcon, active && styles.desktopNavIconActive]}><Text style={[styles.desktopNavIconText, active && styles.desktopNavIconTextActive]}>{item.icon}</Text></View>
+                        <View style={[styles.desktopNavIcon, active && styles.desktopNavIconActive]}>
+                          <SymbolView name={item.icon as any} size={19} tintColor={active ? '#FFFFFF' : '#B9D5C0'} />
+                        </View>
                         <View style={styles.desktopNavCopy}>
                           <Text style={[styles.desktopNavText, active && styles.desktopNavTextActive]}>{item.label}</Text>
                           <Text style={[styles.desktopNavHint, active && styles.desktopNavHintActive]}>{item.helper}</Text>
@@ -1225,7 +1243,7 @@ export default function App() {
         {/* HEADER */}
         <View style={[styles.header, isDesktop && styles.desktopHeader]}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : '🍃 Çaylık'}</Text>
+            <Text style={[styles.headerTitle, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : 'Çaylık'}</Text>
             <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>
               {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : <>Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}</>}
             </Text>
@@ -1259,38 +1277,23 @@ export default function App() {
 
         {/* TAB MENÜSÜ */}
         {!isDesktop && <View style={styles.navBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'dashboard' && styles.navItemActive]}
-              onPress={() => setActiveTab('dashboard')}
-            >
-              <Text style={[styles.navText, activeTab === 'dashboard' && styles.navTextActive]}>🏠 Ana Sayfa</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'harvest' && styles.navItemActive]}
-              onPress={() => setActiveTab('harvest')}
-            >
-              <Text style={[styles.navText, activeTab === 'harvest' && styles.navTextActive]}>🌱 Hasat Ekle</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'collections' && styles.navItemActive]}
-              onPress={() => setActiveTab('collections')}
-            >
-              <Text style={[styles.navText, activeTab === 'collections' && styles.navTextActive]}>💳 Ödeme Al</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navItem, activeTab === 'receivables' && styles.navItemActive]}
-              onPress={() => setActiveTab('receivables')}
-            >
-              <Text style={[styles.navText, activeTab === 'receivables' && styles.navTextActive]}>⏳ Alacaklar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.navItem, activeTab === 'more' && styles.navItemActive]} onPress={() => setActiveTab('more')}>
-              <Text style={[styles.navText, activeTab === 'more' && styles.navTextActive]}>☰ Diğer</Text>
-            </TouchableOpacity>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navBarContent}>
+            {mobileNavItems.map((item) => {
+              const active = activeTab === item.tab;
+              return (
+                <TouchableOpacity
+                  key={item.tab}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={item.label}
+                  style={[styles.navItem, active && styles.navItemActive]}
+                  onPress={() => setActiveTab(item.tab)}
+                >
+                  <SymbolView name={item.icon as any} size={18} tintColor={active ? '#174E3A' : '#D9E9DE'} />
+                  <Text style={[styles.navText, active && styles.navTextActive]}>{item.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>}
 
