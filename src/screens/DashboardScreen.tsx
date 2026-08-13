@@ -68,6 +68,22 @@ export default function DashboardScreen({ ads, harvests, totalKg, totalSales, to
   return (
     <View>
       {ads.filter((ad) => ad.slot === 'dashboard_top' || ad.slot === 'dashboard_middle').slice(0, 2).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
+      {harvests.length === 0 && (
+        <View style={styles.gettingStartedCard}>
+          <View style={styles.gettingStartedHead}>
+            <View style={styles.gettingStartedIcon}><SymbolView name={{ ios: 'hand.thumbsup.fill', android: 'waving_hand', web: 'waving_hand' }} size={22} tintColor="#1F6B4F" /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.gettingStartedTitle}>Başlamak çok kolay</Text>
+              <Text style={styles.gettingStartedText}>İlk kaydınızı birkaç dakikada tamamlayabilirsiniz.</Text>
+            </View>
+          </View>
+          <View style={styles.gettingStartedSteps}>
+            <Text style={styles.gettingStartedStep}><Text style={styles.gettingStartedNumber}>1</Text> Hasat Ekle ile kilo ve satış fiyatını yazın.</Text>
+            <Text style={styles.gettingStartedStep}><Text style={styles.gettingStartedNumber}>2</Text> Net alacak tutarı otomatik hesaplansın.</Text>
+            <Text style={styles.gettingStartedStep}><Text style={styles.gettingStartedNumber}>3</Text> Ödeme geldiğinde Tahsilat Ekle’ye dokunun.</Text>
+          </View>
+        </View>
+      )}
       <Text style={styles.sectionTitle}>Bugün ne yapmak istersiniz?</Text>
       <View style={styles.quickActionGrid}>
         {quickActions.map((action) => (

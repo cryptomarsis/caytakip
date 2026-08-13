@@ -448,6 +448,56 @@ export const styles = StyleSheet.create({
     padding: 13,
     marginTop: 14
   },
+  gettingStartedCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D7EBDD',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#123D2C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2
+  },
+  gettingStartedHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10
+  },
+  gettingStartedIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#E7F4EC',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  gettingStartedTitle: {
+    color: '#174E3A',
+    fontSize: 17,
+    fontWeight: '800'
+  },
+  gettingStartedText: {
+    color: '#5C7063',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2
+  },
+  gettingStartedSteps: {
+    gap: 7,
+    marginTop: 14
+  },
+  gettingStartedStep: {
+    color: '#3E5548',
+    fontSize: 13,
+    lineHeight: 19
+  },
+  gettingStartedNumber: {
+    color: '#1F6B4F',
+    fontWeight: '900'
+  },
   dashboardNoticePositive: {
     backgroundColor: '#ECF7EF',
     borderColor: '#C9E5D0'
