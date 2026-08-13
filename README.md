@@ -21,7 +21,7 @@ Render (veya benzeri) ortam değişkenlerinde aşağıdakiler zorunludur:
 - `MONGODB_URI`
 - Web sürümü açıksa yalnızca kendi alan adınızı içeren `ALLOWED_ORIGINS`
 
-SMS ile güvenli giriş, NetGSM hesabı tamamlanana kadar kapalı kalır. NetGSM API alt kullanıcısı, OTP paketi ve onaylı gönderici adı hazır olduğunda `NETGSM_USERCODE`, `NETGSM_PASSWORD`, `NETGSM_HEADER` değerlerini girip `AUTH_REQUIRE_OTP=true` yapın. Bu adım herkese açık yayından önce zorunlu kabul edilmelidir.
+Bu sürümde SMS doğrulaması kullanılmaz; `AUTH_REQUIRE_OTP=false` kalmalıdır. Telefon numarası ve 6 haneli giriş şifresiyle oturum açılır. Sunucu hem IP bazında hem de hesap bazında hatalı giriş denemelerini sınırlar; beş hatalı denemeden sonra hesap 15 dakika kilitlenir. İleride SMS doğrulaması tercih edilirse NetGSM ayarlarıyla `AUTH_REQUIRE_OTP=true` yapılabilir.
 
 Render'ın geçici diskine yedek alınmaz. Uzak yedekleme için kendi güvenli webhook adresinizi `BACKUP_WEBHOOK_URL` olarak, farklı ve en az 32 karakterlik anahtarınızı `BACKUP_ENCRYPTION_KEY` olarak tanımlayın. Yedek gövdesi AES-256-GCM ile şifrelenerek gönderilir.
 

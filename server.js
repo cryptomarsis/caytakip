@@ -72,6 +72,8 @@ const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGIN_MAX_FAILED_ATTEMPTS = 5;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'development-only-change-me');
 // OTP, NetGSM hesabı ve gönderici adı hazır olduğunda Render'da açıkça true yapılır.
 // Böylece eksik üçüncü taraf hesabı yeni dağıtımı çalışmaz hâle getirmez.
@@ -282,6 +284,8 @@ const UserProfileSchema = new mongoose.Schema({
   name: { type: String, required: true },
   pinHash: { type: String, select: false },
   pinSalt: { type: String, select: false },
+  loginFailures: { type: Number, default: 0 },
+  loginLockedUntil: { type: Date, default: null },
   role: { type: String, enum: ['admin', 'user'], default: 'user' },
   active: { type: Boolean, default: true }
 }, { timestamps: true });
@@ -485,11 +489,22 @@ app.post('/api/auth/login', limitPublicUsage('login', 10, 15 * 60 * 1000), async
     if (!profile) {
       const legacy = await findLegacyUser(phone);
       if (legacy) return res.status(409).json({ error: 'Bu eski hesap için önce oturumun açık olduğu cihazdan giriş şifresi oluşturun.', code: 'PIN_SETUP_REQUIRED' });
-      return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+      return res.status(401).json({ error: 'Telefon numarası veya giriş şifresi hatalı.' });
     }
     if (profile.active === false) return res.status(403).json({ error: 'Kullanıcı hesabı pasif durumda.' });
     if (!profile.pinHash || !profile.pinSalt) return res.status(409).json({ error: 'Bu hesap için giriş şifresi henüz oluşturulmamış. Oturumun açık olduğu cihazdan Ayarlar ekranını açın.', code: 'PIN_SETUP_REQUIRED' });
-    if (!await verifyPin(profile, pin)) return res.status(401).json({ error: 'Telefon numarası veya giriş şifresi hatalı.' });
+    if (profile.loginLockedUntil && profile.loginLockedUntil > new Date()) {
+      return res.status(429).json({ error: 'Çok fazla hatalı giriş denemesi yapıldı. Lütfen 15 dakika sonra tekrar deneyin.' });
+    }
+    if (!await verifyPin(profile, pin)) {
+      const failures = (Number(profile.loginFailures) || 0) + 1;
+      const lockedUntil = failures >= LOGIN_MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOGIN_LOCK_MS) : null;
+      await UserProfile.updateOne({ _id: profile._id }, { $set: { loginFailures: lockedUntil ? 0 : failures, loginLockedUntil: lockedUntil } });
+      return res.status(401).json({ error: 'Telefon numarası veya giriş şifresi hatalı.' });
+    }
+    if (profile.loginFailures || profile.loginLockedUntil) {
+      await UserProfile.updateOne({ _id: profile._id }, { $set: { loginFailures: 0, loginLockedUntil: null } });
+    }
     const tokens = await issueTokens(profile);
     res.json(tokens);
   } catch (err) {
