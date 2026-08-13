@@ -6,7 +6,7 @@ import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { API_URL, fetchWithTimeout } from '../services/api';
 import { saveSession, getSession, clearSession } from '../services/session';
 import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
-import { UserSession, HarvestRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
+import { UserSession, HarvestRecord, PaymentRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
 import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate, calculateAgriculturalDeductions, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
 import DashboardScreen from '../screens/DashboardScreen';
@@ -48,6 +48,7 @@ export default function App() {
 
   // Veri Listeleri
   const [harvests, setHarvests] = useState<HarvestRecord[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [gardens, setGardens] = useState<GardenRecord[]>([]);
   const [factoryPrices, setFactoryPrices] = useState<FactoryPriceRecord[]>([]);
@@ -95,10 +96,8 @@ export default function App() {
 
   const [gForm, setGForm] = useState({ name: '', adaParsel: '', alan: '' });
 
-  // Tahsilat Düzenleme Modal State'leri
-  const [editModalVisible, setEditModalVisible] = useState(false);
+  // Hasat kaydı düzenleme modalı
   const [editingHarvest, setEditingHarvest] = useState<HarvestRecord | null>(null);
-  const [editTahsilatVal, setEditTahsilatVal] = useState('');
   const [harvestEditModalVisible, setHarvestEditModalVisible] = useState(false);
   const [editHarvestForm, setEditHarvestForm] = useState({
     date: '', surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: ''
@@ -335,13 +334,14 @@ export default function App() {
       const headers = getAuthHeaders();
       const results = await Promise.allSettled([
         authFetch(`${API_URL}/harvests`, { headers }),
+        authFetch(`${API_URL}/payments?limit=300`, { headers }),
         authFetch(`${API_URL}/expenses`, { headers }),
         authFetch(`${API_URL}/gardens`, { headers }),
         authFetch(`${API_URL}/factory-prices`, { headers }),
         authFetch(`${API_URL}/ads`, { headers })
       ]);
       const parse = async (r: PromiseSettledResult<Response>) => r.status === 'fulfilled' && r.value.ok ? r.value.json() : [];
-      const [rawH, rawE, rawG, rawP, rawA] = await Promise.all(results.map(parse));
+      const [rawH, rawPayments, rawE, rawG, rawP, rawA] = await Promise.all(results.map(parse));
       const allRequestsSucceeded = results.every((r) => r.status === 'fulfilled' && r.value.ok);
       const allRequestsFailed = results.every((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok));
 
@@ -349,6 +349,7 @@ export default function App() {
         const snapshot = await getDataSnapshot(currentUser.userId);
         if (snapshot) {
           setHarvests(snapshot.harvests as HarvestRecord[]);
+          setPayments((snapshot.payments || []) as PaymentRecord[]);
           setExpenses(snapshot.expenses as ExpenseRecord[]);
           setGardens(snapshot.gardens as GardenRecord[]);
           setFactoryPrices(snapshot.factoryPrices as FactoryPriceRecord[]);
@@ -358,14 +359,14 @@ export default function App() {
         }
       }
 
-      setHarvests(rawH || []); setExpenses(rawE || []); setGardens(rawG || []); setFactoryPrices(rawP || []); setAds(rawA || []);
+      setHarvests(rawH || []); setPayments(rawPayments || []); setExpenses(rawE || []); setGardens(rawG || []); setFactoryPrices(rawP || []); setAds(rawA || []);
       if (allRequestsSucceeded) {
         await saveDataSnapshot(currentUser.userId, {
-          harvests: rawH || [], expenses: rawE || [], gardens: rawG || [], factoryPrices: rawP || [], ads: rawA || []
+          harvests: rawH || [], payments: rawPayments || [], expenses: rawE || [], gardens: rawG || [], factoryPrices: rawP || [], ads: rawA || []
         });
       }
       await scheduleDueNotifications(rawH || []);
-      const failedSources = results.map((r, i) => (r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)) ? ['hasatlar','giderler','bahçeler','fabrika fiyatları','reklamlar'][i] : null).filter(Boolean);
+      const failedSources = results.map((r, i) => (r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)) ? ['hasatlar','tahsilatlar','giderler','bahçeler','fabrika fiyatları','reklamlar'][i] : null).filter(Boolean);
       if (failedSources.length === results.length) { showOperationFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error'); }
     } catch (err: any) { showOperationFeedback('Bağlantı Kurulamadı', err.message || 'Sunucuya ulaşılamadı.', 'error'); }
     finally { setLoading(false); }
@@ -415,7 +416,7 @@ export default function App() {
     return Object.values(map);
   };
 
-  // 2. Vadeli / Bekleyen Alacakların Dinamik Hesaplanması (Madde 2)
+  // Vadeli / Bekleyen Alacakların Dinamik Hesaplanması
   const formatVadeMonth = (value: any) => {
     if (!value) return 'Vadesi Belirtilmeyenler';
     const s = String(value).trim();
@@ -435,6 +436,8 @@ export default function App() {
     return { totalReceivables, list };
   };
 
+  const receivablesSafe = (items: any[]) => (items || []).filter((h: any) => remainingTotalOf(h) > 0.01);
+
   const getReceivablesByMonth = () => {
     const groups: { [key: string]: any[] } = {};
     receivablesSafe(harvests).forEach((h: any) => {
@@ -444,10 +447,6 @@ export default function App() {
     });
     return Object.entries(groups).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   };
-
-  const receivablesSafe = (items: any[]) => (items || []).filter((h: any) => {
-    return remainingTotalOf(h) > 0.01;
-  });
 
   // Giriş Yap / Kayıt Ol İşlemleri
   const syncProfile = async (phone: string, pin: string) => {
@@ -760,6 +759,19 @@ export default function App() {
     }
   };
 
+  // Ana sayfadaki ödeme düğmesi, tahsilatı doğrudan değiştirmek yerine seçili
+  // hasatla ödeme ekranını açar. Böylece her yeni ödeme geçmişe ayrı kayıt olur.
+  const openPaymentForHarvest = (harvest: HarvestRecord) => {
+    if (remainingTotalOf(harvest) <= 0.01) {
+      showOperationFeedback('Ödeme Tamamlandı', 'Bu hasat kaydının açık alacağı bulunmuyor.', 'info');
+      return;
+    }
+    setPayHarvestId(harvest._id);
+    setPayAmount('');
+    setPayDesc('');
+    setActiveTab('collections');
+  };
+
   // Fabrika fiyatı kaydet
   const handleSaveFactoryPrice = async () => {
     if (!isAdmin) { showOperationFeedback('Yetki Yok', 'Bu işlemi sadece yönetici yapabilir.', 'error'); return; }
@@ -826,13 +838,6 @@ export default function App() {
     }
   };
 
-  // Tahsilat Düzenleme Modalı Aç
-  const openEditModal = (harvestItem: HarvestRecord) => {
-    setEditingHarvest(harvestItem);
-    setEditTahsilatVal(String(harvestItem.tahsilat || 0));
-    setEditModalVisible(true);
-  };
-
   const openHarvestEditModal = (harvestItem: HarvestRecord) => {
     setEditingHarvest(harvestItem);
     setEditHarvestForm({
@@ -857,7 +862,9 @@ export default function App() {
     const vadeTarihi = editHarvestForm.isVadeli ? toServerDate(editHarvestForm.vadeTarihi) : '';
     const kg = parseMoney(editHarvestForm.kg);
     const fiyat = parseMoney(editHarvestForm.fiyat);
-    const tahsilat = parseMoney(editHarvestForm.tahsilat);
+    // Tahsilatlar ödeme ekranından girilir ve her biri ayrı geçmiş kaydı oluşturur.
+    // Hasat düzenleme ekranı mevcut tahsilat toplamını değiştirmez.
+    const tahsilat = Number(editingHarvest.tahsilat) || 0;
     const amounts = calculateAgriculturalDeductions(kg, fiyat);
     if (!tarih) { showOperationFeedback('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.', 'error'); return; }
     if (editHarvestForm.isVadeli && !vadeTarihi) { showOperationFeedback('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.', 'error'); return; }
@@ -865,7 +872,7 @@ export default function App() {
       showOperationFeedback('Eksik Bilgi', 'KG, firma ve birim fiyat alanlarını geçerli şekilde doldurun.', 'error');
       return;
     }
-    if (!Number.isFinite(tahsilat) || tahsilat < 0 || tahsilat > amounts.netTutar + 0.01) {
+    if (tahsilat > amounts.netTutar + 0.01) {
       showOperationFeedback('Tahsilat Hatası', 'Tahsilat tutarı net alacak tutarından fazla olamaz.', 'error');
       return;
     }
@@ -892,38 +899,6 @@ export default function App() {
       await fetchData();
     } catch (error: any) {
       showOperationFeedback('Hasat Düzenleme', error?.message || 'Hasat kaydı güncellenemedi.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateCollection = async () => {
-    if (!editingHarvest) return;
-    const newTahsilat = parseMoney(editTahsilatVal);
-    if (isNaN(newTahsilat) || newTahsilat < 0) {
-      showOperationFeedback('Hata', 'Lütfen geçerli bir tutar girin.', 'error');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await fetchWithTimeout(`${API_URL}/harvests/${editingHarvest._id}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ tahsilat: newTahsilat })
-      });
-
-      if (res.ok) {
-        showOperationFeedback('Başarılı', 'Tahsilat tutarı güncellendi.', 'success');
-        setEditModalVisible(false);
-        setEditingHarvest(null);
-        await fetchData();
-      } else {
-        const errData = await res.json().catch(() => null);
-        showOperationFeedback('Hata', errData?.error || errData?.message || 'Tahsilat güncellenemedi.', 'error');
-      }
-    } catch (e: any) {
-      showOperationFeedback('Bağlantı Hatası', e.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1241,7 +1216,7 @@ export default function App() {
               pendingCollection={pendingCollection}
               totalExp={totalExp}
               netProfit={netProfit}
-              openEditModal={openEditModal}
+              openPaymentForHarvest={openPaymentForHarvest}
               openHarvestEditModal={openHarvestEditModal}
               handleDelete={handleDelete}
               onNavigate={setActiveTab}
@@ -1263,6 +1238,7 @@ export default function App() {
             <CollectionsScreen
               handleSpecificHarvestPayment={handleSpecificHarvestPayment}
               harvests={harvests}
+              payments={payments}
               payAmount={payAmount}
               payDesc={payDesc}
               payHarvestId={payHarvestId}
@@ -1385,42 +1361,6 @@ export default function App() {
           </View>
         </Modal>
 
-        {/* TAHSİLAT DÜZENLEME MODALI */}
-        <Modal
-          visible={editModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setEditModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>✏️ Tahsilat Düzenle</Text>
-              {editingHarvest && (
-                <Text style={{ color: '#555', marginBottom: 10 }}>
-                  {editingHarvest.uretici || editingHarvest.producerName} - Net alacak:{' '}
-                  {formatTL(netTotalOf(editingHarvest))}
-                </Text>
-              )}
-              <Text style={styles.label}>Yeni Tahsilat Tutarı (TL)</Text>
-              <TextInput
-                style={styles.input}
-                value={editTahsilatVal}
-                onChangeText={setEditTahsilatVal}
-                keyboardType="numeric"
-                placeholder="0"
-              />
-              <View style={styles.modalBtnGroup}>
-                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setEditModalVisible(false)}>
-                  <Text style={styles.modalBtnText}>İptal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalSaveBtn} onPress={handleUpdateCollection}>
-                  <Text style={styles.modalBtnText}>Kaydet</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
         {/* HASAT KAYDI DÜZENLEME MODALI */}
         <Modal
           visible={harvestEditModalVisible}
@@ -1448,8 +1388,8 @@ export default function App() {
                 <Text style={styles.label}>Brüt Birim Fiyat (TL)</Text>
                 <TextInput style={styles.input} value={editHarvestForm.fiyat} onChangeText={(fiyat) => setEditHarvestForm({ ...editHarvestForm, fiyat })} placeholder="Örn: 35,00" keyboardType="decimal-pad" />
                 <Text style={styles.formHelp}>%2 kesinti: {formatTL(calculateAgriculturalDeductions(editHarvestForm.kg, editHarvestForm.fiyat).gelirVergisiKesintisi)} · Net alacak: {formatTL(calculateAgriculturalDeductions(editHarvestForm.kg, editHarvestForm.fiyat).netTutar)}</Text>
-                <Text style={styles.label}>Alınan Ödeme (TL)</Text>
-                <TextInput style={styles.input} value={editHarvestForm.tahsilat} onChangeText={(tahsilat) => setEditHarvestForm({ ...editHarvestForm, tahsilat })} placeholder="Ödeme yoksa 0" keyboardType="decimal-pad" />
+                <Text style={styles.label}>Toplam Tahsilat</Text>
+                <Text style={styles.formHelp}>Bu hasatta kayıtlı tahsilat: {formatTL(Number(editingHarvest?.tahsilat) || 0)}. Yeni ödeme eklemek için Ödeme Al ekranını kullanın.</Text>
                 <Text style={styles.label}>Bahçe</Text>
                 <TextInput style={styles.input} value={editHarvestForm.garden} onChangeText={(garden) => setEditHarvestForm({ ...editHarvestForm, garden })} placeholder="Örn: Arka Bahçe" />
                 <View style={styles.switchRow}><Text style={styles.switchLabel}>Vadeli satış mı?</Text><Switch value={editHarvestForm.isVadeli} onValueChange={(isVadeli) => setEditHarvestForm({ ...editHarvestForm, isVadeli })} trackColor={{ false: '#767577', true: '#2a9d8f' }} /></View>

@@ -841,6 +841,24 @@ app.delete('/api/harvests/:id', requireAuth, async (req, res) => {
 
 // --- YENİ RAPOR VE TAKİP ROTALARI ---
 
+// Tahsilat geçmişi: Her ödeme kaydının hangi hasada ait olduğunu döndürür.
+app.get('/api/payments', requireAuth, async (req, res) => {
+  try {
+    const filter = buildUserFilter(req);
+    if (filter._id === null) return res.json([]);
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 300) : 300;
+    const data = await Payment.find(filter)
+      .sort({ _id: -1 })
+      .limit(limit)
+      .populate({ path: 'harvestId', select: 'firma tarih surum kg weight bahce garden uretici producerName' })
+      .lean();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 1. Belirli satışa tahsilat ekle
 app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {

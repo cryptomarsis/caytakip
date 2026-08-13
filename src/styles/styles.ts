@@ -799,6 +799,41 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: 'bold'
   },
+  paymentHistoryCard: {
+    backgroundColor: '#F5FAF6',
+    borderWidth: 1,
+    borderColor: '#D8E8DB',
+    borderRadius: 12,
+    padding: 13,
+    marginBottom: 9
+  },
+  paymentHistoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10
+  },
+  paymentHistoryTitle: {
+    color: '#1B513B',
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  paymentHistoryAmount: {
+    color: '#237044',
+    fontSize: 15,
+    fontWeight: '900'
+  },
+  paymentHistoryMeta: {
+    color: '#52695A',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 3
+  },
+  paymentHistoryNote: {
+    color: '#47635A',
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 6
+  },
   formCard: {
     backgroundColor: '#FFFFFF',
     padding: 18,

@@ -17,6 +17,7 @@ export type OfflineRequest = {
 
 export type DataSnapshot = {
   harvests: unknown[];
+  payments?: unknown[];
   expenses: unknown[];
   gardens: unknown[];
   factoryPrices: unknown[];

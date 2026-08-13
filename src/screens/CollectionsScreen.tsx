@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NativeScrollEvent, NativeSyntheticEvent, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { styles } from '../styles/styles';
 import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
+import { PaymentRecord } from '../types';
 
 const recordTime = (value?: string) => {
   if (!value) return '';
@@ -12,7 +13,7 @@ const recordTime = (value?: string) => {
 };
 
 export default function CollectionsScreen(props: any) {
-  const { handleSpecificHarvestPayment, harvests, payAmount, payDesc, payHarvestId, setPayAmount, setPayDesc, setPayHarvestId } = props;
+  const { handleSpecificHarvestPayment, harvests, payments, payAmount, payDesc, payHarvestId, setPayAmount, setPayDesc, setPayHarvestId } = props;
   const scrollRef = useRef<ScrollView>(null);
   const { width } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -55,6 +56,26 @@ export default function CollectionsScreen(props: any) {
 
   const selected = pendingHarvests[currentIndex];
   const selectedRemaining = selected ? remainingTotalOf(selected) : 0;
+  const paymentDate = (payment: PaymentRecord) => formatDisplayDate(String(payment.tarih || payment.createdAt || '').slice(0, 10));
+  const paymentHarvest = (payment: PaymentRecord) => payment.harvestId && typeof payment.harvestId === 'object' ? payment.harvestId : null;
+  const paymentHarvestId = (payment: PaymentRecord) => {
+    const harvest = paymentHarvest(payment);
+    return harvest?._id || (typeof payment.harvestId === 'string' ? payment.harvestId : '');
+  };
+  const legacyPaymentAdjustments = useMemo(() => {
+    const paidByHarvest = new Map<string, number>();
+    ((payments || []) as PaymentRecord[]).forEach((payment) => {
+      const harvestId = paymentHarvestId(payment);
+      if (!harvestId) return;
+      paidByHarvest.set(harvestId, (paidByHarvest.get(harvestId) || 0) + (Number(payment.tutar) || 0));
+    });
+    return (harvests || []).map((harvest: any) => {
+      const totalPaid = Number(harvest.tahsilat) || 0;
+      const detailTotal = paidByHarvest.get(harvest._id) || 0;
+      const missingDetail = totalPaid - detailTotal;
+      return missingDetail > 0.01 ? { harvest, amount: missingDetail } : null;
+    }).filter(Boolean) as Array<{ harvest: any; amount: number }>;
+  }, [harvests, payments]);
 
   return (
     <View>
@@ -181,6 +202,55 @@ export default function CollectionsScreen(props: any) {
         <TouchableOpacity style={[styles.submitBtn, { opacity: pendingHarvests.length === 0 ? 0.5 : 1 }]} disabled={pendingHarvests.length === 0} onPress={handleSpecificHarvestPayment}>
           <Text style={styles.submitBtnText}>Ödemeyi Kaydet</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.formCard}>
+        <Text style={styles.formTitle}>Tahsilat Geçmişi</Text>
+        <Text style={styles.formHelp}>Hangi hasada ne zaman ödeme girdiğinizi buradan takip edebilirsiniz.</Text>
+        {(payments || []).length === 0 && legacyPaymentAdjustments.length === 0 ? (
+          <Text style={styles.emptyText}>Henüz kaydedilmiş tahsilat girişi yok.</Text>
+        ) : (
+          <>
+          {(payments as PaymentRecord[]).map((payment) => {
+            const harvest = paymentHarvest(payment);
+            const firm = harvest?.firma || 'Hasat kaydı bulunamadı';
+            const harvestDate = harvest?.tarih ? formatDisplayDate(harvest.tarih) : '';
+            const harvestKg = harvest?.kg ?? harvest?.weight;
+            const createdTime = recordTime(payment.createdAt);
+            return (
+              <View key={payment._id} style={styles.paymentHistoryCard}>
+                <View style={styles.paymentHistoryHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.paymentHistoryTitle}>{firm}</Text>
+                    <Text style={styles.paymentHistoryMeta}>
+                      Tahsilat: {paymentDate(payment)}{createdTime ? ` · ${createdTime}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.paymentHistoryAmount}>+ {formatTL(Number(payment.tutar) || 0)}</Text>
+                </View>
+                {harvest ? (
+                  <Text style={styles.paymentHistoryMeta}>
+                    Bağlı hasat: {harvestDate || '-'}{harvestKg !== undefined ? ` · ${harvestKg} KG` : ''}{harvest.bahce || harvest.garden ? ` · ${harvest.bahce || harvest.garden}` : ''}
+                  </Text>
+                ) : <Text style={styles.paymentHistoryMeta}>Bağlı hasat kaydı silinmiş veya bulunamıyor.</Text>}
+                {!!payment.aciklama && <Text style={styles.paymentHistoryNote}>Not: {payment.aciklama}</Text>}
+              </View>
+            );
+          })}
+          {legacyPaymentAdjustments.map(({ harvest, amount }) => (
+            <View key={`previous-${harvest._id}`} style={styles.paymentHistoryCard}>
+              <View style={styles.paymentHistoryHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.paymentHistoryTitle}>{harvest.firma || 'Firma belirtilmedi'}</Text>
+                  <Text style={styles.paymentHistoryMeta}>Önceki tahsilat toplamı · Hasat: {formatDisplayDate(harvest.tarih)}</Text>
+                </View>
+                <Text style={styles.paymentHistoryAmount}>+ {formatTL(amount)}</Text>
+              </View>
+              <Text style={styles.paymentHistoryMeta}>Bu tahsilat eski uygulama kaydında toplam olarak bulunuyor; tek tek ödeme tarihi/notu daha önce saklanmamış.</Text>
+            </View>
+          ))}
+          </>
+        )}
       </View>
     </View>
   );

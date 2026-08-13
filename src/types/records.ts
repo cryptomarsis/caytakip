@@ -23,6 +23,15 @@ export interface HarvestRecord {
   vadeTarihi?: string;
 }
 
+export interface PaymentRecord {
+  _id: string;
+  harvestId?: string | Pick<HarvestRecord, '_id' | 'firma' | 'tarih' | 'surum' | 'kg' | 'weight' | 'bahce' | 'garden' | 'uretici' | 'producerName'> | null;
+  tarih?: string;
+  tutar?: number | string;
+  aciklama?: string;
+  createdAt?: string;
+}
+
 export interface ExpenseRecord {
   _id: string;
   tarih?: string;
