@@ -4,7 +4,7 @@
 
 ## Kullanıma hazır kurulum dosyası
 
-`release/Caylik-Setup-1.0.0.exe`
+`release/Caylik-Setup-1.0.2.exe`
 
 Kurulumdan sonra Çaylık, masaüstü ve Başlat menüsünden açılabilir. Excel, CSV ve PDF raporları Windows'un dosya kaydetme penceresiyle bilgisayara kaydedilir.
 

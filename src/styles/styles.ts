@@ -129,6 +129,187 @@ export const styles = StyleSheet.create({
     flex: 1,
     padding: 18
   },
+  mobileShell: {
+    flex: 1
+  },
+  desktopShell: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#F2F6F1'
+  },
+  appMain: {
+    flex: 1,
+    minWidth: 0
+  },
+  desktopSidebar: {
+    width: 276,
+    backgroundColor: '#143D2D',
+    borderRightWidth: 1,
+    borderRightColor: '#0D2E21'
+  },
+  desktopBrand: {
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    paddingBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.12)'
+  },
+  desktopBrandMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#D8F0D8',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  desktopBrandMarkText: {
+    color: '#174735',
+    fontSize: 23,
+    fontWeight: '900'
+  },
+  desktopBrandTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800'
+  },
+  desktopBrandSubtitle: {
+    color: '#B9D5C0',
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  desktopMenuScroll: {
+    flex: 1
+  },
+  desktopMenuContent: {
+    paddingHorizontal: 13,
+    paddingTop: 16,
+    paddingBottom: 20
+  },
+  desktopMenuGroup: {
+    color: '#93B89D',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    marginTop: 15,
+    marginBottom: 7,
+    marginLeft: 10
+  },
+  desktopNavItem: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    marginBottom: 3
+  },
+  desktopNavItemActive: {
+    backgroundColor: '#E5F1E7'
+  },
+  desktopNavIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginRight: 11
+  },
+  desktopNavIconActive: {
+    backgroundColor: '#C8E4CF'
+  },
+  desktopNavIconText: {
+    color: '#E2F3E5',
+    fontSize: 18,
+    fontWeight: '800'
+  },
+  desktopNavIconTextActive: {
+    color: '#1B563D'
+  },
+  desktopNavCopy: {
+    flex: 1
+  },
+  desktopNavText: {
+    color: '#F4FAF5',
+    fontWeight: '700',
+    fontSize: 14
+  },
+  desktopNavTextActive: {
+    color: '#173F2E'
+  },
+  desktopNavHint: {
+    color: '#A9C8B0',
+    fontSize: 11,
+    marginTop: 2
+  },
+  desktopNavHintActive: {
+    color: '#527561'
+  },
+  desktopSidebarFooter: {
+    margin: 13,
+    padding: 14,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.09)'
+  },
+  desktopFooterName: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14
+  },
+  desktopFooterMeta: {
+    color: '#A9C8B0',
+    marginTop: 3,
+    fontSize: 12
+  },
+  desktopFooterSync: {
+    color: '#F8D889',
+    marginTop: 9,
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  desktopFooterWarning: {
+    color: '#FFD8D3',
+    marginTop: 9,
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  desktopHeader: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#DCE7DE',
+    shadowColor: '#133724',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2
+  },
+  desktopHeaderTitle: {
+    color: '#1B4935',
+    fontSize: 21
+  },
+  desktopHeaderSubtitle: {
+    color: '#577364',
+    fontSize: 13
+  },
+  desktopLogoutBtn: {
+    backgroundColor: '#1F6245',
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  desktopScroll: {
+    padding: 0,
+    backgroundColor: '#F2F6F1'
+  },
+  desktopContent: {
+    width: '100%',
+    maxWidth: 1500,
+    alignSelf: 'center',
+    padding: 30,
+    paddingBottom: 48
+  },
   sectionTitle: {
     fontSize: 19,
     fontWeight: 'bold',

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform } from 'react-native';
+import { Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
@@ -25,6 +25,8 @@ import SettingsScreen from '../screens/SettingsScreen';
 // MAIN COMPONENT
 // ==========================================
 export default function App() {
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth >= 960;
   // Kullanıcı Giriş / Kayıt State'leri
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -106,6 +108,20 @@ export default function App() {
   const [payDesc, setPayDesc] = useState('');
 
   const isAdmin = currentUser?.role === 'admin';
+  const desktopMenuItems = [
+    { group: 'GENEL', tab: 'dashboard' as const, icon: '⌂', label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
+    { group: 'GENEL', tab: 'harvest' as const, icon: '＋', label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
+    { group: 'ÖDEMELER', tab: 'collections' as const, icon: '₺', label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
+    { group: 'ÖDEMELER', tab: 'receivables' as const, icon: '◷', label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
+    { group: 'ÖDEMELER', tab: 'expense' as const, icon: '−', label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
+    { group: 'TAKİP', tab: 'gardens' as const, icon: '♧', label: 'Bahçeler', helper: 'Bahçe bilgileri' },
+    { group: 'TAKİP', tab: 'prices' as const, icon: '◈', label: 'Fabrika Fiyatları', helper: 'Güncel fiyat karşılaştırması' },
+    { group: 'TAKİP', tab: 'reports' as const, icon: '▤', label: 'Raporlar', helper: 'PDF, Excel ve analizler' },
+    { group: 'HESAP', tab: 'more' as const, icon: '☰', label: 'Diğer', helper: 'Tüm bölümlere kısa yol' },
+    { group: 'HESAP', tab: 'settings' as const, icon: '⚙', label: 'Ayarlar', helper: 'Şifre ve hesap işlemleri' },
+    ...(isAdmin ? [{ group: 'YÖNETİM', tab: 'admin' as const, icon: '★', label: 'Yönetim', helper: 'Yönetici paneli' }] : []),
+  ];
+  const activeDesktopMenu = desktopMenuItems.find((item) => item.tab === activeTab);
 
   const showAuthFeedback = (title: string, message: string, type: 'error' | 'info' = 'error') => {
     setAuthFeedback({ title, message, type });
@@ -1064,26 +1080,72 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
+        <View style={isDesktop ? styles.desktopShell : styles.mobileShell}>
+          {isDesktop && (
+            <View style={styles.desktopSidebar}>
+              <View style={styles.desktopBrand}>
+                <View style={styles.desktopBrandMark}><Text style={styles.desktopBrandMarkText}>Ç</Text></View>
+                <View>
+                  <Text style={styles.desktopBrandTitle}>Çaylık</Text>
+                  <Text style={styles.desktopBrandSubtitle}>Üretici takip sistemi</Text>
+                </View>
+              </View>
+
+              <ScrollView style={styles.desktopMenuScroll} contentContainerStyle={styles.desktopMenuContent} showsVerticalScrollIndicator={false}>
+                {desktopMenuItems.map((item, index) => {
+                  const previous = desktopMenuItems[index - 1];
+                  const showGroup = !previous || previous.group !== item.group;
+                  const active = activeTab === item.tab;
+                  return (
+                    <React.Fragment key={item.tab}>
+                      {showGroup && <Text style={styles.desktopMenuGroup}>{item.group}</Text>}
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        style={[styles.desktopNavItem, active && styles.desktopNavItemActive]}
+                        onPress={() => setActiveTab(item.tab)}
+                      >
+                        <View style={[styles.desktopNavIcon, active && styles.desktopNavIconActive]}><Text style={[styles.desktopNavIconText, active && styles.desktopNavIconTextActive]}>{item.icon}</Text></View>
+                        <View style={styles.desktopNavCopy}>
+                          <Text style={[styles.desktopNavText, active && styles.desktopNavTextActive]}>{item.label}</Text>
+                          <Text style={[styles.desktopNavHint, active && styles.desktopNavHintActive]}>{item.helper}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </React.Fragment>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.desktopSidebarFooter}>
+                <Text style={styles.desktopFooterName}>{currentUser.name}</Text>
+                <Text style={styles.desktopFooterMeta}>{isAdmin ? 'Yönetici hesabı' : 'Üretici hesabı'}</Text>
+                {pendingSyncCount > 0 && <Text style={styles.desktopFooterSync}>⏳ {pendingSyncCount} kayıt gönderilecek</Text>}
+                {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={styles.desktopFooterWarning}>⚠ {failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
+              </View>
+            </View>
+          )}
+
+          <View style={styles.appMain}>
 
         {/* HEADER */}
-        <View style={styles.header}>
+        <View style={[styles.header, isDesktop && styles.desktopHeader]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle}>🍃 Çaylık</Text>
-            <Text style={styles.headerSubtitle}>
-              Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}
+            <Text style={[styles.headerTitle, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : '🍃 Çaylık'}</Text>
+            <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>
+              {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : <>Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}</>}
             </Text>
             {pendingSyncCount > 0 && (
-              <Text style={styles.headerSubtitle}>⏳ {pendingSyncCount} kayıt senkronizasyon bekliyor</Text>
+              <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>⏳ {pendingSyncCount} kayıt senkronizasyon bekliyor</Text>
             )}
             {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={styles.headerWarning}>⚠️ {failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
           </View>
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <TouchableOpacity style={[styles.logoutBtn, isDesktop && styles.desktopLogoutBtn]} onPress={handleLogout}>
             <Text style={styles.logoutBtnText}>Çıkış</Text>
           </TouchableOpacity>
         </View>
 
         {/* TAB MENÜSÜ */}
-        <View style={styles.navBar}>
+        {!isDesktop && <View style={styles.navBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <TouchableOpacity
               style={[styles.navItem, activeTab === 'dashboard' && styles.navItemActive]}
@@ -1117,11 +1179,13 @@ export default function App() {
               <Text style={[styles.navText, activeTab === 'more' && styles.navTextActive]}>☰ Diğer</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
+        </View>}
 
         {/* İÇERİK ALANI */}
         <ScrollView
-          style={styles.content}
+          style={[styles.content, isDesktop && styles.desktopScroll]}
+          contentContainerStyle={isDesktop ? styles.desktopContent : undefined}
+          showsVerticalScrollIndicator={isDesktop}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} colors={['#1b4332']} />}
         >
           {activeTab === 'dashboard' && (
@@ -1240,6 +1304,8 @@ export default function App() {
             />
           )}
         </ScrollView>
+          </View>
+        </View>
 
         {/* TAHSİLAT DÜZENLEME MODALI */}
         <Modal
