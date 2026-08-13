@@ -45,3 +45,7 @@ npx expo config --type public
 ```
 
 Özellikle hesap oluşturma/giriş, hasat ekleme, çevrimdışı kayıt ve senkronizasyon, PDF/Excel paylaşımı, hesap silme ve gizlilik bağlantılarını gerçek bir Android build üzerinde deneyin.
+
+Android Studio veya yerel Android build öncesinde, uygulama yapılandırmasını Android kaynaklarıyla eşitlemek için `npm run prebuild:android` komutunu çalıştırın. Ardından emülatör veya bağlı cihaz için `npx expo run:android` kullanın.
+
+Tek komutla yayın öncesi JavaScript ve yapılandırma denetimi için `npm run release:check` kullanın.

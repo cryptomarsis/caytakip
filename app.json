@@ -9,11 +9,6 @@
     "backgroundColor": "#F8F3E7",
     "icon": "./assets/caylik-icon-v1.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true
     },
@@ -43,7 +38,21 @@
       "expo-sharing",
       "expo-notifications",
       "expo-secure-store",
-      "expo-splash-screen"
-    ]
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F8F3E7"
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "988521d0-c07b-466f-ad90-05cb3be4e358"
+      }
+    },
+    "owner": "cryptomarsis"
   }
 }

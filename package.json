@@ -52,6 +52,8 @@
   },
   "scripts": {
     "start": "expo start",
+    "prebuild:android": "expo prebuild --platform android --no-install",
+    "release:check": "tsc --noEmit && node --check server.js && expo config --type public && expo export --platform android",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",

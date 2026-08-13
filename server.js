@@ -67,6 +67,7 @@ const todayServerDate = () => {
 const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'development-only-change-me');
 // OTP, NetGSM hesabı ve gönderici adı hazır olduğunda Render'da açıkça true yapılır.
 // Böylece eksik üçüncü taraf hesabı yeni dağıtımı çalışmaz hâle getirmez.
@@ -282,10 +283,9 @@ const UserProfileSchema = new mongoose.Schema({
 const SessionSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true },
   userId: { type: String, required: true, index: true },
-  expiresAt: { type: Date, required: true },
+  expiresAt: { type: Date, required: true, expires: 0 },
   revokedAt: { type: Date, default: null }
 }, { timestamps: true });
-SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 const Session = mongoose.model('Session', SessionSchema);
 
 const OtpChallengeSchema = new mongoose.Schema({
@@ -293,10 +293,9 @@ const OtpChallengeSchema = new mongoose.Schema({
   purpose: { type: String, enum: ['login', 'register'], required: true },
   codeHash: { type: String, required: true },
   attempts: { type: Number, default: 0 },
-  expiresAt: { type: Date, required: true },
+  expiresAt: { type: Date, required: true, expires: 0 },
   consumedAt: { type: Date, default: null }
 }, { timestamps: true });
-OtpChallengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
 
 // Mobil uygulamanın çevrimdışı kuyruğu aynı isteği bağlantı koptuğunda yeniden
@@ -307,7 +306,8 @@ const IdempotencySchema = new mongoose.Schema({
   method: { type: String, required: true },
   path: { type: String, required: true },
   status: { type: Number, required: true },
-  body: { type: mongoose.Schema.Types.Mixed, required: true }
+  body: { type: mongoose.Schema.Types.Mixed, required: true },
+  expiresAt: { type: Date, required: true, expires: 0 }
 }, { timestamps: true });
 IdempotencySchema.index({ userId: 1, key: 1, method: 1, path: 1 }, { unique: true });
 const IdempotencyRecord = mongoose.model('IdempotencyRecord', IdempotencySchema);
@@ -405,7 +405,12 @@ const idempotencyMiddleware = async (req, res, next) => {
     const originalJson = res.json.bind(res);
     res.json = (body) => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        IdempotencyRecord.create({ ...identity, status: res.statusCode, body }).catch((error) => console.error('Idempotency kaydı yazılamadı:', error.message));
+        IdempotencyRecord.create({
+          ...identity,
+          status: res.statusCode,
+          body,
+          expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS)
+        }).catch((error) => console.error('Idempotency kaydı yazılamadı:', error.message));
       }
       return originalJson(body);
     };
