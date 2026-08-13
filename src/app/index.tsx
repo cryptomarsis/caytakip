@@ -35,6 +35,8 @@ export default function App() {
   const [authPin, setAuthPin] = useState('');
   const [authPinConfirm, setAuthPinConfirm] = useState('');
   const [authFeedback, setAuthFeedback] = useState<{ title: string; message: string; type: 'error' | 'info' } | null>(null);
+  const [operationFeedback, setOperationFeedback] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ endpoint: string; id: string; title: string; status: 'confirming' | 'deleting' | 'error'; message?: string } | null>(null);
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
@@ -57,9 +59,9 @@ export default function App() {
   const [priceForm, setPriceForm] = useState({ firma: 'ÇAYKUR', fiyat: '', tarih: todayTR, fiyatTuru: 'Peşin', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
 
   const [adForm, setAdForm] = useState({
-    slot: 'dashboard_middle',
+    slot: 'dashboard_top',
     firma: '',
-    kategori: 'Çay Firması',
+    kategori: 'Sponsorlu',
     baslik: '',
     aciklama: '',
     telefon: '',
@@ -130,6 +132,13 @@ export default function App() {
     if (Platform.OS !== 'web') Alert.alert(title, message);
   };
 
+  // Electron/RN Web'de Alert.alert görünür bir pencere açmaz. Kayıt, silme ve
+  // sunucu hatalarının bilgisayarda da anlaşılır olması için aynı mesajı ekranda gösteririz.
+  const showOperationFeedback = (title: string, message: string, type: 'error' | 'success' | 'info' = 'info') => {
+    setOperationFeedback({ title, message, type });
+    if (Platform.OS !== 'web') Alert.alert(title, message);
+  };
+
   // Ortak İstek Başlıklarını Oluşturan Yardımcı Fonksiyon (Madde 6)
   const getAuthHeaders = () => ({
     'Content-Type': 'application/json',
@@ -174,7 +183,10 @@ export default function App() {
 
   const postOrQueue = async (endpoint: string, body: Record<string, unknown>) => {
     const network = await NetInfo.fetch();
-    if (!network.isConnected || network.isInternetReachable === false) {
+    // Electron'da NetInfo her zaman doğru durum döndürmeyebiliyor. Bilgisayarda
+    // kaydı çevrimdışı kuyruğa atmadan önce gerçek sunucu isteğini denemek gerekir.
+    const isDefinitelyOffline = Platform.OS !== 'web' && (!network.isConnected || network.isInternetReachable === false);
+    if (isDefinitelyOffline) {
       await queueOfflineRequest(endpoint, body);
       return { queued: true as const };
     }
@@ -188,7 +200,8 @@ export default function App() {
       return { queued: false as const, response };
     } catch (error) {
       const latestNetwork = await NetInfo.fetch();
-      if (!latestNetwork.isConnected || latestNetwork.isInternetReachable === false) {
+      const wentOffline = Platform.OS !== 'web' && (!latestNetwork.isConnected || latestNetwork.isInternetReachable === false);
+      if (wentOffline) {
         await queueOfflineRequest(endpoint, body);
         return { queued: true as const };
       }
@@ -199,7 +212,7 @@ export default function App() {
   const syncOfflineQueue = async () => {
     if (!currentUser?.userId || isSyncingOfflineQueue.current) return { synced: 0, pending: 0 };
     const network = await NetInfo.fetch();
-    if (!network.isConnected || network.isInternetReachable === false) return { synced: 0, pending: await getPendingRequestCount(currentUser.userId) };
+    if (Platform.OS !== 'web' && (!network.isConnected || network.isInternetReachable === false)) return { synced: 0, pending: await getPendingRequestCount(currentUser.userId) };
 
     isSyncingOfflineQueue.current = true;
     try {
@@ -340,7 +353,7 @@ export default function App() {
           setGardens(snapshot.gardens as GardenRecord[]);
           setFactoryPrices(snapshot.factoryPrices as FactoryPriceRecord[]);
           setAds(snapshot.ads as AdRecord[]);
-          Alert.alert('Çevrimdışı Mod', 'Son senkronize edilen veriler gösteriliyor. Yeni kayıtlar bağlantı geldiğinde gönderilecek.');
+          showOperationFeedback('Çevrimdışı Mod', 'Son senkronize edilen veriler gösteriliyor. Yeni kayıtlar bağlantı geldiğinde gönderilecek.', 'info');
           return;
         }
       }
@@ -353,8 +366,8 @@ export default function App() {
       }
       await scheduleDueNotifications(rawH || []);
       const failedSources = results.map((r, i) => (r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)) ? ['hasatlar','giderler','bahçeler','fabrika fiyatları','reklamlar'][i] : null).filter(Boolean);
-      if (failedSources.length === results.length) { Alert.alert('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.'); }
-    } catch (err: any) { Alert.alert('Bağlantı Kurulamadı', err.message); }
+      if (failedSources.length === results.length) { showOperationFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error'); }
+    } catch (err: any) { showOperationFeedback('Bağlantı Kurulamadı', err.message || 'Sunucuya ulaşılamadı.', 'error'); }
     finally { setLoading(false); }
   };
 
@@ -579,34 +592,36 @@ export default function App() {
     return Object.values(summaryMap);
   };
 
-  // Silme Fonksiyonu
+  // Silme onayı React Native'in kendi penceresiyle gösterilir. Böylece Android,
+  // web ve masaüstünde aynı şekilde çalışır.
   const handleDelete = (endpoint: string, id: string, title: string) => {
-    Alert.alert(`${title} Silinsin mi?`, 'Bu işlem geri alınamaz.', [
-      { text: 'İptal', style: 'cancel' },
-      {
-        text: 'Sil',
-        style: 'destructive',
-        onPress: async () => {
-          setLoading(true);
-          try {
-            const res = await authFetch(`${API_URL}/${endpoint}/${id}`, {
-              method: 'DELETE',
-              headers: getAuthHeaders()
-            });
-            if (res.ok) {
-              await fetchData();
-            } else {
-              const errData = await res.json().catch(() => null);
-              Alert.alert('Hata', errData?.error || errData?.message || 'Silme işlemi gerçekleşmedi.');
-              setLoading(false);
-            }
-          } catch (e: any) {
-            Alert.alert('Hata', e.message);
-            setLoading(false);
-          }
-        }
-      }
-    ]);
+    if (!id) {
+      showOperationFeedback('Kayıt Bulunamadı', 'Silinecek kayıt bilgisi eksik. Sayfayı yenileyip tekrar deneyin.', 'error');
+      return;
+    }
+    setDeleteConfirmation({ endpoint, id, title, status: 'confirming' });
+  };
+
+  const confirmDelete = async () => {
+    const target = deleteConfirmation;
+    if (!target || target.status === 'deleting') return;
+    setDeleteConfirmation({ ...target, status: 'deleting' });
+    setLoading(true);
+    try {
+      const res = await authFetch(`${API_URL}/${target.endpoint}/${target.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || data?.message || 'Silme işlemi gerçekleşmedi.');
+      if (target.endpoint === 'ads') setAds((items) => items.filter((item) => item._id !== target.id));
+      setDeleteConfirmation(null);
+      showOperationFeedback('Silindi', `${target.title} kaydı kaldırıldı.`, 'success');
+      await fetchData();
+    } catch (error: any) {
+      setDeleteConfirmation({ ...target, status: 'error', message: error?.message || 'Silme işlemi tamamlanamadı.' });
+      setLoading(false);
+    }
   };
 
   // Hasat Kaydetme
@@ -615,15 +630,15 @@ export default function App() {
     const tarih = toServerDate(hForm.date);
     const vadeTarihi = hForm.isVadeli ? toServerDate(hForm.vadeTarihi) : '';
     if (!hForm.kg.trim() || !hForm.firma.trim() || !hForm.fiyat.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen miktar, firma ve birim fiyat alanlarını doldurun.');
+      showOperationFeedback('Eksik Bilgi', 'Lütfen miktar, firma ve birim fiyat alanlarını doldurun.', 'error');
       return;
     }
-    if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
-    if (hForm.isVadeli && !vadeTarihi) { Alert.alert('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.'); return; }
+    if (!tarih) { showOperationFeedback('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.', 'error'); return; }
+    if (hForm.isVadeli && !vadeTarihi) { showOperationFeedback('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.', 'error'); return; }
     const amounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat);
     const tahsilat = parseMoney(hForm.tahsilat);
     if (tahsilat > amounts.netTutar + 0.01) {
-      Alert.alert('Tahsilat Hatası', `Tahsilat net alacaktan fazla olamaz. Net alacak: ${formatTL(amounts.netTutar)}`);
+      showOperationFeedback('Tahsilat Hatası', `Tahsilat net alacaktan fazla olamaz. Net alacak: ${formatTL(amounts.netTutar)}`, 'error');
       return;
     }
     setLoading(true);
@@ -650,7 +665,7 @@ export default function App() {
 
       const result = await postOrQueue('/harvests', payload);
       if (result.queued) {
-        Alert.alert('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '' });
         setActiveTab('dashboard');
         return;
@@ -658,7 +673,7 @@ export default function App() {
       const res = result.response;
 
       if (res.ok) {
-        Alert.alert('Başarılı', 'Hasat kaydı eklendi.');
+        showOperationFeedback('Başarılı', 'Hasat kaydı eklendi.', 'success');
         // Form Temizleme Mantığı Düzeltildi (Madde 5)
         setHForm({
           date: todayDisplayDate(),
@@ -678,10 +693,10 @@ export default function App() {
       } else {
         const errData = await res.json().catch(() => null);
         const detailMessage = errData?.error || errData?.message || `Sunucu Hatası: ${res.status}`;
-        Alert.alert('Kayıt Başarısız', detailMessage);
+        showOperationFeedback('Kayıt Başarısız', detailMessage, 'error');
       }
     } catch (e: any) {
-      Alert.alert('Bağlantı Hatası', e.message);
+      showOperationFeedback('Bağlantı Hatası', e.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
       setLoading(false);
     }
@@ -690,18 +705,18 @@ export default function App() {
   // Belirli Bir Hasat Satışına Özel Tahsilat Ekleme
   const handleSpecificHarvestPayment = async () => {
     if (!payHarvestId) {
-      Alert.alert('Eksik Bilgi', 'Lütfen tahsilat düşülecek satışı seçin.');
+      showOperationFeedback('Eksik Bilgi', 'Lütfen tahsilat düşülecek satışı seçin.', 'error');
       return;
     }
     const amount = parseMoney(payAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
-      Alert.alert('Eksik Bilgi', 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.');
+      showOperationFeedback('Eksik Bilgi', 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.', 'error');
       return;
     }
 
     const selected = harvests.find(h => h._id === payHarvestId);
     if (!selected) {
-      Alert.alert('Hata', 'Seçilen satış kaydı bulunamadı. Listeyi yenileyip tekrar deneyin.');
+      showOperationFeedback('Hata', 'Seçilen satış kaydı bulunamadı. Listeyi yenileyip tekrar deneyin.', 'error');
       return;
     }
 
@@ -709,7 +724,7 @@ export default function App() {
     const remaining = remainingTotalOf(selected);
 
     if (amount > remaining + 0.01) {
-      Alert.alert('Hata', `Tahsilat kalan borçtan fazla olamaz. Kalan: ${formatTL(remaining)}`);
+      showOperationFeedback('Hata', `Tahsilat kalan borçtan fazla olamaz. Kalan: ${formatTL(remaining)}`, 'error');
       return;
     }
 
@@ -722,7 +737,7 @@ export default function App() {
         tarih: toServerDate(todayDisplayDate())
       });
       if (result.queued) {
-        Alert.alert('Çevrimdışı Kaydedildi', 'Tahsilat telefonda saklandı; internet gelince otomatik gönderilecek.');
+        showOperationFeedback('Çevrimdışı Kaydedildi', 'Tahsilat telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setPayHarvestId(''); setPayAmount(''); setPayDesc('');
         return;
       }
@@ -730,16 +745,16 @@ export default function App() {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        Alert.alert('Başarılı', 'Tahsilat başarıyla kaydedildi ve satıştan düşüldü.');
+        showOperationFeedback('Başarılı', 'Tahsilat başarıyla kaydedildi ve satıştan düşüldü.', 'success');
         setPayHarvestId('');
         setPayAmount('');
         setPayDesc('');
         await fetchData();
       } else {
-        Alert.alert('Tahsilat Kaydedilemedi', data?.error || data?.message || `Sunucu hatası (${res.status}).`);
+        showOperationFeedback('Tahsilat Kaydedilemedi', data?.error || data?.message || `Sunucu hatası (${res.status}).`, 'error');
       }
     } catch (e: any) {
-      Alert.alert('Bağlantı Hatası', e?.message || 'Sunucuya ulaşılamadı.');
+      showOperationFeedback('Bağlantı Hatası', e?.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
       setLoading(false);
     }
@@ -747,56 +762,65 @@ export default function App() {
 
   // Fabrika fiyatı kaydet
   const handleSaveFactoryPrice = async () => {
-    if (!isAdmin) { Alert.alert('Yetki Yok', 'Bu işlemi sadece yönetici yapabilir.'); return; }
+    if (!isAdmin) { showOperationFeedback('Yetki Yok', 'Bu işlemi sadece yönetici yapabilir.', 'error'); return; }
     const fiyat = parseMoney(priceForm.fiyat);
     const tarih = toServerDate(priceForm.tarih);
     const gecerlilikBaslangic = toServerDate(priceForm.gecerlilikBaslangic);
     if (!priceForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0 || !tarih) {
-      Alert.alert('Eksik Bilgi', 'Fabrika adı, fiyat ve fiyat tarihi zorunludur.'); return;
+      showOperationFeedback('Eksik Bilgi', 'Fabrika adı, fiyat ve fiyat tarihi zorunludur.', 'error'); return;
     }
     setLoading(true);
     try {
       const result = await postOrQueue('/factory-prices', { ...priceForm, firma: priceForm.firma.trim(), fiyat, tarih, gecerlilikBaslangic, vadeGun: Number(priceForm.vadeGun) || 0 });
       if (result.queued) {
-        Alert.alert('Çevrimdışı Kaydedildi', 'Fabrika fiyatı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        showOperationFeedback('Çevrimdışı Kaydedildi', 'Fabrika fiyatı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setPriceForm({ ...priceForm, fiyat: '', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
         return;
       }
       const res = result.response;
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        Alert.alert('Başarılı', 'Fabrika fiyatı kaydedildi.');
+        showOperationFeedback('Başarılı', 'Fabrika fiyatı kaydedildi.', 'success');
         setPriceForm({ ...priceForm, fiyat: '', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
         await fetchData();
-      } else Alert.alert('Hata', data?.error || 'Fiyat kaydedilemedi.');
-    } catch (e: any) { Alert.alert('Hata', e.message); }
+      } else showOperationFeedback('Hata', data?.error || 'Fiyat kaydedilemedi.', 'error');
+    } catch (e: any) { showOperationFeedback('Hata', e.message || 'Fiyat kaydedilemedi.', 'error'); }
     finally { setLoading(false); }
   };
 
   const handleSaveAd = async () => {
-    if (!adForm.firma.trim() || !adForm.baslik.trim()) {
-      Alert.alert('Eksik Bilgi', 'Reklam veren firma ve reklam başlığı zorunludur.');
+    if (!adForm.firma.trim()) {
+      showOperationFeedback('Eksik Bilgi', 'Banner için firma veya marka adı zorunludur.', 'error');
       return;
     }
     setLoading(true);
     try {
-      const result = await postOrQueue('/ads', { ...adForm, firma: adForm.firma.trim(), baslik: adForm.baslik.trim() });
+      const firma = adForm.firma.trim();
+      const result = await postOrQueue('/ads', {
+        ...adForm,
+        firma,
+        baslik: adForm.baslik.trim() || firma,
+        aciklama: adForm.aciklama.trim(),
+        telefon: adForm.telefon.trim(),
+        link: adForm.link.trim(),
+        gorselUrl: adForm.gorselUrl.trim()
+      });
       if (result.queued) {
-        Alert.alert('Çevrimdışı Kaydedildi', 'Reklam kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        showOperationFeedback('Çevrimdışı Kaydedildi', 'Banner telefonda saklandı; internet gelince otomatik yayınlanacak.', 'info');
         setAdForm({ ...adForm, firma: '', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', baslangic: '', bitis: '' });
         return;
       }
       const res = result.response;
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        Alert.alert('Başarılı', 'Reklam alanı yayına alındı.');
+        showOperationFeedback('Başarılı', 'Banner ana sayfada yayına alındı.', 'success');
         setAdForm({ ...adForm, firma: '', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', baslangic: '', bitis: '' });
         await fetchData();
       } else {
-        Alert.alert('Hata', data?.error || 'Reklam kaydedilemedi.');
+        showOperationFeedback('Hata', data?.error || 'Banner kaydedilemedi.', 'error');
       }
     } catch (e: any) {
-      Alert.alert('Hata', e.message);
+      showOperationFeedback('Hata', e.message || 'Banner kaydedilemedi.', 'error');
     } finally {
       setLoading(false);
     }
@@ -835,14 +859,14 @@ export default function App() {
     const fiyat = parseMoney(editHarvestForm.fiyat);
     const tahsilat = parseMoney(editHarvestForm.tahsilat);
     const amounts = calculateAgriculturalDeductions(kg, fiyat);
-    if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
-    if (editHarvestForm.isVadeli && !vadeTarihi) { Alert.alert('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.'); return; }
+    if (!tarih) { showOperationFeedback('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.', 'error'); return; }
+    if (editHarvestForm.isVadeli && !vadeTarihi) { showOperationFeedback('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.', 'error'); return; }
     if (!Number.isFinite(kg) || kg <= 0 || !editHarvestForm.firma.trim() || !Number.isFinite(fiyat) || fiyat < 0) {
-      Alert.alert('Eksik Bilgi', 'KG, firma ve birim fiyat alanlarını geçerli şekilde doldurun.');
+      showOperationFeedback('Eksik Bilgi', 'KG, firma ve birim fiyat alanlarını geçerli şekilde doldurun.', 'error');
       return;
     }
     if (!Number.isFinite(tahsilat) || tahsilat < 0 || tahsilat > amounts.netTutar + 0.01) {
-      Alert.alert('Tahsilat Hatası', 'Tahsilat tutarı net alacak tutarından fazla olamaz.');
+      showOperationFeedback('Tahsilat Hatası', 'Tahsilat tutarı net alacak tutarından fazla olamaz.', 'error');
       return;
     }
     const producerName = isAdmin ? (editHarvestForm.producer.trim() || editingHarvest.producerName || editingHarvest.uretici || currentUser?.name || 'Üretici') : (editingHarvest.producerName || editingHarvest.uretici || currentUser?.name || 'Üretici');
@@ -864,10 +888,10 @@ export default function App() {
       if (!response.ok) throw new Error(data?.error || 'Hasat kaydı güncellenemedi.');
       setHarvestEditModalVisible(false);
       setEditingHarvest(null);
-      Alert.alert('Başarılı', 'Hasat kaydı güncellendi.');
+      showOperationFeedback('Başarılı', 'Hasat kaydı güncellendi.', 'success');
       await fetchData();
     } catch (error: any) {
-      Alert.alert('Hasat Düzenleme', error?.message || 'Hasat kaydı güncellenemedi.');
+      showOperationFeedback('Hasat Düzenleme', error?.message || 'Hasat kaydı güncellenemedi.', 'error');
     } finally {
       setLoading(false);
     }
@@ -877,7 +901,7 @@ export default function App() {
     if (!editingHarvest) return;
     const newTahsilat = parseMoney(editTahsilatVal);
     if (isNaN(newTahsilat) || newTahsilat < 0) {
-      Alert.alert('Hata', 'Lütfen geçerli bir tutar girin.');
+      showOperationFeedback('Hata', 'Lütfen geçerli bir tutar girin.', 'error');
       return;
     }
 
@@ -890,16 +914,16 @@ export default function App() {
       });
 
       if (res.ok) {
-        Alert.alert('Başarılı', 'Tahsilat tutarı güncellendi.');
+        showOperationFeedback('Başarılı', 'Tahsilat tutarı güncellendi.', 'success');
         setEditModalVisible(false);
         setEditingHarvest(null);
         await fetchData();
       } else {
         const errData = await res.json().catch(() => null);
-        Alert.alert('Hata', errData?.error || errData?.message || 'Tahsilat güncellenemedi.');
+        showOperationFeedback('Hata', errData?.error || errData?.message || 'Tahsilat güncellenemedi.', 'error');
       }
     } catch (e: any) {
-      Alert.alert('Bağlantı Hatası', e.message);
+      showOperationFeedback('Bağlantı Hatası', e.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
       setLoading(false);
     }
@@ -908,7 +932,7 @@ export default function App() {
   // Bahçe Kaydetme
   const handleSaveGarden = async () => {
     if (!gForm.name.trim() && !gForm.adaParsel.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen Bahçe Adı veya Ada/Parsel girin.');
+      showOperationFeedback('Eksik Bilgi', 'Lütfen bahçe adı veya ada/parsel girin.', 'error');
       return;
     }
     setLoading(true);
@@ -919,22 +943,22 @@ export default function App() {
         alan: gForm.alan.trim()
       });
       if (result.queued) {
-        Alert.alert('Çevrimdışı Kaydedildi', 'Bahçe kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        showOperationFeedback('Çevrimdışı Kaydedildi', 'Bahçe kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setGForm({ name: '', adaParsel: '', alan: '' });
         return;
       }
       const res = result.response;
 
       if (res.ok) {
-        Alert.alert('Başarılı', 'Bahçe eklendi.');
+        showOperationFeedback('Başarılı', 'Bahçe eklendi.', 'success');
         setGForm({ name: '', adaParsel: '', alan: '' });
         await fetchData();
       } else {
         const errData = await res.json().catch(() => null);
-        Alert.alert('Hata', errData?.error || errData?.message || 'Bahçe eklenemedi.');
+        showOperationFeedback('Hata', errData?.error || errData?.message || 'Bahçe eklenemedi.', 'error');
       }
     } catch (e: any) {
-      Alert.alert('Bağlantı Hatası', e.message);
+      showOperationFeedback('Bağlantı Hatası', e.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
       setLoading(false);
     }
@@ -942,37 +966,38 @@ export default function App() {
 
   // Gider Kaydetme
   const handleSaveExpense = async () => {
-    if (!eForm.tutar.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen tutar girin.');
+    const tutar = parseMoney(eForm.tutar);
+    if (!eForm.tutar.trim() || !Number.isFinite(tutar) || tutar <= 0) {
+      showOperationFeedback('Eksik Bilgi', 'Lütfen 0’dan büyük geçerli bir tutar girin.', 'error');
       return;
     }
     const tarih = toServerDate(eForm.date);
-    if (!tarih) { Alert.alert('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.'); return; }
+    if (!tarih) { showOperationFeedback('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.', 'error'); return; }
     setLoading(true);
     try {
       const result = await postOrQueue('/expenses', {
         tarih,
         kategori: eForm.kategori,
         aciklama: eForm.aciklama ? eForm.aciklama.trim() : '',
-        tutar: parseMoney(eForm.tutar)
+        tutar
       });
       if (result.queued) {
-        Alert.alert('Çevrimdışı Kaydedildi', 'Gider kaydı telefonda saklandı; internet gelince otomatik gönderilecek.');
+        showOperationFeedback('Çevrimdışı Kaydedildi', 'Gider kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setEForm({ ...eForm, aciklama: '', tutar: '' });
         return;
       }
       const res = result.response;
 
       if (res.ok) {
-        Alert.alert('Başarılı', 'Gider eklendi.');
+        showOperationFeedback('Başarılı', 'Gider eklendi.', 'success');
         setEForm({ ...eForm, aciklama: '', tutar: '' });
         await fetchData();
       } else {
         const errData = await res.json().catch(() => null);
-        Alert.alert('Hata', errData?.error || errData?.message || 'Gider eklenemedi.');
+        showOperationFeedback('Hata', errData?.error || errData?.message || 'Gider eklenemedi.', 'error');
       }
     } catch (e: any) {
-      Alert.alert('Bağlantı Hatası', e.message);
+      showOperationFeedback('Bağlantı Hatası', e.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1144,6 +1169,24 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
+        {operationFeedback && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => setOperationFeedback(null)}
+            style={[
+              styles.operationFeedback,
+              operationFeedback.type === 'error' && styles.operationFeedbackError,
+              operationFeedback.type === 'success' && styles.operationFeedbackSuccess
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.operationFeedbackTitle}>{operationFeedback.title}</Text>
+              <Text style={styles.operationFeedbackText}>{operationFeedback.message}</Text>
+            </View>
+            <Text style={styles.operationFeedbackClose}>×</Text>
+          </TouchableOpacity>
+        )}
+
         {/* TAB MENÜSÜ */}
         {!isDesktop && <View style={styles.navBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -1306,6 +1349,41 @@ export default function App() {
         </ScrollView>
           </View>
         </View>
+
+        <Modal
+          visible={Boolean(deleteConfirmation)}
+          transparent
+          animationType="fade"
+          onRequestClose={() => deleteConfirmation?.status !== 'deleting' && setDeleteConfirmation(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.deleteConfirmModal]}>
+              <Text style={styles.modalTitle}>{deleteConfirmation?.title || 'Kayıt'} silinsin mi?</Text>
+              <Text style={styles.formHelp}>Bu işlem geri alınamaz.</Text>
+              {deleteConfirmation?.status === 'error' && (
+                <View style={styles.deleteConfirmError}>
+                  <Text style={styles.deleteConfirmErrorText}>{deleteConfirmation.message}</Text>
+                </View>
+              )}
+              <View style={styles.modalBtnGroup}>
+                <TouchableOpacity
+                  disabled={deleteConfirmation?.status === 'deleting'}
+                  style={[styles.modalCancelBtn, deleteConfirmation?.status === 'deleting' && styles.buttonDisabled]}
+                  onPress={() => setDeleteConfirmation(null)}
+                >
+                  <Text style={styles.modalBtnText}>Vazgeç</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  disabled={deleteConfirmation?.status === 'deleting'}
+                  style={[styles.deleteConfirmButton, deleteConfirmation?.status === 'deleting' && styles.buttonDisabled]}
+                  onPress={confirmDelete}
+                >
+                  <Text style={styles.modalBtnText}>{deleteConfirmation?.status === 'deleting' ? 'Siliniyor…' : deleteConfirmation?.status === 'error' ? 'Tekrar Dene' : 'Sil'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* TAHSİLAT DÜZENLEME MODALI */}
         <Modal

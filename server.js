@@ -1110,13 +1110,15 @@ app.post('/api/expenses', requireAuth, idempotencyMiddleware, async (req, res) =
 
     const tarih = normalizeCalendarDate(req.body.tarih) || (req.body.tarih ? '' : todayServerDate());
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
+    const tutar = Number(String(req.body.tutar ?? '').replace(',', '.'));
+    if (!Number.isFinite(tutar) || tutar <= 0) return res.status(400).json({ error: 'Gider tutarı 0’dan büyük olmalıdır.' });
     const payload = {
       userId: req.auth.userId,
       userPhone: req.auth.phone,
       tarih,
       kategori: String(req.body.kategori || 'Diğer').trim(),
       aciklama: String(req.body.aciklama || '').trim(),
-      tutar: Number(req.body.tutar) || 0
+      tutar
     };
 
     const newExpense = new Expense(payload);

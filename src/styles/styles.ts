@@ -414,6 +414,163 @@ export const styles = StyleSheet.create({
     color: '#6c4f00',
     marginTop: 8
   },
+  sponsorBanner: {
+    backgroundColor: '#173F2E',
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#C9DCCB',
+    shadowColor: '#0B241A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 3
+  },
+  sponsorBannerPress: {
+    opacity: 0.96
+  },
+  sponsorBannerImage: {
+    width: '100%',
+    height: 148,
+    backgroundColor: '#285E43'
+  },
+  sponsorBannerFallback: {
+    height: 110,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    justifyContent: 'flex-end',
+    backgroundColor: '#245D42'
+  },
+  sponsorBannerFallbackMark: {
+    color: '#D7EEDB',
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: 0.4
+  },
+  sponsorBannerInfo: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF'
+  },
+  sponsorBannerMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6
+  },
+  sponsorBannerBadge: {
+    color: '#416C51',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '900',
+    letterSpacing: 0.8
+  },
+  sponsorBannerFirm: {
+    color: '#416C51',
+    fontSize: 12,
+    fontWeight: '700',
+    flexShrink: 1,
+    textAlign: 'right'
+  },
+  sponsorBannerTitle: {
+    color: '#173F2E',
+    fontSize: 18,
+    fontWeight: '800'
+  },
+  sponsorBannerText: {
+    color: '#557064',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4
+  },
+  sponsorBannerAction: {
+    color: '#246548',
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 9
+  },
+  bannerHelp: {
+    color: '#557064',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 8
+  },
+  bannerPreviewLabel: {
+    color: '#416C51',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 12,
+    marginBottom: 7
+  },
+  bannerListTitle: {
+    color: '#1B4332',
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 8,
+    marginBottom: 8
+  },
+  operationFeedback: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 18,
+    marginTop: 14,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#E7F2E9',
+    borderWidth: 1,
+    borderColor: '#BBDCC3'
+  },
+  operationFeedbackSuccess: {
+    backgroundColor: '#E7F2E9',
+    borderColor: '#BBDCC3'
+  },
+  operationFeedbackError: {
+    backgroundColor: '#FDECEC',
+    borderColor: '#F0C5C1'
+  },
+  operationFeedbackTitle: {
+    color: '#1B4332',
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 2
+  },
+  operationFeedbackText: {
+    color: '#456052',
+    fontSize: 13,
+    lineHeight: 18
+  },
+  operationFeedbackClose: {
+    color: '#456052',
+    fontSize: 24,
+    lineHeight: 26,
+    paddingHorizontal: 4
+  },
+  deleteConfirmModal: {
+    maxWidth: 440
+  },
+  deleteConfirmButton: {
+    backgroundColor: '#B23A3A',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8
+  },
+  deleteConfirmError: {
+    backgroundColor: '#FFF0EF',
+    borderWidth: 1,
+    borderColor: '#F0C5C1',
+    borderRadius: 9,
+    padding: 10,
+    marginTop: 4
+  },
+  deleteConfirmErrorText: {
+    color: '#9F3030',
+    fontSize: 13,
+    lineHeight: 18
+  },
   monthCard: {
     backgroundColor: '#eef7f1',
     borderRadius: 12,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View, TouchableOpacity } from 'react-native';
+import { Image, Linking, Text, View, TouchableOpacity } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
@@ -19,6 +19,57 @@ type DashboardProps = {
   onNavigate: (tab: 'harvest' | 'collections' | 'expense' | 'prices' | 'reports') => void;
 };
 
+const imageUrlOf = (value: unknown) => {
+  const url = String(value || '').trim();
+  return /^https?:\/\/\S+$/i.test(url) ? url : '';
+};
+
+const actionUrlOf = (ad: any) => {
+  const link = String(ad?.link || '').trim();
+  if (/^https?:\/\/\S+$/i.test(link)) return link;
+  const phone = String(ad?.telefon || '').replace(/[^0-9+]/g, '');
+  return phone ? `tel:${phone}` : '';
+};
+
+function SponsorBanner({ ad }: { ad: any }) {
+  const imageUrl = imageUrlOf(ad.gorselUrl);
+  const actionUrl = actionUrlOf(ad);
+  const title = String(ad.baslik || ad.firma || 'Sponsorlu içerik').trim();
+  const firm = String(ad.firma || '').trim();
+  const isAnnouncement = String(ad.kategori || '').toLocaleLowerCase('tr-TR') === 'duyuru';
+  const content = (
+    <>
+      {imageUrl ? (
+        <Image source={{ uri: imageUrl }} style={styles.sponsorBannerImage} resizeMode="cover" />
+      ) : (
+        <View style={styles.sponsorBannerFallback}>
+          <Text style={styles.sponsorBannerFallbackMark}>{firm || 'Çaylık'}</Text>
+        </View>
+      )}
+      <View style={styles.sponsorBannerInfo}>
+        <View style={styles.sponsorBannerMeta}>
+          <Text style={styles.sponsorBannerBadge}>{isAnnouncement ? 'DUYURU' : 'SPONSORLU'}</Text>
+          {!!firm && <Text style={styles.sponsorBannerFirm}>{firm}</Text>}
+        </View>
+        <Text style={styles.sponsorBannerTitle}>{title}</Text>
+        {!!ad.aciklama && <Text style={styles.sponsorBannerText}>{ad.aciklama}</Text>}
+        {!!actionUrl && <Text style={styles.sponsorBannerAction}>İncelemek için dokunun →</Text>}
+      </View>
+    </>
+  );
+
+  if (!actionUrl) return <View style={styles.sponsorBanner}>{content}</View>;
+  return (
+    <TouchableOpacity
+      accessibilityRole="link"
+      style={[styles.sponsorBanner, styles.sponsorBannerPress]}
+      onPress={() => { Linking.openURL(actionUrl).catch(() => undefined); }}
+    >
+      {content}
+    </TouchableOpacity>
+  );
+}
+
 export default function DashboardScreen({
   ads,
   harvests,
@@ -35,6 +86,10 @@ export default function DashboardScreen({
 }: DashboardProps) {
   return (
     <View>
+      {ads.filter((ad) => ad.slot === 'dashboard_top' || ad.slot === 'dashboard_middle').slice(0, 2).map((ad, index) => (
+        <SponsorBanner key={ad._id || index} ad={ad} />
+      ))}
+
       <Text style={styles.sectionTitle}>Hızlı İşlemler</Text>
 
       <View style={styles.quickActionGrid}>
@@ -61,15 +116,6 @@ export default function DashboardScreen({
       </View>
 
       <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Bu Sezonun Özeti</Text>
-
-      {ads.filter(a => a.slot === 'dashboard_top' || a.slot === 'dashboard_middle').slice(0, 2).map((ad, i) => (
-        <View key={ad._id || i} style={styles.adCard}>
-          <Text style={styles.adLabel}>SPONSORLU • {ad.kategori || 'REKLAM'}</Text>
-          <Text style={styles.adTitle}>{ad.baslik}</Text>
-          <Text style={styles.adText}>{ad.aciklama || ''}</Text>
-          <Text style={styles.adCompany}>📣 {ad.firma}{ad.telefon ? ` • ${ad.telefon}` : ''}</Text>
-        </View>
-      ))}
 
       <View style={styles.statsGrid}>
         <View style={[styles.statCard, { borderLeftColor: '#2a9d8f' }]}>
