@@ -188,9 +188,20 @@ const isAdminRequest = (req) => {
   return Boolean(auth?.role === 'admin');
 };
 
+// Mongoose varsayılan olarak bağlantı yokken sorguları bellekte bekletir. Bu, mobil
+// istemcide uzun süre "Lütfen bekleyiniz" ekranına yol açabildiği için API katmanında
+// bağlantı durumunu açıkça kontrol ediyoruz ve sorgu biriktirmeyi kapatıyoruz.
+mongoose.set('bufferCommands', false);
+const isDatabaseReady = () => mongoose.connection.readyState === 1;
+
+mongoose.connection.on('connected', () => console.log('MongoDB bağlantısı hazır.'));
+mongoose.connection.on('disconnected', () => console.warn('MongoDB bağlantısı kesildi.'));
+mongoose.connection.on('error', (err) => console.error('MongoDB bağlantı olayı hatası:', err.message));
+
 mongoose.connect(MONGO_URI, {
-  serverSelectionTimeoutMS: 10000,
+  serverSelectionTimeoutMS: 7000,
   socketTimeoutMS: 45000,
+  maxPoolSize: 10,
 })
   .then(() => console.log('✅ MongoDB bağlantısı başarılı.'))
   .catch((err) => console.error('❌ MongoDB bağlantı hatası:', err.message));
@@ -443,7 +454,28 @@ const buildUserFilter = (req) => {
 
 // --- ROUTES ---
 
-app.get('/api/health', (req, res) => res.json({ ok: true, version: '2026-08-12-pin-migration-v3', service: 'cay-ureticisi-takip' }));
+app.get('/api/health/live', (req, res) => res.json({ ok: true, service: 'cay-ureticisi-takip' }));
+app.get('/api/health', (req, res) => {
+  const databaseReady = isDatabaseReady();
+  return res.status(databaseReady ? 200 : 503).json({
+    ok: databaseReady,
+    database: databaseReady ? 'ready' : 'unavailable',
+    version: '2026-08-17-release-readiness',
+    service: 'cay-ureticisi-takip'
+  });
+});
+
+// Veritabanı çevrimdışıyken her isteğin Mongoose kuyruğunda zaman aşımına uğraması
+// yerine istemciye anında tekrar deneyebileceği anlaşılır bir 503 yanıtı verilir.
+app.use('/api', (req, res, next) => {
+  if (req.path === '/legal/privacy') return next();
+  if (isDatabaseReady()) return next();
+  return res.status(503).json({
+    error: 'Sunucu veritabanına bağlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.',
+    code: 'DATABASE_UNAVAILABLE',
+    retryAfterSeconds: 10
+  });
+});
 
 app.get('/', (req, res) => {
   res.send('🌱 Çay Takip Sistemi API Çalışıyor!');

@@ -28,7 +28,7 @@ Render'ın geçici diskine yedek alınmaz. Uzak yedekleme için kendi güvenli w
 ## Mağaza sürümü
 
 - Uygulama kimliği: `com.cryptomarsis.cayureticisi`
-- Sürüm: `1.0.6` / Android `versionCode: 6`
+- Sürüm: `1.0.8`. Android üretim sürüm numarasını EAS, `production` profiliyle her derlemede otomatik artırır.
 - Üretim paketi: `npx eas build --platform android --profile production`
 - `SUPPORT_EMAIL` girildikten ve API yeniden yayımlandıktan sonra gizlilik sayfası `https://<api-adresiniz>/privacy`, hesap silme sayfası `https://<api-adresiniz>/delete-account` olur. Bu iki adresi Play Console'da kullanın.
 

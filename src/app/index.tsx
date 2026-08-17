@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import { SymbolView } from 'expo-symbols';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
-import { API_URL, fetchWithTimeout } from '../services/api';
+import { API_TIMEOUTS, API_URL, fetchWithTimeout } from '../services/api';
 import { saveSession, getSession, clearSession } from '../services/session';
 import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
 import { UserSession, HarvestRecord, PaymentRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
@@ -174,7 +174,7 @@ export default function App() {
     } catch { return null; }
   };
 
-  const authFetch = async (url: string, options: RequestInit = {}, timeout = 60000) => {
+  const authFetch = async (url: string, options: RequestInit = {}, timeout = API_TIMEOUTS.default) => {
     const makeOptions = (user: UserSession) => ({ ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}), Authorization: `Bearer ${user.token}` } });
     if (!currentUser?.token) throw new Error('Oturum bulunamadı.');
     let res = await fetchWithTimeout(url, makeOptions(currentUser), timeout);
@@ -338,7 +338,7 @@ export default function App() {
         const due = new Date(Number(m[1]), Number(m[2])-1, Number(m[3] || 1), 9, 0, 0);
         const reminder = new Date(due.getTime() - 24*60*60*1000);
         if (reminder <= now || due <= now) continue;
-        await Notifications.scheduleNotificationAsync({ content:{ title:'⏰ Çay Takip - Vade Yaklaşıyor', body:`${h.firma || 'Fabrika'} için ${h.uretici || h.producerName || 'üretici'} kaydının vadesi ${formatDisplayDate(h.vadeTarihi)}.`, data:{type:'vade',harvestId:h._id}, sound:'default' }, trigger: reminder });
+        await Notifications.scheduleNotificationAsync({ content:{ title:'⏰ Çay Takip - Vade Yaklaşıyor', body:`${h.firma || 'Fabrika'} için ${h.uretici || h.producerName || 'üretici'} kaydının vadesi ${formatDisplayDate(h.vadeTarihi)}.`, data:{type:'vade',harvestId:h._id}, sound:'default', ...(Platform.OS === 'android' ? { channelId: 'cay-takip' } : {}) }, trigger: reminder });
       }
     } catch (e) { console.log('Vade bildirimi planlanamadı:', e); }
   };
@@ -487,7 +487,7 @@ export default function App() {
     try {
       const res = await fetchWithTimeout(`${API_URL}/auth/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: normalized, pin })
-      });
+      }, API_TIMEOUTS.authentication);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const error: any = new Error(data?.error || 'Giriş yapılamadı.');
@@ -503,7 +503,7 @@ export default function App() {
     const res = await fetchWithTimeout(`${API_URL}/users/profile`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone: normalized, name: name.trim(), pin })
-    });
+    }, API_TIMEOUTS.authentication);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const error: any = new Error(data?.error || 'Üretici profili kaydedilemedi.');

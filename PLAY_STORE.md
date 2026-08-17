@@ -56,7 +56,7 @@ Play Console'daki Veri Güvenliği formu, uygulamanın gerçek davranışına g�
 
 ## Bu sürümün teknik durumu
 
-- Yayın sürümü: `1.0.6` / Android `versionCode: 6`
+- Yayın sürümü: `1.0.8`. Android üretim sürüm numarası EAS tarafından her üretim derlemesinde otomatik artırılır.
 - Paket adı: `com.cryptomarsis.cayureticisi`
 - Telefon, mikrofon, kamera ve harici depolama izinleri istenmez.
 - SMS doğrulaması kullanılmaz. Telefon numarası + 6 haneli giriş şifresi kullanılır; aynı hesapta 5 hatalı denemeden sonra giriş 15 dakika kilitlenir.
