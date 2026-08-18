@@ -2,30 +2,32 @@ import React from 'react';
 import { Text, View, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import { styles } from '../styles/styles';
 import { formatTL, formatDisplayDate } from '../utils/format';
+import { AppIcon } from '../components/app-icon';
+import { IconHeading } from '../components/icon-heading';
 
 export default function GardensScreen(props: any) {
   const { gForm, gardens, calculatedGardenSummaries, handleDelete, handleSaveGarden, setGForm } = props;
   return (
 
             <View>
-              <Text style={styles.sectionTitle}>📊 BAHÇE BAZLI TOPLAM TOPLAMA VE KAZANÇ</Text>
+              <IconHeading icon="tree" title="BAHÇE BAZLI TOPLAM TOPLAMA VE KAZANÇ" />
               {calculatedGardenSummaries.length === 0 ? (
                 <Text style={styles.emptyText}>Henüz bahçelerden yapılmış bir hasat verisi bulunamadı.</Text>
               ) : (
                 calculatedGardenSummaries.map((g: any, idx: number) => (
                   <View key={idx} style={[styles.listItem, { borderLeftWidth: 4, borderLeftColor: '#1b4332' }]}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏡 {g.name}</Text>
-                      <Text style={styles.listSubText}>⚖️ Toplam Hasat: {g.toplamKg.toLocaleString('tr-TR')} KG</Text>
-                      <Text style={styles.listSubText}>💰 Net Alacak: {formatTL(g.toplamKazanc)}</Text>
-                      <Text style={styles.listSubText}>💵 Toplam Tahsilat: {formatTL(g.toplamTahsilat)}</Text>
+                      <Text style={styles.listTitle}>{g.name}</Text>
+                      <Text style={styles.listSubText}>Toplam Hasat: {g.toplamKg.toLocaleString('tr-TR')} KG</Text>
+                      <Text style={styles.listSubText}>Net Alacak: {formatTL(g.toplamKazanc)}</Text>
+                      <Text style={styles.listSubText}>Toplam Tahsilat: {formatTL(g.toplamTahsilat)}</Text>
                     </View>
                   </View>
                 ))
               )}
 
               <View style={[styles.formCard, { marginTop: 20 }]}>
-                <Text style={styles.formTitle}>🏡 YENİ BAHÇE TANIMLA</Text>
+                <IconHeading icon="tree" title="YENİ BAHÇE TANIMLA" compact />
 
                 <Text style={styles.label}>Bahçe Adı</Text>
                 <TextInput
@@ -52,7 +54,7 @@ export default function GardensScreen(props: any) {
                 />
 
                 <TouchableOpacity style={styles.submitBtn} onPress={handleSaveGarden}>
-                  <Text style={styles.submitBtnText}>💾 BAHÇEYİ KAYDET</Text>
+                  <View style={styles.submitBtnContent}><AppIcon name="content-save" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>BAHÇEYİ KAYDET</Text></View>
                 </TouchableOpacity>
               </View>
 
@@ -63,12 +65,12 @@ export default function GardensScreen(props: any) {
                 gardens.map((item: any, index: number) => (
                   <View key={item._id || index} style={styles.listItem}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.listTitle}>🏡 {item.name || 'İsimsiz Bahçe'}</Text>
-                      {item.adaParsel ? <Text style={styles.listSubText}>📍 Ada/Parsel: {item.adaParsel}</Text> : null}
-                      {item.alan ? <Text style={styles.listSubText}>📐 Alan: {item.alan}</Text> : null}
+                      <Text style={styles.listTitle}>{item.name || 'İsimsiz Bahçe'}</Text>
+                      {item.adaParsel ? <Text style={styles.listSubText}>Ada/Parsel: {item.adaParsel}</Text> : null}
+                      {item.alan ? <Text style={styles.listSubText}>Alan: {item.alan}</Text> : null}
                     </View>
                     <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('gardens', item._id, 'Bahçe')}>
-                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                      <View style={styles.actionBtnContent}><AppIcon name="trash-can-outline" size={15} color="#FFFFFF" /><Text style={styles.actionBtnText}>Sil</Text></View>
                     </TouchableOpacity>
                   </View>
                 ))

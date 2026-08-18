@@ -2,6 +2,8 @@ import React from 'react';
 import { Text, View, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import { styles } from '../styles/styles';
 import { formatTL, formatDisplayDate } from '../utils/format';
+import { AppIcon } from '../components/app-icon';
+import { IconHeading } from '../components/icon-heading';
 
 export default function ExpenseScreen(props: any) {
   const { eForm, expenses, handleDelete, handleSaveExpense, setEForm } = props;
@@ -9,7 +11,7 @@ export default function ExpenseScreen(props: any) {
 
             <View>
               <View style={styles.formCard}>
-                <Text style={styles.formTitle}>🧾 Gider Ekle</Text>
+                <IconHeading icon="receipt-text" title="Gider Ekle" compact />
                 <Text style={styles.formHelp}>Gider türünü ve tutarı yazıp kaydedin.</Text>
 
                 <Text style={styles.label}>Tarih (GG.AA.YYYY)</Text>
@@ -51,7 +53,7 @@ export default function ExpenseScreen(props: any) {
                 />
 
                 <TouchableOpacity style={styles.submitBtn} onPress={handleSaveExpense}>
-                  <Text style={styles.submitBtnText}>💾 GİDERİ KAYDET</Text>
+                  <View style={styles.submitBtnContent}><AppIcon name="content-save" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>GİDERİ KAYDET</Text></View>
                 </TouchableOpacity>
               </View>
 
@@ -65,11 +67,11 @@ export default function ExpenseScreen(props: any) {
                       <Text style={styles.listTitle}>
                         {item.kategori || 'Diğer'} - {formatTL(item.tutar)}
                       </Text>
-                      <Text style={styles.listSubText}>📅 {formatDisplayDate(item.tarih)}</Text>
-                      {item.aciklama ? <Text style={styles.listSubText}>📝 {item.aciklama}</Text> : null}
+                      <Text style={styles.listSubText}>Tarih: {formatDisplayDate(item.tarih)}</Text>
+                      {item.aciklama ? <Text style={styles.listSubText}>Not: {item.aciklama}</Text> : null}
                     </View>
                     <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('expenses', item._id, 'Gider')}>
-                      <Text style={styles.actionBtnText}>🗑️ Sil</Text>
+                      <View style={styles.actionBtnContent}><AppIcon name="trash-can-outline" size={15} color="#FFFFFF" /><Text style={styles.actionBtnText}>Sil</Text></View>
                     </TouchableOpacity>
                   </View>
                 ))

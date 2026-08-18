@@ -102,6 +102,40 @@ export const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16
   },
+  submitBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9
+  },
+  actionBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5
+  },
+  iconHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14
+  },
+  iconHeadingCompact: {
+    gap: 8,
+    marginBottom: 10
+  },
+  iconHeadingBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E7F4EC'
+  },
+  iconHeadingBadgeCompact: {
+    width: 32,
+    height: 32,
+    borderRadius: 11
+  },
   header: {
     backgroundColor: '#174E3A',
     paddingHorizontal: 16,
@@ -173,6 +207,56 @@ export const styles = StyleSheet.create({
   navTextActiveAdmin: {
     color: '#000000',
     fontWeight: 'bold'
+  },
+  mobileBottomNav: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E0E9E2',
+    paddingTop: 8,
+    paddingBottom: 10,
+    paddingHorizontal: 4,
+    shadowColor: '#173F2E',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -3 },
+    elevation: 10
+  },
+  mobileBottomNavItem: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    minHeight: 54
+  },
+  mobileBottomNavIcon: {
+    height: 33,
+    minWidth: 42,
+    borderRadius: 16.5,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  mobileBottomNavIconActive: {
+    backgroundColor: '#1F6B4F'
+  },
+  mobileBottomNavText: {
+    color: '#66786C',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  mobileBottomNavTextActive: {
+    color: '#174E3A',
+    fontWeight: '800'
+  },
+  statusLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4
   },
   content: {
     flex: 1,
@@ -268,7 +352,7 @@ export const styles = StyleSheet.create({
     marginRight: 11
   },
   desktopNavIconActive: {
-    backgroundColor: '#C8E4CF'
+    backgroundColor: '#1F6B4F'
   },
   desktopNavIconText: {
     color: '#E2F3E5',

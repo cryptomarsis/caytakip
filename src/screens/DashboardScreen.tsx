@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, Linking, Text, View, TouchableOpacity } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon, AppIconName } from '../components/app-icon';
 import { formatTL, formatDisplayDate, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
 
@@ -58,11 +58,11 @@ function SponsorBanner({ ad }: { ad: any }) {
 export default function DashboardScreen({ ads, harvests, totalKg, totalSales, totalPay, pendingCollection, totalExp, netProfit, openPaymentForHarvest, openHarvestEditModal, handleDelete, onNavigate }: DashboardProps) {
   const pendingCount = harvests.filter((item) => remainingTotalOf(item) > 0.01).length;
   const quickActions = [
-    { tab: 'harvest' as const, label: 'Hasat Ekle', detail: 'Yeni satış kaydı', primary: true, icon: { ios: 'leaf.fill', android: 'energy_savings_leaf', web: 'energy_savings_leaf' }, tint: '#FFFFFF', background: 'rgba(255,255,255,0.18)' },
-    { tab: 'collections' as const, label: 'Tahsilat Ekle', detail: 'Ödeme girişini kaydet', icon: { ios: 'creditcard.fill', android: 'payments', web: 'payments' }, tint: '#1F6B4F', background: '#E7F4EC' },
-    { tab: 'receivables' as const, label: 'Alacaklar', detail: 'Bekleyen ödemeleri gör', icon: { ios: 'calendar.badge.clock', android: 'event_note', web: 'event_note' }, tint: '#9A6515', background: '#FFF3D7' },
-    { tab: 'expense' as const, label: 'Gider Ekle', detail: 'Masrafı kaydet', icon: { ios: 'receipt', android: 'receipt_long', web: 'receipt_long' }, tint: '#2B5E8C', background: '#EAF3FB' },
-    { tab: 'prices' as const, label: 'Fabrika Fiyatları', detail: 'Güncel fiyatları karşılaştır', icon: { ios: 'building.2.fill', android: 'factory', web: 'factory' }, tint: '#6D4E9B', background: '#F2ECFA' },
+    { tab: 'harvest' as const, label: 'Hasat Ekle', detail: 'Yeni satış kaydı', primary: true, icon: 'leaf' as AppIconName, tint: '#FFFFFF', background: 'rgba(255,255,255,0.18)' },
+    { tab: 'collections' as const, label: 'Tahsilat Ekle', detail: 'Ödeme girişini kaydet', icon: 'cash-multiple' as AppIconName, tint: '#1F6B4F', background: '#E7F4EC' },
+    { tab: 'receivables' as const, label: 'Alacaklar', detail: 'Bekleyen ödemeleri gör', icon: 'calendar-clock' as AppIconName, tint: '#9A6515', background: '#FFF3D7' },
+    { tab: 'expense' as const, label: 'Gider Ekle', detail: 'Masrafı kaydet', icon: 'receipt-text' as AppIconName, tint: '#2B5E8C', background: '#EAF3FB' },
+    { tab: 'prices' as const, label: 'Fabrika Fiyatları', detail: 'Güncel fiyatları karşılaştır', icon: 'factory' as AppIconName, tint: '#6D4E9B', background: '#F2ECFA' },
   ];
 
   return (
@@ -71,7 +71,7 @@ export default function DashboardScreen({ ads, harvests, totalKg, totalSales, to
       {harvests.length === 0 && (
         <View style={styles.gettingStartedCard}>
           <View style={styles.gettingStartedHead}>
-            <View style={styles.gettingStartedIcon}><SymbolView name={{ ios: 'hand.thumbsup.fill', android: 'waving_hand', web: 'waving_hand' }} size={22} tintColor="#1F6B4F" /></View>
+            <View style={styles.gettingStartedIcon}><AppIcon name="hand-wave" size={22} color="#1F6B4F" /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.gettingStartedTitle}>Başlamak çok kolay</Text>
               <Text style={styles.gettingStartedText}>İlk kaydınızı birkaç dakikada tamamlayabilirsiniz.</Text>
@@ -95,7 +95,7 @@ export default function DashboardScreen({ ads, harvests, totalKg, totalSales, to
             onPress={() => onNavigate(action.tab)}
           >
             <View style={[styles.quickActionIconWrap, action.primary && styles.quickActionPrimaryIconWrap, { backgroundColor: action.background }]}>
-              <SymbolView name={action.icon as any} size={action.primary ? 28 : 24} tintColor={action.tint} />
+              <AppIcon name={action.icon} size={action.primary ? 28 : 24} color={action.tint} />
             </View>
             <View style={styles.quickActionCopy}>
               <Text style={[styles.quickActionText, action.primary && styles.quickActionPrimaryText]}>{action.label}</Text>
@@ -112,7 +112,7 @@ export default function DashboardScreen({ ads, harvests, totalKg, totalSales, to
         onPress={() => onNavigate(pendingCollection > 0 ? 'collections' : 'history')}
       >
         <View style={[styles.dashboardNoticeIcon, pendingCollection <= 0 && styles.dashboardNoticeIconPositive]}>
-          <SymbolView name={{ ios: pendingCollection > 0 ? 'clock.badge.exclamationmark' : 'checkmark.circle.fill', android: pendingCollection > 0 ? 'pending_actions' : 'check_circle', web: pendingCollection > 0 ? 'pending_actions' : 'check_circle' }} size={22} tintColor={pendingCollection > 0 ? '#9A6515' : '#237044'} />
+          <AppIcon name={pendingCollection > 0 ? 'clock-alert-outline' : 'check-circle'} size={22} color={pendingCollection > 0 ? '#9A6515' : '#237044'} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.dashboardNoticeTitle}>{pendingCollection > 0 ? `${pendingCount} kayıtta tahsilat bekliyor` : 'Bekleyen tahsilat yok'}</Text>

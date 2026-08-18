@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
-import { SymbolView } from 'expo-symbols';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
+import { AppIcon, AppIconName } from '../components/app-icon';
 import { API_TIMEOUTS, API_URL, fetchWithTimeout } from '../services/api';
 import { saveSession, getSession, clearSession } from '../services/session';
 import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
@@ -118,25 +118,25 @@ export default function App() {
 
   const isAdmin = currentUser?.role === 'admin';
   const desktopMenuItems = [
-    { group: 'GENEL', tab: 'dashboard' as const, icon: { ios: 'house.fill', android: 'home', web: 'home' }, label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
-    { group: 'GENEL', tab: 'harvest' as const, icon: { ios: 'leaf.fill', android: 'energy_savings_leaf', web: 'energy_savings_leaf' }, label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
-    { group: 'GENEL', tab: 'history' as const, icon: { ios: 'clock.arrow.circlepath', android: 'history', web: 'history' }, label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
-    { group: 'ÖDEMELER', tab: 'collections' as const, icon: { ios: 'creditcard.fill', android: 'payments', web: 'payments' }, label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
-    { group: 'ÖDEMELER', tab: 'receivables' as const, icon: { ios: 'calendar.badge.clock', android: 'event_note', web: 'event_note' }, label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
-    { group: 'ÖDEMELER', tab: 'expense' as const, icon: { ios: 'receipt', android: 'receipt_long', web: 'receipt_long' }, label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
-    { group: 'TAKİP', tab: 'gardens' as const, icon: { ios: 'tree.fill', android: 'yard', web: 'yard' }, label: 'Bahçeler', helper: 'Bahçe bilgileri' },
-    { group: 'TAKİP', tab: 'prices' as const, icon: { ios: 'building.2.fill', android: 'factory', web: 'factory' }, label: 'Fabrika Fiyatları', helper: 'Güncel fiyat karşılaştırması' },
-    { group: 'TAKİP', tab: 'reports' as const, icon: { ios: 'chart.bar.fill', android: 'bar_chart', web: 'bar_chart' }, label: 'Raporlar', helper: 'PDF, Excel ve analizler' },
-    { group: 'HESAP', tab: 'more' as const, icon: { ios: 'square.grid.2x2.fill', android: 'apps', web: 'apps' }, label: 'Diğer', helper: 'Tüm bölümlere kısa yol' },
-    { group: 'HESAP', tab: 'settings' as const, icon: { ios: 'gearshape.fill', android: 'settings', web: 'settings' }, label: 'Ayarlar', helper: 'Şifre ve hesap işlemleri' },
-    ...(isAdmin ? [{ group: 'YÖNETİM', tab: 'admin' as const, icon: { ios: 'person.badge.key.fill', android: 'admin_panel_settings', web: 'admin_panel_settings' }, label: 'Yönetim', helper: 'Yönetici paneli' }] : []),
+    { group: 'GENEL', tab: 'dashboard' as const, icon: 'home-variant' as AppIconName, label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
+    { group: 'GENEL', tab: 'harvest' as const, icon: 'leaf' as AppIconName, label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
+    { group: 'GENEL', tab: 'history' as const, icon: 'history' as AppIconName, label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
+    { group: 'ÖDEMELER', tab: 'collections' as const, icon: 'cash-multiple' as AppIconName, label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
+    { group: 'ÖDEMELER', tab: 'receivables' as const, icon: 'calendar-clock' as AppIconName, label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
+    { group: 'ÖDEMELER', tab: 'expense' as const, icon: 'receipt-text' as AppIconName, label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
+    { group: 'TAKİP', tab: 'gardens' as const, icon: 'tree' as AppIconName, label: 'Bahçeler', helper: 'Bahçe bilgileri' },
+    { group: 'TAKİP', tab: 'prices' as const, icon: 'factory' as AppIconName, label: 'Fabrika Fiyatları', helper: 'Güncel fiyat karşılaştırması' },
+    { group: 'TAKİP', tab: 'reports' as const, icon: 'chart-box-outline' as AppIconName, label: 'Raporlar', helper: 'PDF, Excel ve analizler' },
+    { group: 'HESAP', tab: 'more' as const, icon: 'dots-grid' as AppIconName, label: 'Diğer', helper: 'Tüm bölümlere kısa yol' },
+    { group: 'HESAP', tab: 'settings' as const, icon: 'cog-outline' as AppIconName, label: 'Ayarlar', helper: 'Şifre ve hesap işlemleri' },
+    ...(isAdmin ? [{ group: 'YÖNETİM', tab: 'admin' as const, icon: 'shield-account-outline' as AppIconName, label: 'Yönetim', helper: 'Yönetici paneli' }] : []),
   ];
   const mobileNavItems = [
-    { tab: 'dashboard' as const, label: 'Ana Sayfa', icon: { ios: 'house.fill', android: 'home', web: 'home' } },
-    { tab: 'harvest' as const, label: 'Hasat Ekle', icon: { ios: 'leaf.fill', android: 'energy_savings_leaf', web: 'energy_savings_leaf' } },
-    { tab: 'collections' as const, label: 'Ödeme Al', icon: { ios: 'creditcard.fill', android: 'payments', web: 'payments' } },
-    { tab: 'receivables' as const, label: 'Alacaklar', icon: { ios: 'calendar.badge.clock', android: 'event_note', web: 'event_note' } },
-    { tab: 'more' as const, label: 'Diğer', icon: { ios: 'square.grid.2x2.fill', android: 'apps', web: 'apps' } },
+    { tab: 'dashboard' as const, label: 'Ana Sayfa', icon: 'home-variant' as AppIconName },
+    { tab: 'harvest' as const, label: 'Hasat Ekle', icon: 'leaf' as AppIconName },
+    { tab: 'collections' as const, label: 'Ödeme Al', icon: 'cash-multiple' as AppIconName },
+    { tab: 'receivables' as const, label: 'Alacaklar', icon: 'calendar-clock' as AppIconName },
+    { tab: 'more' as const, label: 'Diğer', icon: 'dots-grid' as AppIconName },
   ];
   const activeDesktopMenu = desktopMenuItems.find((item) => item.tab === activeTab);
 
@@ -1217,7 +1217,7 @@ export default function App() {
                         onPress={() => setActiveTab(item.tab)}
                       >
                         <View style={[styles.desktopNavIcon, active && styles.desktopNavIconActive]}>
-                          <SymbolView name={item.icon as any} size={19} tintColor={active ? '#FFFFFF' : '#B9D5C0'} />
+                          <AppIcon name={item.icon} size={20} color={active ? '#FFFFFF' : '#B9D5C0'} />
                         </View>
                         <View style={styles.desktopNavCopy}>
                           <Text style={[styles.desktopNavText, active && styles.desktopNavTextActive]}>{item.label}</Text>
@@ -1232,8 +1232,18 @@ export default function App() {
               <View style={styles.desktopSidebarFooter}>
                 <Text style={styles.desktopFooterName}>{currentUser.name}</Text>
                 <Text style={styles.desktopFooterMeta}>{isAdmin ? 'Yönetici hesabı' : 'Üretici hesabı'}</Text>
-                {pendingSyncCount > 0 && <Text style={styles.desktopFooterSync}>⏳ {pendingSyncCount} kayıt gönderilecek</Text>}
-                {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={styles.desktopFooterWarning}>⚠ {failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
+                {pendingSyncCount > 0 && (
+                  <View style={styles.statusLine}>
+                    <AppIcon name="cloud-upload-outline" size={15} color="#C8E4CF" />
+                    <Text style={styles.desktopFooterSync}>{pendingSyncCount} kayıt gönderilecek</Text>
+                  </View>
+                )}
+                {failedSyncCount > 0 && (
+                  <TouchableOpacity onPress={manageFailedOfflineRequests} style={styles.statusLine}>
+                    <AppIcon name="alert-circle-outline" size={15} color="#FFD39C" />
+                    <Text style={styles.desktopFooterWarning}>{failedSyncCount} kayıt için işlem gerekli</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           )}
@@ -1248,9 +1258,17 @@ export default function App() {
               {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : <>Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}</>}
             </Text>
             {pendingSyncCount > 0 && (
-              <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>⏳ {pendingSyncCount} kayıt senkronizasyon bekliyor</Text>
+              <View style={styles.statusLine}>
+                <AppIcon name="cloud-upload-outline" size={15} color="#46735A" />
+                <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>{pendingSyncCount} kayıt senkronizasyon bekliyor</Text>
+              </View>
             )}
-            {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={styles.headerWarning}>⚠️ {failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
+            {failedSyncCount > 0 && (
+              <TouchableOpacity onPress={manageFailedOfflineRequests} style={styles.statusLine}>
+                <AppIcon name="alert-circle-outline" size={16} color="#A64B19" />
+                <Text style={styles.headerWarning}>{failedSyncCount} kayıt için işlem gerekli</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <TouchableOpacity style={[styles.logoutBtn, isDesktop && styles.desktopLogoutBtn]} onPress={handleLogout}>
             <Text style={styles.logoutBtnText}>Çıkış</Text>
@@ -1274,28 +1292,6 @@ export default function App() {
             <Text style={styles.operationFeedbackClose}>×</Text>
           </TouchableOpacity>
         )}
-
-        {/* TAB MENÜSÜ */}
-        {!isDesktop && <View style={styles.navBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navBarContent}>
-            {mobileNavItems.map((item) => {
-              const active = activeTab === item.tab;
-              return (
-                <TouchableOpacity
-                  key={item.tab}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={item.label}
-                  style={[styles.navItem, active && styles.navItemActive]}
-                  onPress={() => setActiveTab(item.tab)}
-                >
-                  <SymbolView name={item.icon as any} size={18} tintColor={active ? '#174E3A' : '#D9E9DE'} />
-                  <Text style={[styles.navText, active && styles.navTextActive]}>{item.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>}
 
         {/* İÇERİK ALANI */}
         <ScrollView
@@ -1435,6 +1431,28 @@ export default function App() {
             />
           )}
         </ScrollView>
+        {!isDesktop && (
+          <View style={styles.mobileBottomNav}>
+            {mobileNavItems.map((item) => {
+              const active = activeTab === item.tab;
+              return (
+                <TouchableOpacity
+                  key={item.tab}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={item.label}
+                  style={styles.mobileBottomNavItem}
+                  onPress={() => setActiveTab(item.tab)}
+                >
+                  <View style={[styles.mobileBottomNavIcon, active && styles.mobileBottomNavIconActive]}>
+                    <AppIcon name={item.icon} size={22} color={active ? '#FFFFFF' : '#6D8174'} />
+                  </View>
+                  <Text numberOfLines={1} style={[styles.mobileBottomNavText, active && styles.mobileBottomNavTextActive]}>{item.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
           </View>
         </View>
 
@@ -1483,7 +1501,7 @@ export default function App() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, { maxHeight: '90%' }]}>
               <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                <Text style={styles.modalTitle}>✏️ Hasat Kaydını Düzenle</Text>
+                <Text style={styles.modalTitle}>Hasat Kaydını Düzenle</Text>
                 <Text style={styles.formHelp}>Yanlış girilen bilgileri düzeltip kaydedin.</Text>
 
                 <Text style={styles.label}>Tarih (GG.AA.YYYY)</Text>
