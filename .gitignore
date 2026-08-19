@@ -4,6 +4,7 @@ node_modules/
 !.env.example
 .expo/
 .idea/
+.gradle-user/
 build/
 dist/
 release/

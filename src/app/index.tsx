@@ -338,7 +338,19 @@ export default function App() {
         const due = new Date(Number(m[1]), Number(m[2])-1, Number(m[3] || 1), 9, 0, 0);
         const reminder = new Date(due.getTime() - 24*60*60*1000);
         if (reminder <= now || due <= now) continue;
-        await Notifications.scheduleNotificationAsync({ content:{ title:'⏰ Çay Takip - Vade Yaklaşıyor', body:`${h.firma || 'Fabrika'} için ${h.uretici || h.producerName || 'üretici'} kaydının vadesi ${formatDisplayDate(h.vadeTarihi)}.`, data:{type:'vade',harvestId:h._id}, sound:'default', ...(Platform.OS === 'android' ? { channelId: 'cay-takip' } : {}) }, trigger: reminder });
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '⏰ Çaylık - Vade Yaklaşıyor',
+            body: `${h.firma || 'Fabrika'} için ${h.uretici || h.producerName || 'üretici'} kaydının vadesi ${formatDisplayDate(h.vadeTarihi)}.`,
+            data: { type: 'vade', harvestId: h._id },
+            sound: 'default',
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: reminder,
+            ...(Platform.OS === 'android' ? { channelId: 'cay-takip' } : {}),
+          },
+        });
       }
     } catch (e) { console.log('Vade bildirimi planlanamadı:', e); }
   };
