@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppIcon, AppIconName } from '../components/app-icon';
@@ -701,18 +702,28 @@ export default function App() {
       }
 
       const result = source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7, base64: true, exif: false })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7, base64: true, exif: false });
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7, base64: false, exif: false })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7, base64: false, exif: false });
       if (result.canceled) return;
 
       const asset = result.assets?.[0];
-      if (!asset?.base64) throw new Error('Fotoğraf hazırlanamadı. Lütfen tekrar deneyin.');
+      if (!asset?.uri) throw new Error('Fotoğraf hazırlanamadı. Lütfen tekrar deneyin.');
+
+      // Galerideki HEIC/PNG gibi biçimleri ve çok büyük fotoğrafları, sunucunun
+      // güvenle okuyabileceği küçük bir JPEG'e dönüştürür. Böylece hem Android
+      // hem iOS'ta aynı veri biçimi gönderilir.
+      const preparedImage = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 1600 } }],
+        { compress: 0.72, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+      if (!preparedImage.base64) throw new Error('Fotoğraf hazırlanamadı. Lütfen tekrar deneyin.');
 
       setReceiptBusy(true);
       setReceiptNotice('Fiş okunuyor...');
       const response = await authFetch(`${API_URL}/receipts/parse`, {
         method: 'POST',
-        body: JSON.stringify({ imageBase64: asset.base64, mimeType: asset.mimeType || 'image/jpeg' })
+        body: JSON.stringify({ imageBase64: preparedImage.base64, mimeType: 'image/jpeg' })
       }, API_TIMEOUTS.receipt);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Fiş okunamadı.');

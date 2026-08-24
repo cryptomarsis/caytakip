@@ -845,6 +845,12 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       console.error('RECEIPT PARSE ERROR:', response.status, payload?.error?.message || 'Unknown response');
+      if (response.status === 401 || response.status === 403) {
+        return res.status(503).json({ error: 'Fiş okuma hizmeti yapılandırması doğrulanamadı. Lütfen daha sonra tekrar deneyin.' });
+      }
+      if (response.status === 429) {
+        return res.status(429).json({ error: 'Fiş okuma limiti doldu. Lütfen biraz sonra tekrar deneyin.' });
+      }
       return res.status(502).json({ error: 'Fiş okunamadı. Lütfen daha net bir fotoğrafla yeniden deneyin.' });
     }
 
