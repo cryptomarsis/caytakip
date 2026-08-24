@@ -4,13 +4,45 @@ import { styles } from '../styles/styles';
 import { calculateAgriculturalDeductions, formatTL } from '../utils/format';
 
 export default function HarvestScreen(props: any) {
-  const { currentUser, hForm, handleSaveHarvest, setHForm } = props;
+  const {
+    currentUser,
+    hForm,
+    handleSaveHarvest,
+    setHForm,
+    onPickReceipt,
+    receiptBusy,
+    receiptNotice,
+  } = props;
   const [showDetails, setShowDetails] = useState(false);
   const amounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat);
 
   return <View style={styles.formCard}>
     <Text style={styles.formTitle}>Yeni Hasat Kaydı</Text>
     <Text style={styles.formHelp}>Brüt fiyatı yazın; %2 kesinti ve net alacak otomatik hesaplanır.</Text>
+
+    <View style={{ backgroundColor: '#edf7f0', borderRadius: 12, padding: 12, marginBottom: 14 }}>
+      <Text style={{ color: '#1b4332', fontWeight: '800', marginBottom: 3 }}>Fişten bilgileri ekle</Text>
+      <Text style={[styles.listSubText, { color: '#4e6758', marginBottom: 10 }]}>
+        Fiş fotoğrafını çekin veya galeriden seçin. Bilgiler kaydedilmeden önce formda gösterilir.
+      </Text>
+      <View style={{ flexDirection: 'row' }}>
+        <TouchableOpacity
+          disabled={receiptBusy}
+          onPress={() => onPickReceipt?.('camera')}
+          style={{ flex: 1, borderWidth: 1, borderColor: '#2b6f50', paddingVertical: 10, borderRadius: 10, alignItems: 'center', marginRight: 8, opacity: receiptBusy ? 0.55 : 1 }}
+        >
+          <Text style={{ color: '#1b4332', fontWeight: '700' }}>{receiptBusy ? 'Fiş okunuyor...' : 'Fotoğraf Çek'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          disabled={receiptBusy}
+          onPress={() => onPickReceipt?.('library')}
+          style={{ flex: 1, borderWidth: 1, borderColor: '#2b6f50', paddingVertical: 10, borderRadius: 10, alignItems: 'center', opacity: receiptBusy ? 0.55 : 1 }}
+        >
+          <Text style={{ color: '#1b4332', fontWeight: '700' }}>Galeriden Seç</Text>
+        </TouchableOpacity>
+      </View>
+      {!!receiptNotice && <Text style={{ color: '#24553c', fontSize: 13, marginTop: 10 }}>{receiptNotice}</Text>}
+    </View>
 
     <Text style={styles.label}>Miktar (KG) *</Text>
     <TextInput style={styles.input} value={hForm.kg} onChangeText={(t) => setHForm({ ...hForm, kg: t })} placeholder="Örn: 1000" keyboardType="decimal-pad" />

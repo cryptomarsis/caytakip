@@ -38,23 +38,52 @@ function BannerCard({ ad, preview = false }: { ad: any; preview?: boolean }) {
 }
 
 export default function AdminScreen(props: any) {
-  const { adForm, ads, handleDelete, handleSaveAd, setAdForm, totalKg, totalPay, totalSales, currentUser } = props;
+  const { adForm, ads, handleDelete, handleSaveAd, setAdForm, currentUser } = props;
   const [users, setUsers] = useState<any[]>([]);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
+  const [summary, setSummary] = useState({ producerCount: 0, totalKg: 0, totalSales: 0, totalPaid: 0, remaining: 0 });
+  const [loadError, setLoadError] = useState('');
 
-  const loadUsers = async () => {
+  const loadAdminData = async (requestedPage = page) => {
     if (!currentUser?.token) return;
+    setLoadingUsers(true);
+    setLoadError('');
     try {
-      const res = await fetchWithTimeout(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${currentUser.token}` } });
-      const data = await res.json();
-      if (res.ok) setUsers(Array.isArray(data) ? data : []);
-    } catch {
-      // Kullanıcı listesi geçici olarak yüklenemezse mevcut ekran kullanılabilir kalır.
+      const producerUrl = `${API_URL}/admin/producers?page=${requestedPage}&limit=25&search=${encodeURIComponent(query.trim())}`;
+      const [usersResponse, summaryResponse] = await Promise.all([
+        fetchWithTimeout(producerUrl, { headers: { Authorization: `Bearer ${currentUser.token}` } }),
+        fetchWithTimeout(`${API_URL}/admin/summary`, { headers: { Authorization: `Bearer ${currentUser.token}` } })
+      ]);
+      const [usersData, summaryData] = await Promise.all([
+        usersResponse.json().catch(() => ({})),
+        summaryResponse.json().catch(() => ({}))
+      ]);
+      if (!usersResponse.ok) throw new Error(usersData.error || 'Üretici listesi yüklenemedi.');
+      if (!summaryResponse.ok) throw new Error(summaryData.error || 'Yönetici toplamları yüklenemedi.');
+      setUsers(Array.isArray(usersData.items) ? usersData.items : []);
+      setPagination(usersData.pagination || { page: requestedPage, total: 0, totalPages: 1 });
+      setSummary({
+        producerCount: Number(summaryData?.producerCount || 0),
+        totalKg: Number(summaryData?.totalKg || 0),
+        totalSales: Number(summaryData?.totalSales || 0),
+        totalPaid: Number(summaryData?.totalPaid || 0),
+        remaining: Number(summaryData?.remaining || 0)
+      });
+    } catch (error: any) {
+      setLoadError(error?.message || 'Yönetici bilgileri yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin.');
+    } finally {
+      setLoadingUsers(false);
     }
   };
 
-  useEffect(() => { loadUsers(); }, [currentUser?.token]);
+  useEffect(() => {
+    const timer = setTimeout(() => { loadAdminData(page); }, query ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [currentUser?.token, page, query]);
 
   const toggleUser = async (user: any, active: boolean) => {
     setBusy(true);
@@ -68,7 +97,7 @@ export default function AdminScreen(props: any) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'İşlem başarısız.');
       }
-      await loadUsers();
+      await loadAdminData(page);
     } catch (error: any) {
       Alert.alert('Hata', error.message);
     } finally {
@@ -87,7 +116,6 @@ export default function AdminScreen(props: any) {
     }
   };
 
-  const filtered = users.filter((user) => `${user.name || ''} ${user.phone || ''}`.toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR')));
   const previewAd = {
     ...adForm,
     firma: adForm.firma || 'Marka adı',
@@ -99,25 +127,39 @@ export default function AdminScreen(props: any) {
     <View>
       <Text style={styles.sectionTitle}>YÖNETİCİ PANELİ</Text>
       <View style={styles.statsGrid}>
-        <View style={styles.statCard}><Text style={styles.statValue}>{users.length}</Text><Text style={styles.statLabel}>Üretici</Text></View>
-        <View style={styles.statCard}><Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Toplam KG</Text></View>
-        <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalSales)}</Text><Text style={styles.statLabel}>Net Satış</Text></View>
-        <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalPay)}</Text><Text style={styles.statLabel}>Tahsilat</Text></View>
+        <View style={styles.statCard}><Text style={styles.statValue}>{Number(summary.producerCount || 0).toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Üretici</Text></View>
+        <View style={styles.statCard}><Text style={styles.statValue}>{Number(summary.totalKg || 0).toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Toplam KG</Text></View>
+        <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(summary.totalSales || 0)}</Text><Text style={styles.statLabel}>Net Satış</Text></View>
+        <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(summary.totalPaid || 0)}</Text><Text style={styles.statLabel}>Tahsilat</Text></View>
       </View>
+      {!!loadError && <Text style={{ color: '#B42318', marginTop: 8, fontWeight: '700' }}>{loadError}</Text>}
 
       <View style={styles.formCard}>
         <Text style={styles.formTitle}>Üretici Yönetimi</Text>
-        <TextInput style={styles.input} value={query} onChangeText={setQuery} placeholder="Ad soyad veya telefon ara" />
-        {filtered.length === 0 ? <Text style={styles.emptyText}>Üretici bulunamadı.</Text> : filtered.map((user) => (
+        <Text style={styles.listSubText}>Toplam {Number(pagination.total || 0).toLocaleString('tr-TR')} üretici. Arama sonuçları sayfalı olarak yüklenir.</Text>
+        <TextInput style={styles.input} value={query} onChangeText={(value) => { setQuery(value); setPage(1); }} placeholder="Ad soyad veya telefon ara" />
+        {loadingUsers ? <Text style={styles.emptyText}>Üreticiler yükleniyor...</Text> : users.length === 0 ? <Text style={styles.emptyText}>Üretici bulunamadı.</Text> : users.map((user) => (
           <View key={user._id} style={styles.listItem}>
             <View style={{ flex: 1 }}>
               <Text style={styles.listTitle}>{user.name || 'İsimsiz üretici'}</Text>
               <Text style={styles.listSubText}>{user.phone} • {user.harvestCount || 0} hasat • {(user.totalKg || 0).toLocaleString('tr-TR')} KG</Text>
               <Text style={styles.listSubText}>Satış: {formatTL(user.totalSales || 0)} • Kalan: {formatTL(user.remaining || 0)}</Text>
             </View>
-            <Switch value={user.active !== false} onValueChange={(active) => toggleUser(user, active)} disabled={busy} />
+            <Switch value={user.active !== false} onValueChange={(active) => toggleUser(user, active)} disabled={busy || loadingUsers} />
           </View>
         ))}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1, marginRight: 8, opacity: page <= 1 ? 0.45 : 1 }]} disabled={page <= 1 || loadingUsers} onPress={() => setPage(Math.max(1, page - 1))}>
+            <Text style={styles.secondaryBtnText}>ÖNCEKİ</Text>
+          </TouchableOpacity>
+          <Text style={[styles.listSubText, { textAlign: 'center' }]}>Sayfa {pagination.page || page} / {pagination.totalPages || 1}</Text>
+          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1, marginLeft: 8, opacity: page >= Number(pagination.totalPages || 1) ? 0.45 : 1 }]} disabled={page >= Number(pagination.totalPages || 1) || loadingUsers} onPress={() => setPage(page + 1)}>
+            <Text style={styles.secondaryBtnText}>SONRAKİ</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={styles.secondaryBtn} disabled={loadingUsers} onPress={() => loadAdminData(page)}>
+          <Text style={styles.secondaryBtnText}>LİSTEYİ YENİLE</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.formCard}>

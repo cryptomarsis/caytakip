@@ -29,7 +29,9 @@ const corsOptions = {
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '1mb' }));
+// Fiş görselleri yalnızca okunma isteği sırasında bellekte tutulur. Bu sınır,
+// normal API isteklerini büyütmeden küçük bir fiş fotoğrafının gönderilmesine izin verir.
+app.use(express.json({ limit: '6mb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -88,6 +90,9 @@ const NETGSM_PASSWORD = String(process.env.NETGSM_PASSWORD || '').trim();
 const NETGSM_HEADER = String(process.env.NETGSM_HEADER || '').trim();
 const BACKUP_WEBHOOK_URL = String(process.env.BACKUP_WEBHOOK_URL || '').trim();
 const BACKUP_ENCRYPTION_KEY = String(process.env.BACKUP_ENCRYPTION_KEY || '').trim();
+const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
+const OPENAI_RECEIPT_MODEL = String(process.env.OPENAI_MODEL || 'gpt-5-mini').trim();
+const MAX_RECEIPT_IMAGE_BYTES = 4 * 1024 * 1024;
 
 if (isProduction) {
   if (JWT_SECRET.length < 32) throw new Error('JWT_SECRET üretimde en az 32 karakter olmalıdır.');
@@ -752,6 +757,112 @@ app.put('/api/users/me/pin', requireAuth, limitPublicUsage('pin-change', 5, 15 *
 });
 
 // HARVEST ROUTES
+const getResponseOutputText = (payload) => {
+  if (typeof payload?.output_text === 'string') return payload.output_text;
+  for (const item of Array.isArray(payload?.output) ? payload.output : []) {
+    for (const content of Array.isArray(item?.content) ? item.content : []) {
+      if (typeof content?.text === 'string') return content.text;
+      if (typeof content?.value === 'string') return content.value;
+    }
+  }
+  return '';
+};
+
+// Fiş görüntüsü kalıcı olarak kaydedilmez. Yalnızca kullanıcının mevcut hasat
+// formunu doldurmasına yardımcı olmak için işlenir ve ardından istemciye sonuç döner.
+app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 12, 60 * 60 * 1000), async (req, res) => {
+  try {
+    if (!OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'Fiş okuma hizmeti henüz yapılandırılmamış.' });
+    }
+
+    const mimeType = String(req.body?.mimeType || 'image/jpeg').toLowerCase();
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+      return res.status(400).json({ error: 'Fiş fotoğrafı JPEG, PNG veya WEBP biçiminde olmalıdır.' });
+    }
+
+    const imageBase64 = String(req.body?.imageBase64 || '')
+      .replace(/^data:[^;]+;base64,/i, '')
+      .replace(/\s/g, '');
+    if (!imageBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
+      return res.status(400).json({ error: 'Fiş fotoğrafı okunamadı.' });
+    }
+    if (Buffer.byteLength(imageBase64, 'base64') > MAX_RECEIPT_IMAGE_BYTES) {
+      return res.status(413).json({ error: 'Fiş fotoğrafı en fazla 4 MB olabilir.' });
+    }
+
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: OPENAI_RECEIPT_MODEL,
+        input: [
+          {
+            role: 'system',
+            content: [{
+              type: 'input_text',
+              text: 'You extract structured information from Turkish fresh tea purchase receipts. Return only values visibly printed on the receipt. Never use handwriting. Do not invent missing values.'
+            }]
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: 'Read this tea receipt. Extract: date as YYYY-MM-DD from Tarih/Saat or equivalent, company as Fabrika or buyer name, and netWeightKg from Net Ağırlık / Net Weight. If a value is absent or uncertain, return null. Net weight is preferred over gross weight.'
+              },
+              {
+                type: 'input_image',
+                image_url: `data:${mimeType};base64,${imageBase64}`,
+                detail: 'high'
+              }
+            ]
+          }
+        ],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'tea_receipt',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                date: { type: ['string', 'null'] },
+                company: { type: ['string', 'null'] },
+                netWeightKg: { type: ['number', 'null'] }
+              },
+              required: ['date', 'company', 'netWeightKg']
+            }
+          }
+        }
+      })
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('RECEIPT PARSE ERROR:', response.status, payload?.error?.message || 'Unknown response');
+      return res.status(502).json({ error: 'Fiş okunamadı. Lütfen daha net bir fotoğrafla yeniden deneyin.' });
+    }
+
+    const parsed = JSON.parse(getResponseOutputText(payload) || '{}');
+    const date = normalizeCalendarDate(parsed.date);
+    const company = String(parsed.company || '').trim().slice(0, 120) || null;
+    const netWeightKg = Number(parsed.netWeightKg);
+    res.json({
+      date: date || null,
+      company,
+      netWeightKg: Number.isFinite(netWeightKg) && netWeightKg > 0 ? netWeightKg : null
+    });
+  } catch (err) {
+    console.error('RECEIPT PARSE ERROR:', err.message);
+    res.status(500).json({ error: 'Fiş bilgileri okunamadı. Lütfen alanları elle girin.' });
+  }
+});
+
 app.get('/api/harvests', requireAuth, async (req, res) => {
   try {
     const filter = buildUserFilter(req);
@@ -1424,26 +1535,131 @@ app.delete('/api/gardens/:id', requireAuth, async (req, res) => {
 
 // ADMIN ROUTES
 // ADMIN / PRODUCER MANAGEMENT
+const adminMetricPipeline = (match = {}) => [
+  { $match: match },
+  { $project: {
+    userId: { $ifNull: ['$userId', ''] },
+    userPhone: { $ifNull: ['$userPhone', ''] },
+    kgValue: { $ifNull: ['$kg', { $ifNull: ['$weight', 0] }] },
+    netValue: {
+      $cond: [
+        { $gt: [{ $ifNull: ['$toplamTutar', 0] }, 0] },
+        { $ifNull: ['$toplamTutar', 0] },
+        { $multiply: [{ $ifNull: ['$kg', { $ifNull: ['$weight', 0] }] }, { $ifNull: ['$fiyat', 0] }, 0.98] }
+      ]
+    },
+    paidValue: { $ifNull: ['$tahsilat', 0] }
+  } },
+  { $group: {
+    _id: { userId: '$userId', userPhone: '$userPhone' },
+    totalKg: { $sum: '$kgValue' },
+    totalSales: { $sum: '$netValue' },
+    totalPaid: { $sum: '$paidValue' },
+    harvestCount: { $sum: 1 }
+  } }
+];
+
+const getAdminHarvestFilter = async () => {
+  const admins = await UserProfile.find({ role: 'admin' }).select('userId phone').lean();
+  const adminIdentifiers = admins.flatMap((admin) => {
+    const matches = [];
+    const userId = String(admin.userId || '').trim();
+    const phone = String(admin.phone || '').trim();
+    if (userId) matches.push({ userId });
+    if (phone) matches.push({ userPhone: phone });
+    return matches;
+  });
+  return adminIdentifiers.length ? { $nor: adminIdentifiers } : {};
+};
+
+const getAdminProducerFilter = (search = '') => {
+  const phrase = String(search || '').trim();
+  const filter = { role: { $ne: 'admin' } };
+  if (!phrase) return filter;
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    $and: [
+      filter,
+      { $or: [{ name: { $regex: escaped, $options: 'i' } }, { phone: { $regex: escaped, $options: 'i' } }] }
+    ]
+  };
+};
+
+const metricsForProducerProfiles = async (profiles) => {
+  const userIds = profiles.map((profile) => String(profile.userId || '').trim()).filter(Boolean);
+  const phones = profiles.map((profile) => String(profile.phone || '').trim()).filter(Boolean);
+  const matches = [];
+  if (userIds.length) matches.push({ userId: { $in: userIds } });
+  if (phones.length) matches.push({ userPhone: { $in: phones } });
+  if (!matches.length) return profiles.map((profile) => ({ ...profile, totalKg: 0, totalSales: 0, totalPaid: 0, harvestCount: 0, remaining: 0 }));
+
+  const rows = await Harvest.aggregate(adminMetricPipeline({ $or: matches }));
+  const byUserId = new Map();
+  const byPhone = new Map();
+  rows.forEach((row) => {
+    if (row?._id?.userId) byUserId.set(String(row._id.userId), row);
+    if (row?._id?.userPhone) byPhone.set(String(row._id.userPhone), row);
+  });
+  return profiles.map((profile) => {
+    const metric = byUserId.get(String(profile.userId || '')) || byPhone.get(String(profile.phone || '')) || {};
+    const totalSales = Number(metric.totalSales || 0);
+    const totalPaid = Number(metric.totalPaid || 0);
+    return {
+      ...profile,
+      totalKg: Number(metric.totalKg || 0),
+      totalSales,
+      totalPaid,
+      harvestCount: Number(metric.harvestCount || 0),
+      remaining: Math.max(0, totalSales - totalPaid)
+    };
+  });
+};
+
+const listAdminProducers = async ({ page = 1, limit = 25, search = '' } = {}) => {
+  const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 25));
+  const filter = getAdminProducerFilter(search);
+  const [profiles, total] = await Promise.all([
+    UserProfile.find(filter).select('userId phone name role active createdAt').sort({ name: 1, _id: 1 }).skip((safePage - 1) * safeLimit).limit(safeLimit).lean(),
+    UserProfile.countDocuments(filter)
+  ]);
+  const items = await metricsForProducerProfiles(profiles);
+  return { items, page: safePage, limit: safeLimit, total, totalPages: Math.max(1, Math.ceil(total / safeLimit)) };
+};
+
+app.get('/api/admin/producers', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await listAdminProducers(req.query || {});
+    res.json({
+      items: result.items,
+      pagination: { page: result.page, limit: result.limit, total: result.total, totalPages: result.totalPages }
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/summary', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [producerCount, adminHarvestFilter] = await Promise.all([
+      UserProfile.countDocuments({ role: { $ne: 'admin' } }),
+      getAdminHarvestFilter()
+    ]);
+    const rows = await Harvest.aggregate(adminMetricPipeline(adminHarvestFilter));
+    const totals = rows.reduce((result, row) => ({
+      totalKg: result.totalKg + Number(row.totalKg || 0),
+      totalSales: result.totalSales + Number(row.totalSales || 0),
+      totalPaid: result.totalPaid + Number(row.totalPaid || 0),
+      harvestCount: result.harvestCount + Number(row.harvestCount || 0)
+    }), { totalKg: 0, totalSales: 0, totalPaid: 0, harvestCount: 0 });
+    res.json({ ...totals, producerCount, remaining: Math.max(0, totals.totalSales - totals.totalPaid) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Eski yönetici ekranları için uyumluluk rotası. Yeni uygulama sayfalı /producers
+// rotasını kullanır; bu rota en fazla 100 üretici döndürür.
 app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [users, harvestSummary] = await Promise.all([
-      UserProfile.find().sort({ name: 1 }).lean(),
-      Harvest.aggregate([
-        { $group: {
-          _id: '$userId',
-          totalKg: { $sum: { $ifNull: ['$kg', '$weight'] } },
-          totalSales: { $sum: { $multiply: [{ $multiply: [{ $ifNull: ['$kg', '$weight'] }, { $ifNull: ['$fiyat', 0] }] }, 0.98] } },
-          totalPaid: { $sum: { $ifNull: ['$tahsilat', 0] } },
-          harvestCount: { $sum: 1 }
-        } }
-      ])
-    ]);
-    const summaryByUserId = new Map(harvestSummary.map((item) => [item._id, item]));
-    const summary = users.map((u) => {
-      const item = summaryByUserId.get(u.userId) || { totalKg: 0, totalSales: 0, totalPaid: 0, harvestCount: 0 };
-      return { ...u, ...item, remaining: Math.max(0, item.totalSales - item.totalPaid) };
-    });
-    res.json(summary);
+    const result = await listAdminProducers({ page: 1, limit: 100, search: req.query?.search || '' });
+    res.json(result.items);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

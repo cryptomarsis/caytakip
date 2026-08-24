@@ -4,7 +4,7 @@
     "slug": "cay-ureticisi",
     "description": "Çaylık; çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
     "scheme": "cayureticisi",
-    "version": "1.0.9",
+    "version": "1.0.10",
     "orientation": "portrait",
     "backgroundColor": "#F8F3E7",
     "icon": "./assets/caylik-icon-v1.png",
@@ -23,9 +23,6 @@
       "backgroundColor": "#F8F3E7",
       "allowBackup": false,
       "blockedPermissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
@@ -43,6 +40,13 @@
       "expo-sharing",
       "expo-notifications",
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Hasat fişini seçip hasat formunu doldurmak için fotoğraflarınıza erişim gerekir.",
+          "cameraPermission": "Hasat fişinin fotoğrafını çekip hasat formunu doldurmak için kameraya erişim gerekir."
+        }
+      ],
       [
         "expo-splash-screen",
         {

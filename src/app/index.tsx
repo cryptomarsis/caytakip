@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
+import * as ImagePicker from 'expo-image-picker';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppIcon, AppIconName } from '../components/app-icon';
@@ -88,6 +89,8 @@ export default function App() {
     isVadeli: false,
     vadeTarihi: ''
   });
+  const [receiptBusy, setReceiptBusy] = useState(false);
+  const [receiptNotice, setReceiptNotice] = useState('');
 
   const [eForm, setEForm] = useState({
     date: todayTR,
@@ -483,13 +486,17 @@ export default function App() {
   const receivablesSafe = (items: any[]) => (items || []).filter((h: any) => remainingTotalOf(h) > 0.01);
 
   const getReceivablesByMonth = () => {
-    const groups: { [key: string]: any[] } = {};
+    const groups: { [key: string]: { label: string; rows: any[] } } = {};
     receivablesSafe(harvests).forEach((h: any) => {
-      const key = formatVadeMonth(h.vadeTarihi || h.tarih);
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(h);
+      const rawDate = h.vadeTarihi || h.tarih;
+      const normalizedDate = toServerDate(rawDate);
+      const key = normalizedDate ? normalizedDate.slice(0, 7) : '9999-12';
+      if (!groups[key]) groups[key] = { label: formatVadeMonth(rawDate), rows: [] };
+      groups[key].rows.push(h);
     });
-    return Object.entries(groups).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    return Object.entries(groups)
+      .sort(([first], [second]) => first.localeCompare(second))
+      .map(([, group]) => [group.label, group.rows] as [string, any[]]);
   };
 
   // Giriş Yap / Kayıt Ol İşlemleri
@@ -667,6 +674,59 @@ export default function App() {
     }
   };
 
+  const handlePickReceipt = async (source: 'camera' | 'library') => {
+    try {
+      const permission = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        showOperationFeedback(
+          'İzin Gerekli',
+          source === 'camera'
+            ? 'Fiş fotoğrafı çekmek için kamera izni gerekir.'
+            : 'Fiş seçmek için fotoğraf erişim izni gerekir.',
+          'error'
+        );
+        return;
+      }
+
+      const result = source === 'camera'
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7, base64: true, exif: false })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.7, base64: true, exif: false });
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      if (!asset?.base64) throw new Error('Fotoğraf hazırlanamadı. Lütfen tekrar deneyin.');
+
+      setReceiptBusy(true);
+      setReceiptNotice('Fiş okunuyor...');
+      const response = await authFetch(`${API_URL}/receipts/parse`, {
+        method: 'POST',
+        body: JSON.stringify({ imageBase64: asset.base64, mimeType: asset.mimeType || 'image/jpeg' })
+      }, API_TIMEOUTS.receipt);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Fiş okunamadı.');
+
+      const hasKg = Number(data?.netWeightKg) > 0;
+      const fields = [data?.date ? 'tarih' : '', data?.company ? 'firma' : '', hasKg ? 'net ağırlık' : ''].filter(Boolean);
+      setHForm((current) => ({
+        ...current,
+        date: data?.date ? formatDisplayDate(data.date) : current.date,
+        firma: data?.company ? String(data.company) : current.firma,
+        kg: hasKg ? String(data.netWeightKg).replace('.', ',') : current.kg
+      }));
+      setReceiptNotice(fields.length
+        ? `Fişten ${fields.join(', ')} eklendi. Kaydetmeden önce kontrol edin.`
+        : 'Fişte net okunabilen bilgi bulunamadı. Alanları elle doldurun.');
+    } catch (error: any) {
+      const message = error?.message || 'Fiş okunamadı. Lütfen alanları elle doldurun.';
+      setReceiptNotice(message);
+      showOperationFeedback('Fiş Okunamadı', message, 'error');
+    } finally {
+      setReceiptBusy(false);
+    }
+  };
+
   // Hasat Kaydetme
   const handleSaveHarvest = async () => {
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
@@ -709,6 +769,7 @@ export default function App() {
       const result = await postOrQueue('/harvests', payload);
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
+        setReceiptNotice('');
         setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '' });
         setActiveTab('dashboard');
         return;
@@ -717,6 +778,7 @@ export default function App() {
 
       if (res.ok) {
         showOperationFeedback('Başarılı', 'Hasat kaydı eklendi.', 'success');
+        setReceiptNotice('');
         // Form Temizleme Mantığı Düzeltildi (Madde 5)
         setHForm({
           date: todayDisplayDate(),
@@ -1336,6 +1398,9 @@ export default function App() {
               hForm={hForm}
               handleSaveHarvest={handleSaveHarvest}
               setHForm={setHForm}
+              onPickReceipt={handlePickReceipt}
+              receiptBusy={receiptBusy}
+              receiptNotice={receiptNotice}
             />
           )}
 

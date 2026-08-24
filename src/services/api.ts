@@ -3,6 +3,7 @@ export const API_URL = `${API_ORIGIN}/api`;
 export const API_TIMEOUTS = {
   default: 25000,
   authentication: 25000,
+  receipt: 60000,
 };
 
 export const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = API_TIMEOUTS.default) => {
