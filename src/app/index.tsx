@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, useWindowDimensions } from 'react-native';
+import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import NetInfo from '@react-native-community/netinfo';
@@ -680,13 +680,23 @@ export default function App() {
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        showOperationFeedback(
-          'İzin Gerekli',
-          source === 'camera'
-            ? 'Fiş fotoğrafı çekmek için kamera izni gerekir.'
-            : 'Fiş seçmek için fotoğraf erişim izni gerekir.',
-          'error'
-        );
+        const permissionName = source === 'camera' ? 'kamera' : 'fotoğraf erişim';
+        const message = source === 'camera'
+          ? 'Fiş fotoğrafı çekmek için kamera izni gerekir.'
+          : 'Fiş seçmek için fotoğraf erişim izni gerekir.';
+
+        if (permission.canAskAgain === false) {
+          Alert.alert(
+            'İzin Ayarlar’dan Açılmalı',
+            `${message} Android ayarlarından Çaylık uygulamasının ${permissionName} iznini açın.`,
+            [
+              { text: 'Vazgeç', style: 'cancel' },
+              { text: 'Ayarları Aç', onPress: () => { void Linking.openSettings(); } }
+            ]
+          );
+        } else {
+          showOperationFeedback('İzin Gerekli', message, 'error');
+        }
         return;
       }
 
