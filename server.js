@@ -504,7 +504,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-17-release-readiness',
+    version: '2026-08-26-ai-wallet-fix',
     service: 'cay-ureticisi-takip'
   });
 });
