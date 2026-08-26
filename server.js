@@ -504,7 +504,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-26-ai-wallet-fix',
+    version: '2026-08-26-ai-wallet-mongoose-fix',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -912,12 +912,15 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
 });
 
 const ensureAiWallet = async (userId) => {
-  let profile = await UserProfile.findOneAndUpdate(
-    { userId },
-    [{ $set: { aiCredits: { $ifNull: ['$aiCredits', AI_INITIAL_CREDITS] } } }],
-    { returnDocument: 'after' }
-  ).select('userId name aiCredits').lean();
+  let profile = await UserProfile.findOne({ userId }).select('userId name aiCredits').lean();
   if (!profile) return null;
+  if (profile.aiCredits === null || profile.aiCredits === undefined) {
+    profile = await UserProfile.findOneAndUpdate(
+      { userId },
+      { $set: { aiCredits: AI_INITIAL_CREDITS } },
+      { returnDocument: 'after' }
+    ).select('userId name aiCredits').lean();
+  }
 
   await AiCreditTransaction.updateOne(
     { userId, requestId: `welcome:${userId}` },
