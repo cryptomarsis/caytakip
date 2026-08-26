@@ -93,12 +93,15 @@ const BACKUP_ENCRYPTION_KEY = String(process.env.BACKUP_ENCRYPTION_KEY || '').tr
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 const OPENAI_RECEIPT_MODEL = String(process.env.OPENAI_MODEL || 'gpt-5-mini').trim();
 const OPENAI_ASSISTANT_MODEL = String(process.env.OPENAI_ASSISTANT_MODEL || OPENAI_RECEIPT_MODEL).trim();
+const OPENAI_TRANSCRIBE_MODEL = String(process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe').trim();
 const AI_INITIAL_CREDITS = Math.max(50, Number(process.env.AI_INITIAL_CREDITS || 50));
 const AI_CREDIT_USD = Math.max(0.000001, Number(process.env.AI_CREDIT_USD || 0.00025));
 const AI_INPUT_USD_PER_MILLION = Math.max(0, Number(process.env.AI_INPUT_USD_PER_MILLION || 0.25));
 const AI_OUTPUT_USD_PER_MILLION = Math.max(0, Number(process.env.AI_OUTPUT_USD_PER_MILLION || 2));
 const AI_MAX_RESERVED_CREDITS = Math.max(5, Number(process.env.AI_MAX_RESERVED_CREDITS || 25));
 const MAX_RECEIPT_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_VOICE_AUDIO_BYTES = 3 * 1024 * 1024;
+const AI_VOICE_TRANSCRIPTION_CREDITS = 6;
 
 if (isProduction) {
   if (JWT_SECRET.length < 32) throw new Error('JWT_SECRET üretimde en az 32 karakter olmalıdır.');
@@ -504,7 +507,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-26-ai-assistant-output-fix',
+    version: '2026-08-26-ai-voice',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -688,7 +691,7 @@ app.get('/api/legal/privacy', (req, res) => {
     sections: [
       { heading: 'Toplanan bilgiler', body: 'Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.' },
       { heading: 'Kullanım amacı', body: 'Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği, destek talepleri ve kullanıcının isteği üzerine Çaylık Asistan yanıtları oluşturmak için kullanılır.' },
-      { heading: 'Yapay zekâ hizmeti', body: 'Çaylık Asistan kullanıldığında yazdığınız soru ve soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında uzman görüşü esas alınmalıdır.' },
+      { heading: 'Yapay zekâ hizmeti', body: 'Çaylık Asistan kullanıldığında yazdığınız soru ve soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Sesli soru özelliği kullanılırsa yalnızca kullanıcının başlattığı kısa ses kaydı metne çevrilmek üzere gönderilir ve kalıcı olarak saklanmaz. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında uzman görüşü esas alınmalıdır.' },
       { heading: 'Saklama ve güvenlik', body: 'Oturum bilgileri cihazda güvenli depoda tutulur; çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Veriler üçüncü taraflara satılmaz.' },
       { heading: 'Saklama süresi', body: 'Hesabınız aktif olduğu sürece kayıtlarınız saklanır. Hesap silme talebinde hesap ve ilişkili kayıtlar silinir; yasal saklama zorunlulukları varsa yalnızca gerekli süre boyunca tutulabilir.' },
       { heading: 'Haklarınız', body: 'Bilgilerinize erişme, düzeltme ve hesabınızı silme talebinde bulunabilirsiniz. Hesap silme işlemi uygulama içinden veya destek e-postası yoluyla başlatılabilir.' }
@@ -698,7 +701,7 @@ app.get('/api/legal/privacy', (req, res) => {
 
 app.get('/privacy', (req, res) => {
   const email = SUPPORT_EMAIL || 'uygulama içindeki Ayarlar ve Gizlilik ekranı';
-  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${APP_NAME} Gizlilik Politikası</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#183A2A;line-height:1.6}h1,h2{color:#1F513D}a{color:#246548}</style></head><body><h1>${APP_NAME} Gizlilik Politikası</h1><p>Son güncelleme: 26 Ağustos 2026</p><h2>Toplanan bilgiler</h2><p>Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.</p><h2>Kullanım amacı</h2><p>Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği, destek talepleri ve kullanıcının isteği üzerine Çaylık Asistan yanıtları oluşturmak için kullanılır. Veriler üçüncü taraflara satılmaz.</p><h2>Yapay zekâ hizmeti</h2><p>Çaylık Asistan kullanıldığında yazdığınız soru ile soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında ürün etiketi ve uzman görüşü esas alınmalıdır.</p><h2>Saklama ve güvenlik</h2><p>Oturum bilgileri cihazda güvenli depoda tutulur. Çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Hesap silindiğinde bu cihaz içi kopya ile sunucudaki ilişkili kayıtlar silinir; yasal saklama zorunluluğu varsa yalnızca gerekli süre boyunca tutulabilir.</p><h2>Veri silme ve hesap silme</h2><p>Hasat, ödeme, gider ve bahçe kayıtlarınızı hesabınızı silmeden uygulama içinden tek tek silebilirsiniz. Ayrıntılı yönergeler için <a href="/data-deletion">veri silme sayfasını</a> açın.</p><p>Hesabınızı uygulama içindeki <strong>Ayarlar ve Gizlilik</strong> ekranından kalıcı olarak silebilirsiniz. Uygulamaya erişemiyorsanız silme talebinizi ${email.includes('@') ? `<a href="mailto:${email}">${email}</a>` : email} üzerinden başlatabilirsiniz.</p></body></html>`);
+  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${APP_NAME} Gizlilik Politikası</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#183A2A;line-height:1.6}h1,h2{color:#1F513D}a{color:#246548}</style></head><body><h1>${APP_NAME} Gizlilik Politikası</h1><p>Son güncelleme: 26 Ağustos 2026</p><h2>Toplanan bilgiler</h2><p>Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.</p><h2>Kullanım amacı</h2><p>Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği, destek talepleri ve kullanıcının isteği üzerine Çaylık Asistan yanıtları oluşturmak için kullanılır. Veriler üçüncü taraflara satılmaz.</p><h2>Yapay zekâ hizmeti</h2><p>Çaylık Asistan kullanıldığında yazdığınız soru ile soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Sesli soru özelliği kullanılırsa yalnızca kullanıcının başlattığı kısa ses kaydı metne çevrilmek üzere gönderilir ve kalıcı olarak saklanmaz. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında ürün etiketi ve uzman görüşü esas alınmalıdır.</p><h2>Saklama ve güvenlik</h2><p>Oturum bilgileri cihazda güvenli depoda tutulur. Çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Hesap silindiğinde bu cihaz içi kopya ile sunucudaki ilişkili kayıtlar silinir; yasal saklama zorunluluğu varsa yalnızca gerekli süre boyunca tutulabilir.</p><h2>Veri silme ve hesap silme</h2><p>Hasat, ödeme, gider ve bahçe kayıtlarınızı hesabınızı silmeden uygulama içinden tek tek silebilirsiniz. Ayrıntılı yönergeler için <a href="/data-deletion">veri silme sayfasını</a> açın.</p><p>Hesabınızı uygulama içindeki <strong>Ayarlar ve Gizlilik</strong> ekranından kalıcı olarak silebilirsiniz. Uygulamaya erişemiyorsanız silme talebinizi ${email.includes('@') ? `<a href="mailto:${email}">${email}</a>` : email} üzerinden başlatabilirsiniz.</p></body></html>`);
 });
 
 app.get('/data-deletion', (req, res) => {
@@ -1016,6 +1019,94 @@ app.get('/api/ai/wallet', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('AI WALLET ERROR:', error.message);
     res.status(500).json({ error: 'Kredi bilgisi alınamadı.' });
+  }
+});
+
+app.post('/api/ai/transcribe', requireAuth, limitPublicUsage('ai-transcribe', 30, 60 * 60 * 1000), async (req, res) => {
+  const userId = req.auth.userId;
+  const requestId = String(req.body?.requestId || '').trim().slice(0, 100);
+  let transaction = null;
+  let reserved = false;
+  try {
+    if (!OPENAI_API_KEY) return res.status(503).json({ error: 'Sesli soru hizmeti henüz yapılandırılmamış.' });
+    if (!requestId || !/^[A-Za-z0-9_.:-]{8,100}$/.test(requestId)) return res.status(400).json({ error: 'Geçerli bir istek kimliği zorunludur.' });
+
+    const mimeType = String(req.body?.mimeType || '').toLowerCase();
+    const supportedTypes = new Set(['audio/mp4', 'audio/m4a', 'audio/webm', 'audio/mpeg', 'audio/wav']);
+    if (!supportedTypes.has(mimeType)) return res.status(400).json({ error: 'Ses kaydı desteklenen biçimde değil.' });
+    const audioBase64 = String(req.body?.audioBase64 || '').replace(/^data:[^;]+;base64,/i, '').replace(/\s/g, '');
+    if (!audioBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(audioBase64)) return res.status(400).json({ error: 'Ses kaydı okunamadı.' });
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    if (!audioBuffer.length || audioBuffer.length > MAX_VOICE_AUDIO_BYTES) return res.status(413).json({ error: 'Ses kaydı en fazla 20 saniye olabilir.' });
+
+    await releaseStaleAiReservations(userId);
+    const profile = await ensureAiWallet(userId);
+    if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
+    const existing = await AiCreditTransaction.findOne({ userId, requestId }).lean();
+    if (existing?.status === 'completed' && existing.responseText) {
+      return res.json({ text: existing.responseText, creditsUsed: Math.abs(Number(existing.amount || 0)), credits: Number(existing.balanceAfter || 0), replayed: true });
+    }
+    if (existing) return res.status(409).json({ error: 'Bu ses kaydı halen işleniyor. Lütfen birkaç saniye bekleyin.' });
+    if (Number(profile.aiCredits || 0) < AI_VOICE_TRANSCRIPTION_CREDITS) {
+      return res.status(402).json({ error: 'Sesli soru için en az 6 kredi gerekiyor.', code: 'INSUFFICIENT_CREDITS', credits: Number(profile.aiCredits || 0), requiredCredits: AI_VOICE_TRANSCRIPTION_CREDITS });
+    }
+
+    transaction = await AiCreditTransaction.create({
+      userId, requestId, type: 'assistant', status: 'pending', amount: 0,
+      reservedCredits: AI_VOICE_TRANSCRIPTION_CREDITS, description: 'Sesli soru metne çevirme', model: OPENAI_TRANSCRIBE_MODEL
+    });
+    const wallet = await UserProfile.findOneAndUpdate(
+      { userId, aiCredits: { $gte: AI_VOICE_TRANSCRIPTION_CREDITS } },
+      { $inc: { aiCredits: -AI_VOICE_TRANSCRIPTION_CREDITS } },
+      { returnDocument: 'after' }
+    ).select('aiCredits').lean();
+    if (!wallet) {
+      await AiCreditTransaction.updateOne({ _id: transaction._id }, { $set: { status: 'failed', description: 'Sesli soru için yetersiz kredi' } });
+      return res.status(402).json({ error: 'Sesli soru için en az 6 kredi gerekiyor.', code: 'INSUFFICIENT_CREDITS', credits: Number(profile.aiCredits || 0), requiredCredits: AI_VOICE_TRANSCRIPTION_CREDITS });
+    }
+    reserved = true;
+    await AiCreditTransaction.updateOne({ _id: transaction._id }, { $set: { status: 'reserved', balanceAfter: Number(wallet.aiCredits || 0) } });
+
+    const extension = mimeType === 'audio/webm' ? 'webm' : mimeType === 'audio/wav' ? 'wav' : mimeType === 'audio/mpeg' ? 'mp3' : 'm4a';
+    const form = new FormData();
+    form.append('model', OPENAI_TRANSCRIBE_MODEL);
+    form.append('prompt', 'Türkçe yaş çay üreticiliği sorusu. Çaylık, hasat, sürüm, bahçe, fabrika, alacak, tahsilat, budama ve gübreleme terimlerini doğru yaz.');
+    form.append('file', new Blob([audioBuffer], { type: mimeType === 'audio/m4a' ? 'audio/mp4' : mimeType }), `caylik-ses.${extension}`);
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: form
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('AI TRANSCRIBE ERROR:', response.status, payload?.error?.message || 'Unknown response');
+      const upstreamError = new Error(response.status === 429 ? 'Sesli soru hizmeti şu anda yoğun. Lütfen biraz sonra tekrar deneyin.' : 'Ses kaydı metne çevrilemedi. Lütfen tekrar deneyin.');
+      upstreamError.statusCode = response.status === 429 ? 429 : 502;
+      throw upstreamError;
+    }
+    const text = String(payload?.text || '').trim().slice(0, 1200);
+    if (!text) throw new Error('Söylediğiniz anlaşılamadı. Lütfen daha net ve kısa konuşup tekrar deneyin.');
+
+    const balanceAfter = Number(wallet.aiCredits || 0);
+    await AiCreditTransaction.updateOne({ _id: transaction._id }, {
+      $set: {
+        status: 'completed', amount: -AI_VOICE_TRANSCRIPTION_CREDITS, balanceAfter,
+        responseText: text, description: `Sesli soru (${AI_VOICE_TRANSCRIPTION_CREDITS} kredi)`
+      }
+    });
+    reserved = false;
+    return res.json({ text, creditsUsed: AI_VOICE_TRANSCRIPTION_CREDITS, credits: balanceAfter });
+  } catch (error) {
+    if (reserved && transaction?._id) {
+      const released = await AiCreditTransaction.findOneAndUpdate(
+        { _id: transaction._id, status: 'reserved' },
+        { $set: { status: 'failed', amount: 0, description: 'Başarısız sesli soru; kredi iade edildi.' } },
+        { returnDocument: 'after' }
+      ).lean();
+      if (released) await UserProfile.updateOne({ userId }, { $inc: { aiCredits: AI_VOICE_TRANSCRIPTION_CREDITS } });
+    } else if (transaction?._id) {
+      await AiCreditTransaction.updateOne({ _id: transaction._id, status: 'pending' }, { $set: { status: 'failed', description: 'Sesli soru tamamlanamadı.' } });
+    }
+    console.error('AI TRANSCRIBE ERROR:', error.message);
+    return res.status(error.statusCode || 500).json({ error: error.message || 'Ses kaydı metne çevrilemedi.' });
   }
 });
 
