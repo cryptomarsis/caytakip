@@ -504,7 +504,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-26-ai-wallet-mongoose-fix',
+    version: '2026-08-26-ai-assistant-output-fix',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -1077,9 +1077,13 @@ app.post('/api/ai/chat', requireAuth, limitPublicUsage('ai-chat', 60, 60 * 60 * 
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: OPENAI_ASSISTANT_MODEL,
+        reasoning: { effort: 'low' },
         instructions: `Sen Çaylık uygulamasının Türkçe çay üreticisi asistanısın. Yaş çay yetiştiriciliği, bahçe bakımı, budama, gübreleme, hasat, kalite, satış, alacak ve uygulamadaki kayıtların yorumlanmasında sade ve uygulanabilir yardım ver. Kullanıcının kendi hesap verileri verildiyse yalnızca o verilerden hesap yap. Güncel fiyat, mevzuat veya hava durumu verisi sağlanmadıysa bunu açıkça söyle ve tahmin uydurma. Tarım ilacı, kimyasal doz, ciddi bitki hastalığı veya insan sağlığı konusunda kesin teşhis ya da tehlikeli talimat verme; ürün etiketi, yerel tarım müdürlüğü veya ziraat mühendisine yönlendir. Finansal yatırım tavsiyesi verme. Cevabı kısa paragraflar ve gerektiğinde maddelerle, en fazla yaklaşık 450 kelime olarak yaz.`,
         input,
-        max_output_tokens: 600
+        // GPT-5 ailesinde bu sınır görünür yanıtla birlikte düşünme
+        // belirteçlerini de kapsar. 600 belirteç bazı sorularda yalnızca
+        // düşünmeye yetip boş görünür yanıt üretebildiği için pay bırakılır.
+        max_output_tokens: 1600
       })
     });
     const payload = await response.json().catch(() => ({}));
@@ -1092,7 +1096,12 @@ app.post('/api/ai/chat', requireAuth, limitPublicUsage('ai-chat', 60, 60 * 60 * 
     }
 
     const answer = getResponseOutputText(payload).trim().slice(0, 12000);
-    if (!answer) throw new Error('Asistan boş yanıt verdi.');
+    if (!answer) {
+      console.error('AI CHAT EMPTY OUTPUT:', payload?.status || 'unknown', payload?.incomplete_details?.reason || 'no-output-text');
+      const emptyError = new Error('Asistan yanıtını tamamlayamadı. Lütfen yeniden deneyin.');
+      emptyError.statusCode = 502;
+      throw emptyError;
+    }
     const usage = calculateAiCredits(payload.usage || {});
     const creditsUsed = Math.min(reservedCredits, usage.credits);
     const refund = Math.max(0, reservedCredits - creditsUsed);
