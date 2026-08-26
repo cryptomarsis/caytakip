@@ -93,7 +93,7 @@ const BACKUP_ENCRYPTION_KEY = String(process.env.BACKUP_ENCRYPTION_KEY || '').tr
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 const OPENAI_RECEIPT_MODEL = String(process.env.OPENAI_MODEL || 'gpt-5-mini').trim();
 const OPENAI_ASSISTANT_MODEL = String(process.env.OPENAI_ASSISTANT_MODEL || OPENAI_RECEIPT_MODEL).trim();
-const AI_INITIAL_CREDITS = Math.max(0, Number(process.env.AI_INITIAL_CREDITS || 50));
+const AI_INITIAL_CREDITS = Math.max(50, Number(process.env.AI_INITIAL_CREDITS || 50));
 const AI_CREDIT_USD = Math.max(0.000001, Number(process.env.AI_CREDIT_USD || 0.00025));
 const AI_INPUT_USD_PER_MILLION = Math.max(0, Number(process.env.AI_INPUT_USD_PER_MILLION || 0.25));
 const AI_OUTPUT_USD_PER_MILLION = Math.max(0, Number(process.env.AI_OUTPUT_USD_PER_MILLION || 2));
@@ -912,27 +912,43 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
 });
 
 const ensureAiWallet = async (userId) => {
-  const profile = await UserProfile.findOneAndUpdate(
+  let profile = await UserProfile.findOneAndUpdate(
     { userId },
     [{ $set: { aiCredits: { $ifNull: ['$aiCredits', AI_INITIAL_CREDITS] } } }],
     { returnDocument: 'after' }
   ).select('userId name aiCredits').lean();
   if (!profile) return null;
+
   await AiCreditTransaction.updateOne(
     { userId, requestId: `welcome:${userId}` },
     {
-      $setOnInsert: {
+      $set: {
         type: 'welcome', status: 'completed', amount: AI_INITIAL_CREDITS,
-        balanceAfter: Number(profile.aiCredits || 0), description: 'Çaylık Asistan başlangıç kredisi'
-      }
+        description: 'Çaylık Asistan başlangıç kredisi'
+      },
+      $setOnInsert: { balanceAfter: AI_INITIAL_CREDITS }
     },
     { upsert: true }
   ).catch((error) => {
     if (error?.code !== 11000) throw error;
   });
+
+  // Kredi bakiyesinin tek doğruluk kaynağı hareket defteridir. Böylece eski
+  // kullanıcılarda eksik alan veya yarım kalmış ilk kurulum 0 kredi göstermez.
+  const ledger = await AiCreditTransaction.aggregate([
+    { $match: { userId } },
+    { $group: {
+      _id: null,
+      completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, '$amount', 0] } },
+      reserved: { $sum: { $cond: [{ $eq: ['$status', 'reserved'] }, '$reservedCredits', 0] } }
+    } }
+  ]);
+  const calculatedBalance = Math.max(0, Number(ledger[0]?.completed || 0) - Number(ledger[0]?.reserved || 0));
+  profile = await UserProfile.findOneAndUpdate(
+    { userId }, { $set: { aiCredits: calculatedBalance } }, { returnDocument: 'after' }
+  ).select('userId name aiCredits').lean();
   return profile;
 };
-
 const releaseStaleAiReservations = async (userId) => {
   const cutoff = new Date(Date.now() - (5 * 60 * 1000));
   const stale = await AiCreditTransaction.find({ userId, status: 'reserved', createdAt: { $lt: cutoff } })
