@@ -242,6 +242,7 @@ const HarvestSchema = new mongoose.Schema({
   kalanBakiye: Number,     // toplamTutar - tahsilat
   aciklama: String,
   bahce: String,
+  receiptFingerprint: { type: String, default: undefined },
   
   // Vadeli Takip İçin Alanlar
   isVadeli: { type: Boolean, default: false },
@@ -251,6 +252,10 @@ const HarvestSchema = new mongoose.Schema({
 HarvestSchema.index({ userId: 1, createdAt: -1 });
 HarvestSchema.index({ userPhone: 1, createdAt: -1 });
 HarvestSchema.index({ userId: 1, isVadeli: 1, vadeTarihi: 1 });
+HarvestSchema.index(
+  { userId: 1, receiptFingerprint: 1 },
+  { unique: true, partialFilterExpression: { receiptFingerprint: { $type: 'string' } } }
+);
 
 // Tahsilat Geçmişi Kaydı (Hangi hasada ne kadar ödeme yapıldı?)
 const PaymentSchema = new mongoose.Schema({
@@ -507,7 +512,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-26-ai-voice',
+    version: '2026-08-27-receipt-dedup',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -832,8 +837,18 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
     if (!imageBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
       return res.status(400).json({ error: 'Fiş fotoğrafı okunamadı.' });
     }
-    if (Buffer.byteLength(imageBase64, 'base64') > MAX_RECEIPT_IMAGE_BYTES) {
+    const imageBuffer = Buffer.from(imageBase64, 'base64');
+    if (imageBuffer.length > MAX_RECEIPT_IMAGE_BYTES) {
       return res.status(413).json({ error: 'Fiş fotoğrafı en fazla 4 MB olabilir.' });
+    }
+    const receiptFingerprint = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+    const existingReceipt = await Harvest.findOne({ userId: req.auth.userId, receiptFingerprint })
+      .select('tarih firma kg').lean();
+    if (existingReceipt) {
+      return res.status(409).json({
+        error: `Bu fiş daha önce ${existingReceipt.tarih || 'belirtilmeyen tarihte'} ${existingReceipt.firma || 'bir firma'} için kaydedilmiş.`,
+        code: 'DUPLICATE_RECEIPT'
+      });
     }
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -906,7 +921,8 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
     res.json({
       date: date || null,
       company,
-      netWeightKg: Number.isFinite(netWeightKg) && netWeightKg > 0 ? netWeightKg : null
+      netWeightKg: Number.isFinite(netWeightKg) && netWeightKg > 0 ? netWeightKg : null,
+      receiptFingerprint
     });
   } catch (err) {
     console.error('RECEIPT PARSE ERROR:', err.message);
@@ -1253,11 +1269,18 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     const tarih = normalizeCalendarDate(req.body.tarih) || (req.body.tarih ? '' : todayServerDate());
     const isVadeli = req.body.isVadeli === true || req.body.isVadeli === 'true';
     const vadeTarihi = isVadeli ? normalizeCalendarDate(req.body.vadeTarihi) : '';
+    const receiptFingerprint = /^[a-f0-9]{64}$/i.test(String(req.body.receiptFingerprint || ''))
+      ? String(req.body.receiptFingerprint).toLowerCase()
+      : undefined;
     if (!Number.isFinite(kgVal) || kgVal <= 0) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
     if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
+    if (receiptFingerprint) {
+      const duplicateReceipt = await Harvest.exists({ userId: req.auth.userId, receiptFingerprint });
+      if (duplicateReceipt) return res.status(409).json({ error: 'Bu fiş daha önce hasat kaydı olarak eklenmiş.', code: 'DUPLICATE_RECEIPT' });
+    }
     const amounts = calculateHarvestAmounts(kgVal, fiyatVal);
     const toplam = amounts.netTutar;
     if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
@@ -1285,6 +1308,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       tahsilat: tahsilatVal,
       aciklama: String(req.body.aciklama || '').trim(),
       bahce: String(req.body.bahce || req.body.garden || '').trim(),
+      receiptFingerprint,
       isVadeli,
       vadeTarihi,
       toplamTutar: toplam,
@@ -1316,6 +1340,9 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     res.status(201).json(newHarvest);
   } catch (err) {
     console.error('Hasat Ekleme Hatası:', err);
+    if (err?.code === 11000 && err?.keyPattern?.receiptFingerprint) {
+      return res.status(409).json({ error: 'Bu fiş daha önce hasat kaydı olarak eklenmiş.', code: 'DUPLICATE_RECEIPT' });
+    }
     res.status(400).json({ error: err.message });
   }
 });
