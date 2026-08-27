@@ -6,6 +6,7 @@ import { HarvestRecord, ExpenseRecord } from '../types';
 import { styles } from '../styles/styles';
 import { AppIcon } from '../components/app-icon';
 import { IconHeading } from '../components/icon-heading';
+import { useAppTheme } from '../context/app-theme';
 type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: unknown };
 
 type DesktopBridge = {
@@ -44,6 +45,10 @@ const saleOf = (h: HarvestRecord) => netTotalOf(h);
 const paidOf = (h: HarvestRecord) => parseMoney(h.tahsilat ?? 0);
 
 export default function ReportsScreen({ harvests, expenses }: Props) {
+  const { paperTheme: theme, isDark: darkCards } = useAppTheme();
+  const reportCard = { backgroundColor: darkCards ? '#18251F' : '#FFFFFF', borderColor: darkCards ? '#476356' : '#DDE8DF' };
+  const reportValue = { color: darkCards ? '#FFFFFF' : '#174E3A' };
+  const reportLabel = { color: darkCards ? '#E5EDE7' : '#526057' };
   const years = useMemo(() => {
     const values = new Set<number>();
     harvests.forEach(h => { const y = yearOf(h.tarih); if (y) values.add(y); });
@@ -210,35 +215,35 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
 
   return <View>
     <IconHeading icon="chart-box-outline" title="RAPORLAR" />
-    <View style={styles.rowBtnGroup}>{years.map(y=><TouchableOpacity key={y} style={[styles.groupBtn,year===y&&styles.groupBtnActive]} onPress={()=>setYear(y)}><Text style={[styles.groupBtnText,year===y&&styles.groupBtnTextActive]}>{y}</Text></TouchableOpacity>)}</View>
+    <View style={styles.rowBtnGroup}>{years.map(y=><TouchableOpacity key={y} style={[styles.groupBtn,{backgroundColor:theme.colors.surfaceVariant,borderColor:theme.colors.outline},year===y&&styles.groupBtnActive]} onPress={()=>setYear(y)}><Text style={[styles.groupBtnText,{color:theme.colors.onSurface},year===y&&styles.groupBtnTextActive]}>{y}</Text></TouchableOpacity>)}</View>
 
     <View style={styles.statsGrid}>
-      <View style={styles.statCard}><Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text><Text style={styles.statLabel}>Toplam Hasat</Text></View>
-      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalSales)}</Text><Text style={styles.statLabel}>Net Satış</Text></View>
-      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalPaid)}</Text><Text style={styles.statLabel}>Toplam Tahsilat</Text></View>
-      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(receivable)}</Text><Text style={styles.statLabel}>Vadeli Alacak</Text></View>
-      <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(totalExpenses)}</Text><Text style={styles.statLabel}>Toplam Gider</Text></View>
+      <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,reportValue]}>{totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text><Text style={[styles.statLabel,reportLabel]}>Toplam Hasat</Text></View>
+      <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,reportValue]}>{formatTL(totalSales)}</Text><Text style={[styles.statLabel,reportLabel]}>Net Satış</Text></View>
+      <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,reportValue]}>{formatTL(totalPaid)}</Text><Text style={[styles.statLabel,reportLabel]}>Toplam Tahsilat</Text></View>
+      <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,{color:darkCards?'#FFB4AB':theme.colors.error}]}>{formatTL(receivable)}</Text><Text style={[styles.statLabel,reportLabel]}>Vadeli Alacak</Text></View>
+      <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,reportValue]}>{formatTL(totalExpenses)}</Text><Text style={[styles.statLabel,reportLabel]}>Toplam Gider</Text></View>
     </View>
 
-    <View style={styles.formCard}>
+    <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}>
       <IconHeading icon="leaf" title="Sürüm Bazlı Hasat" compact />
-      {versions.length === 0 ? <Text style={styles.emptyText}>Bu yıl hasat kaydı yok.</Text> : versions.map(v => <View key={v.name} style={{marginBottom:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={styles.listTitle}>{v.name}</Text><Text style={styles.listSubText}>{v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><View style={{height:14,backgroundColor:'#e9ecef',borderRadius:7,overflow:'hidden'}}><View style={{width:`${Math.max(2,(v.kg/maxVersionKg)*100)}%`,height:'100%',backgroundColor:'#2d6a4f'}}/></View></View>)}
-      <Text style={[styles.listSubText,{marginTop:4}]}>Grafik: Sürümlerin toplam KG karşılaştırması</Text>
+      {versions.length === 0 ? <Text style={[styles.emptyText,{color:theme.colors.onSurfaceVariant}]}>Bu yıl hasat kaydı yok.</Text> : versions.map(v => <View key={v.name} style={{marginBottom:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={[styles.listTitle,{color:theme.colors.onSurface}]}>{v.name}</Text><Text style={[styles.listSubText,{color:theme.colors.onSurfaceVariant}]}>{v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><View style={{height:14,backgroundColor:theme.colors.surfaceVariant,borderRadius:7,overflow:'hidden'}}><View style={{width:`${Math.max(2,(v.kg/maxVersionKg)*100)}%`,height:'100%',backgroundColor:theme.colors.primary}}/></View></View>)}
+      <Text style={[styles.listSubText,{marginTop:4,color:theme.colors.onSurfaceVariant}]}>Grafik: Sürümlerin toplam KG karşılaştırması</Text>
     </View>
 
-    <View style={styles.formCard}>
+    <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}>
       <IconHeading icon="tree" title="Bahçe Bazında Hasat" compact />
-      {gardenHarvests.length === 0 ? <Text style={styles.emptyText}>Bu yıl bahçe bilgisi olan hasat kaydı yok.</Text> : gardenHarvests.map(g => <View key={g.name} style={{marginBottom:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={styles.listTitle}>{g.name}</Text><Text style={styles.listSubText}>{g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><Text style={[styles.listSubText,{marginTop:2}]}>Toplam satış: {formatTL(g.sales)}</Text><View style={{height:12,marginTop:6,backgroundColor:'#e9ecef',borderRadius:6,overflow:'hidden'}}><View style={{width:`${Math.max(2,(g.kg/maxGardenKg)*100)}%`,height:'100%',backgroundColor:'#2d6a4f'}}/></View></View>)}
-      <Text style={[styles.listSubText,{marginTop:4}]}>Her bahçeden üretilen toplam çay miktarı</Text>
+      {gardenHarvests.length === 0 ? <Text style={[styles.emptyText,{color:theme.colors.onSurfaceVariant}]}>Bu yıl bahçe bilgisi olan hasat kaydı yok.</Text> : gardenHarvests.map(g => <View key={g.name} style={{marginBottom:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={[styles.listTitle,{color:theme.colors.onSurface}]}>{g.name}</Text><Text style={[styles.listSubText,{color:theme.colors.onSurfaceVariant}]}>{g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><Text style={[styles.listSubText,{marginTop:2,color:theme.colors.onSurfaceVariant}]}>Toplam satış: {formatTL(g.sales)}</Text><View style={{height:12,marginTop:6,backgroundColor:theme.colors.surfaceVariant,borderRadius:6,overflow:'hidden'}}><View style={{width:`${Math.max(2,(g.kg/maxGardenKg)*100)}%`,height:'100%',backgroundColor:theme.colors.primary}}/></View></View>)}
+      <Text style={[styles.listSubText,{marginTop:4,color:theme.colors.onSurfaceVariant}]}>Her bahçeden üretilen toplam çay miktarı</Text>
     </View>
 
-    <View style={styles.formCard}>
+    <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}>
       <IconHeading icon="chart-line" title="Aylık Hasat Grafiği" compact />
-      {monthly.map(x => <View key={x.month} style={{marginBottom:8}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={styles.listSubText}>{months[x.month]}</Text><Text style={styles.listSubText}>{x.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><View style={{height:10,backgroundColor:'#e9ecef',borderRadius:5,overflow:'hidden'}}><View style={{width:`${Math.max(x.kg?2:0,(x.kg/maxMonthlyKg)*100)}%`,height:'100%',backgroundColor:'#40916c'}}/></View></View>)}
+      {monthly.map(x => <View key={x.month} style={{marginBottom:8}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={[styles.listSubText,{color:theme.colors.onSurfaceVariant}]}>{months[x.month]}</Text><Text style={[styles.listSubText,{color:theme.colors.onSurfaceVariant}]}>{x.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</Text></View><View style={{height:10,backgroundColor:theme.colors.surfaceVariant,borderRadius:5,overflow:'hidden'}}><View style={{width:`${Math.max(x.kg?2:0,(x.kg/maxMonthlyKg)*100)}%`,height:'100%',backgroundColor:theme.colors.primary}}/></View></View>)}
     </View>
 
-    <View style={styles.formCard}><IconHeading icon="factory" title="Fabrika Bazında Satış" compact />{factorySales.length===0?<Text style={styles.emptyText}>Bu yıl fabrika satış kaydı yok.</Text>:factorySales.map(f=><View key={f.name} style={{paddingVertical:8,borderBottomWidth:1,borderBottomColor:'#eee'}}><Text style={styles.listTitle}>{f.name}</Text><Text style={styles.listSubText}>{f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG • {formatTL(f.sales)}</Text><Text style={{color:f.remaining>0?'#d62828':'#2b9348',fontWeight:'bold'}}>Kalan: {formatTL(f.remaining)}</Text></View>)}</View>
+    <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}><IconHeading icon="factory" title="Fabrika Bazında Satış" compact />{factorySales.length===0?<Text style={[styles.emptyText,{color:theme.colors.onSurfaceVariant}]}>Bu yıl fabrika satış kaydı yok.</Text>:factorySales.map(f=><View key={f.name} style={{paddingVertical:8,borderBottomWidth:1,borderBottomColor:theme.colors.outline}}><Text style={[styles.listTitle,{color:theme.colors.onSurface}]}>{f.name}</Text><Text style={[styles.listSubText,{color:theme.colors.onSurfaceVariant}]}>{f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG • {formatTL(f.sales)}</Text><Text style={{color:f.remaining>0?theme.colors.error:theme.colors.primary,fontWeight:'bold'}}>Kalan: {formatTL(f.remaining)}</Text></View>)}</View>
 
-    <View style={styles.formCard}><IconHeading icon="export-variant" title="Dışa Aktarma" compact /><TouchableOpacity style={styles.submitBtn} onPress={exportCSV}><View style={styles.submitBtnContent}><AppIcon name="share-variant-outline" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>CSV PAYLAŞ</Text></View></TouchableOpacity><TouchableOpacity style={[styles.submitBtn,{marginTop:10}]} onPress={exportXLSX}><View style={styles.submitBtnContent}><AppIcon name="file-excel" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>EXCEL OLUŞTUR</Text></View></TouchableOpacity><TouchableOpacity style={[styles.submitBtn,{marginTop:10}]} onPress={exportPDF}><View style={styles.submitBtnContent}><AppIcon name="file-pdf-box" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>PDF OLUŞTUR</Text></View></TouchableOpacity></View>
+    <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}><IconHeading icon="export-variant" title="Dışa Aktarma" compact /><TouchableOpacity style={styles.submitBtn} onPress={exportCSV}><View style={styles.submitBtnContent}><AppIcon name="share-variant-outline" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>CSV PAYLAŞ</Text></View></TouchableOpacity><TouchableOpacity style={[styles.submitBtn,{marginTop:10}]} onPress={exportXLSX}><View style={styles.submitBtnContent}><AppIcon name="file-excel" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>EXCEL OLUŞTUR</Text></View></TouchableOpacity><TouchableOpacity style={[styles.submitBtn,{marginTop:10}]} onPress={exportPDF}><View style={styles.submitBtnContent}><AppIcon name="file-pdf-box" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>PDF OLUŞTUR</Text></View></TouchableOpacity></View>
   </View>;
 }

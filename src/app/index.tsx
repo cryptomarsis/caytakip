@@ -1,17 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions } from 'react-native';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
-import { AppIcon, AppIconName } from '../components/app-icon';
+import { useTheme } from 'react-native-paper';
+import { AppIcon } from '../components/app-icon';
 import { API_TIMEOUTS, API_URL, fetchWithTimeout } from '../services/api';
+import { clearDueNotifications, setupNotifications } from '../services/dueNotifications';
 import { saveSession, getSession, clearSession } from '../services/session';
-import { clearOfflineData, discardOfflineRequest, enqueueOfflineRequest, getDataSnapshot, getFailedRequestCount, getOfflineRequests, getPendingRequestCount, retryOfflineRequest, saveDataSnapshot, syncOfflineRequests } from '../services/offlineQueue';
+import { clearOfflineData } from '../services/offlineQueue';
 import { UserSession, HarvestRecord, PaymentRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
 import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate, calculateAgriculturalDeductions, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
+import { useHarvestMetrics } from '../hooks/useHarvestMetrics';
+import { useAiAssistant } from '../hooks/useAiAssistant';
+import { useAppData } from '../hooks/useAppData';
+import { useOfflineSync } from '../hooks/useOfflineSync';
+import { ActiveTab, getDesktopMenuItems, mobileNavItems } from './navigation';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
 import HarvestHistoryScreen from '../screens/HarvestHistoryScreen';
@@ -24,6 +34,15 @@ import AdminScreen from '../screens/AdminScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import MoreScreen from '../screens/MoreScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import AssistantScreen from '../screens/AssistantScreen';
+import CreditStoreScreen, { CreditProductId } from '../screens/CreditStoreScreen';
+
+const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
+const ONBOARDING_STEPS = [
+  { title: 'Hasadını kaydet', message: 'Hasat Ekle’ye dokunun; kilo, firma ve satış fiyatını yazın.' },
+  { title: 'Alacağını takip et', message: 'Alacaklar ekranından bekleyen ödemeleri ve vade tarihlerini görün.' },
+  { title: 'Ödeme geldiğinde kaydedin', message: 'Ödeme Al ekranından tahsilatı girin. Tutarlarınız otomatik güncellenir.' },
+];
 
 // ==========================================
 // MAIN COMPONENT
@@ -31,6 +50,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 export default function App() {
   const { width: windowWidth } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && windowWidth >= 960;
+  const paperTheme = useTheme();
   // Kullanıcı Giriş / Kayıt State'leri
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -41,42 +61,23 @@ export default function App() {
   const [authFeedback, setAuthFeedback] = useState<{ title: string; message: string; type: 'error' | 'info' } | null>(null);
   const [operationFeedback, setOperationFeedback] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ endpoint: string; id: string; title: string; status: 'confirming' | 'deleting' | 'error'; message?: string } | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
 
   // Navigasyon ve Yüklenme State'leri
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'harvest' | 'history' | 'collections' | 'receivables' | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'admin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  const [failedSyncCount, setFailedSyncCount] = useState(0);
-  const isSyncingOfflineQueue = useRef(false);
 
-  // Veri Listeleri
-  const [harvests, setHarvests] = useState<HarvestRecord[]>([]);
-  const [payments, setPayments] = useState<PaymentRecord[]>([]);
-  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
-  const [gardens, setGardens] = useState<GardenRecord[]>([]);
-  const [factoryPrices, setFactoryPrices] = useState<FactoryPriceRecord[]>([]);
+  // Veri listeleri useAppData hook'unda tutulur; bu dosya yalnızca ekran akışını yönetir.
   const [selectedFactory, setSelectedFactory] = useState<string | null>(null);
   const [factoryFilter, setFactoryFilter] = useState<'Tümü' | 'Haftalık' | 'Aylık' | 'Peşin' | 'Vadeli'>('Tümü');
-  const [ads, setAds] = useState<AdRecord[]>([]);
-
-  const todayTR = todayDisplayDate();
-  const [priceForm, setPriceForm] = useState({ firma: 'ÇAYKUR', fiyat: '', tarih: todayTR, fiyatTuru: 'Peşin', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
-
+  const [priceForm, setPriceForm] = useState({ firma: 'ÇAYKUR', fiyat: '', tarih: todayDisplayDate(), fiyatTuru: 'Peşin', vadeGun: '', gecerlilikBaslangic: '', politika: '', kaynak: '', aciklama: '' });
   const [adForm, setAdForm] = useState({
-    slot: 'dashboard_top',
-    firma: '',
-    kategori: 'Sponsorlu',
-    baslik: '',
-    aciklama: '',
-    telefon: '',
-    link: '',
-    gorselUrl: '',
-    baslangic: '',
-    bitis: ''
+    slot: 'dashboard_top', firma: '', kategori: 'Sponsorlu', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', baslangic: '', bitis: ''
   });
 
   // Form State'leri
+  const todayTR = todayDisplayDate();
   const [hForm, setHForm] = useState({
     date: todayTR,
     surum: '1. Sürüm',
@@ -88,16 +89,19 @@ export default function App() {
     aciklama: '',
     garden: '',
     isVadeli: false,
-    vadeTarihi: ''
+    vadeTarihi: '',
+    receiptFingerprint: ''
   });
   const [receiptBusy, setReceiptBusy] = useState(false);
   const [receiptNotice, setReceiptNotice] = useState('');
+  const [receiptDraft, setReceiptDraft] = useState<{ date?: string; company?: string; netWeightKg?: number | null; paymentTerm?: string; receiptFingerprint?: string } | null>(null);
 
   const [eForm, setEForm] = useState({
     date: todayTR,
     kategori: 'İşçilik',
     aciklama: '',
-    tutar: ''
+    tutar: '',
+    garden: ''
   });
 
   const [gForm, setGForm] = useState({ name: '', adaParsel: '', alan: '' });
@@ -121,27 +125,7 @@ export default function App() {
   const [payDate, setPayDate] = useState(todayTR);
 
   const isAdmin = currentUser?.role === 'admin';
-  const desktopMenuItems = [
-    { group: 'GENEL', tab: 'dashboard' as const, icon: 'home-variant' as AppIconName, label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
-    { group: 'GENEL', tab: 'harvest' as const, icon: 'leaf' as AppIconName, label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
-    { group: 'GENEL', tab: 'history' as const, icon: 'history' as AppIconName, label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
-    { group: 'ÖDEMELER', tab: 'collections' as const, icon: 'cash-multiple' as AppIconName, label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },
-    { group: 'ÖDEMELER', tab: 'receivables' as const, icon: 'calendar-clock' as AppIconName, label: 'Alacaklar', helper: 'Bekleyen ödemeler' },
-    { group: 'ÖDEMELER', tab: 'expense' as const, icon: 'receipt-text' as AppIconName, label: 'Giderler', helper: 'Masraf kaydı ve listesi' },
-    { group: 'TAKİP', tab: 'gardens' as const, icon: 'tree' as AppIconName, label: 'Bahçeler', helper: 'Bahçe bilgileri' },
-    { group: 'TAKİP', tab: 'prices' as const, icon: 'factory' as AppIconName, label: 'Fabrika Fiyatları', helper: 'Güncel fiyat karşılaştırması' },
-    { group: 'TAKİP', tab: 'reports' as const, icon: 'chart-box-outline' as AppIconName, label: 'Raporlar', helper: 'PDF, Excel ve analizler' },
-    { group: 'HESAP', tab: 'more' as const, icon: 'dots-grid' as AppIconName, label: 'Diğer', helper: 'Tüm bölümlere kısa yol' },
-    { group: 'HESAP', tab: 'settings' as const, icon: 'cog-outline' as AppIconName, label: 'Ayarlar', helper: 'Şifre ve hesap işlemleri' },
-    ...(isAdmin ? [{ group: 'YÖNETİM', tab: 'admin' as const, icon: 'shield-account-outline' as AppIconName, label: 'Yönetim', helper: 'Yönetici paneli' }] : []),
-  ];
-  const mobileNavItems = [
-    { tab: 'dashboard' as const, label: 'Ana Sayfa', icon: 'home-variant' as AppIconName },
-    { tab: 'harvest' as const, label: 'Hasat Ekle', icon: 'leaf' as AppIconName },
-    { tab: 'collections' as const, label: 'Ödeme Al', icon: 'cash-multiple' as AppIconName },
-    { tab: 'receivables' as const, label: 'Alacaklar', icon: 'calendar-clock' as AppIconName },
-    { tab: 'more' as const, label: 'Diğer', icon: 'dots-grid' as AppIconName },
-  ];
+  const desktopMenuItems = getDesktopMenuItems(Boolean(isAdmin));
   const activeDesktopMenu = desktopMenuItems.find((item) => item.tab === activeTab);
 
   const showAuthFeedback = (title: string, message: string, type: 'error' | 'info' = 'error') => {
@@ -188,17 +172,44 @@ export default function App() {
     return fetchWithTimeout(url, makeOptions(nextUser), timeout);
   };
 
-  const refreshPendingSyncCount = async () => {
-    if (!currentUser?.userId) return;
-    setPendingSyncCount(await getPendingRequestCount(currentUser.userId));
-    setFailedSyncCount(await getFailedRequestCount(currentUser.userId));
+  const {
+    harvests, setHarvests,
+    payments, setPayments,
+    expenses, setExpenses,
+    gardens, setGardens,
+    factoryPrices, setFactoryPrices,
+    ads, setAds,
+    lastSyncAt,
+    fetchData,
+  } = useAppData({ currentUser, authFetch, getAuthHeaders, setLoading, onFeedback: showOperationFeedback });
+  const {
+    pendingCount: pendingSyncCount,
+    failedCount: failedSyncCount,
+    refreshCounts: refreshPendingSyncCount,
+    queueRequest: queueOfflineRequest,
+    syncQueue: syncOfflineQueue,
+    manageFailedRequests: manageFailedOfflineRequests,
+  } = useOfflineSync({ currentUser, authFetch, getAuthHeaders });
+
+  const aiAssistant = useAiAssistant(currentUser?.userId, authFetch);
+
+  const handleCreditPurchase = (productId: CreditProductId) => {
+    const labels: Record<CreditProductId, string> = {
+      caylik_credits_250: '250 kredi · 39,99 TL',
+      caylik_credits_750: '750 kredi · 89,99 TL',
+      caylik_credits_2000: '2.000 kredi · 199,99 TL',
+      caylik_pro_monthly: 'Çaylık Pro · 119,99 TL / ay',
+    };
+    Alert.alert('Mağaza bağlantısı hazırlanıyor', `${labels[productId]} paketi seçildi. App Store ve Google Play ürünleri tanımlandıktan sonra ödeme bu düğmeden güvenli şekilde tamamlanacak.`);
   };
 
-  const queueOfflineRequest = async (endpoint: string, body: Record<string, unknown>) => {
-    if (!currentUser?.userId) throw new Error('Oturum bulunamadı.');
-    await enqueueOfflineRequest({ userId: currentUser.userId, endpoint, method: 'POST', body });
-    await refreshPendingSyncCount();
+  const handleRestoreCreditPurchases = () => {
+    Alert.alert('Satın alımları geri yükle', 'App Store ve Google Play bağlantısı tamamlandığında önceki Pro aboneliğiniz bu düğmeden geri yüklenecek.');
   };
+
+  useEffect(() => {
+    if (activeTab === 'assistant' && currentUser?.userId) void aiAssistant.refreshWallet();
+  }, [activeTab, currentUser?.userId]);
 
   const postOrQueue = async (endpoint: string, body: Record<string, unknown>) => {
     const network = await NetInfo.fetch();
@@ -228,42 +239,6 @@ export default function App() {
     }
   };
 
-  const syncOfflineQueue = async () => {
-    if (!currentUser?.userId || isSyncingOfflineQueue.current) return { synced: 0, pending: 0 };
-    const network = await NetInfo.fetch();
-    if (Platform.OS !== 'web' && (!network.isConnected || network.isInternetReachable === false)) return { synced: 0, pending: await getPendingRequestCount(currentUser.userId) };
-
-    isSyncingOfflineQueue.current = true;
-    try {
-      const result = await syncOfflineRequests(currentUser.userId, (request) => authFetch(`${API_URL}${request.endpoint}`, {
-        method: request.method,
-        headers: { ...getAuthHeaders(), 'Idempotency-Key': request.id },
-        body: JSON.stringify(request.body)
-      }));
-      setPendingSyncCount(result.pending);
-      setFailedSyncCount(await getFailedRequestCount(currentUser.userId));
-      return result;
-    } finally {
-      isSyncingOfflineQueue.current = false;
-    }
-  };
-
-  const manageFailedOfflineRequests = async () => {
-    if (!currentUser?.userId) return;
-    const failed = (await getOfflineRequests(currentUser.userId)).filter((item) => item.status === 'failed');
-    if (!failed.length) return;
-    const first = failed[0];
-    Alert.alert(
-      'Gönderilemeyen kayıt var',
-      `${failed.length} kayıt sunucu tarafından kabul edilmedi. İlk hata: ${first.lastError || 'Bilinmeyen hata'}`,
-      [
-        { text: 'Kapat', style: 'cancel' },
-        { text: 'Sil', style: 'destructive', onPress: async () => { await discardOfflineRequest(currentUser.userId, first.id); await refreshPendingSyncCount(); } },
-        { text: 'Tekrar Dene', onPress: async () => { await retryOfflineRequest(currentUser.userId, first.id); await syncOfflineQueue(); await refreshPendingSyncCount(); } }
-      ]
-    );
-  };
-
   // Uygulama Açılışında Oturumu Kontrol Et
   useEffect(() => {
     const checkSavedSession = async () => {
@@ -279,147 +254,6 @@ export default function App() {
     checkSavedSession();
   }, []);
 
-  // Verileri Sunucudan Çek
-  const setupNotifications = async () => {
-    try {
-      // Expo Go Android'de remote push token desteği yoktur (SDK 53+).
-      // Development/production build'de ise bildirim sistemi normal şekilde çalışır.
-      if (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient') {
-        console.log('Push bildirimleri Expo Go geliştirme ortamında atlandı.');
-        return;
-      }
-
-      const Notifications = require('expo-notifications');
-
-      Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowAlert: true,
-          shouldPlaySound: true,
-          shouldSetBadge: false
-        })
-      });
-
-      const permissions = await Notifications.getPermissionsAsync();
-      let finalStatus = permissions.status;
-
-      if (finalStatus !== 'granted') {
-        finalStatus = (await Notifications.requestPermissionsAsync()).status;
-      }
-
-      if (finalStatus !== 'granted') {
-        console.log('Bildirim izni verilmedi.');
-        return;
-      }
-
-      if (Platform.OS === 'android' && Notifications.setNotificationChannelAsync) {
-        await Notifications.setNotificationChannelAsync('cay-takip', {
-          name: 'Çay Takip Bildirimleri',
-          importance: Notifications.AndroidImportance?.HIGH ?? 4
-        });
-      }
-
-    } catch (e) {
-      console.log('Bildirim kurulumu atlandı:', e);
-    }
-  };
-
-  const scheduleDueNotifications = async (items: HarvestRecord[]) => {
-    if (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient') {
-      return;
-    }
-
-    try {
-      const Notifications = require('expo-notifications');
-      const permissions = await Notifications.getPermissionsAsync();
-      if (permissions.status !== 'granted') return;
-      const now = new Date();
-      if (Notifications.cancelAllScheduledNotificationsAsync) await Notifications.cancelAllScheduledNotificationsAsync();
-      for (const h of items) {
-        if (!h.isVadeli || !h.vadeTarihi) continue;
-        const raw = String(h.vadeTarihi);
-        const m = raw.match(/^(\d{4})[-.](\d{1,2})(?:[-.](\d{1,2}))?/);
-        if (!m) continue;
-        const due = new Date(Number(m[1]), Number(m[2])-1, Number(m[3] || 1), 9, 0, 0);
-        const reminder = new Date(due.getTime() - 24*60*60*1000);
-        if (reminder <= now || due <= now) continue;
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: '⏰ Çaylık - Vade Yaklaşıyor',
-            body: `${h.firma || 'Fabrika'} için ${h.uretici || h.producerName || 'üretici'} kaydının vadesi ${formatDisplayDate(h.vadeTarihi)}.`,
-            data: { type: 'vade', harvestId: h._id },
-            sound: 'default',
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: reminder,
-            ...(Platform.OS === 'android' ? { channelId: 'cay-takip' } : {}),
-          },
-        });
-      }
-    } catch (e) { console.log('Vade bildirimi planlanamadı:', e); }
-  };
-
-  const fetchData = async () => {
-    if (!currentUser?.token) return;
-    setLoading(true);
-    try {
-      const headers = getAuthHeaders();
-      const results = await Promise.allSettled([
-        authFetch(`${API_URL}/harvests?limit=500`, { headers }),
-        authFetch(`${API_URL}/payments?limit=500`, { headers }),
-        authFetch(`${API_URL}/expenses`, { headers }),
-        authFetch(`${API_URL}/gardens`, { headers }),
-        authFetch(`${API_URL}/factory-prices`, { headers }),
-        authFetch(`${API_URL}/ads`, { headers })
-      ]);
-      // Bir istek geçici olarak başarısız olursa o bölümdeki ekrandaki veriyi
-      // boş listeyle ezmeyelim. Kullanıcı bağlantı geri gelene kadar son doğru
-      // veriyi görmeye devam eder.
-      const parse = async (r: PromiseSettledResult<Response>) => {
-        if (r.status !== 'fulfilled' || !r.value.ok) return null;
-        const data = await r.value.json();
-        return Array.isArray(data) ? data : [];
-      };
-      const [rawH, rawPayments, rawE, rawG, rawP, rawA] = await Promise.all(results.map(parse));
-      const allRequestsSucceeded = results.every((r) => r.status === 'fulfilled' && r.value.ok);
-      const allRequestsFailed = results.every((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok));
-
-      if (allRequestsFailed) {
-        const snapshot = await getDataSnapshot(currentUser.userId);
-        if (snapshot) {
-          setHarvests(snapshot.harvests as HarvestRecord[]);
-          setPayments((snapshot.payments || []) as PaymentRecord[]);
-          setExpenses(snapshot.expenses as ExpenseRecord[]);
-          setGardens(snapshot.gardens as GardenRecord[]);
-          setFactoryPrices(snapshot.factoryPrices as FactoryPriceRecord[]);
-          setAds(snapshot.ads as AdRecord[]);
-          showOperationFeedback('Çevrimdışı Mod', 'Son senkronize edilen veriler gösteriliyor. Yeni kayıtlar bağlantı geldiğinde gönderilecek.', 'info');
-          return;
-        }
-      }
-
-      const nextHarvests = rawH === null ? harvests : rawH as HarvestRecord[];
-      const nextPayments = rawPayments === null ? payments : rawPayments as PaymentRecord[];
-      const nextExpenses = rawE === null ? expenses : rawE as ExpenseRecord[];
-      const nextGardens = rawG === null ? gardens : rawG as GardenRecord[];
-      const nextFactoryPrices = rawP === null ? factoryPrices : rawP as FactoryPriceRecord[];
-      const nextAds = rawA === null ? ads : rawA as AdRecord[];
-      setHarvests(nextHarvests); setPayments(nextPayments); setExpenses(nextExpenses); setGardens(nextGardens); setFactoryPrices(nextFactoryPrices); setAds(nextAds);
-      if (allRequestsSucceeded) {
-        await saveDataSnapshot(currentUser.userId, {
-          harvests: nextHarvests, payments: nextPayments, expenses: nextExpenses, gardens: nextGardens, factoryPrices: nextFactoryPrices, ads: nextAds
-        });
-      }
-      if (rawH !== null) await scheduleDueNotifications(nextHarvests);
-      const failedSources = results.map((r, i) => (r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)) ? ['hasatlar','tahsilatlar','giderler','bahçeler','fabrika fiyatları','reklamlar'][i] : null).filter(Boolean);
-      if (failedSources.length > 0 && failedSources.length < results.length) {
-        showOperationFeedback('Kısmi Güncelleme', `${failedSources.join(', ')} şu an güncellenemedi. Ekranda son kaydedilmiş bilgiler korunuyor.`, 'info');
-      }
-      if (failedSources.length === results.length) { showOperationFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error'); }
-    } catch (err: any) { showOperationFeedback('Bağlantı Kurulamadı', err.message || 'Sunucuya ulaşılamadı.', 'error'); }
-    finally { setLoading(false); }
-  };
-
   useEffect(() => {
     if (currentUser) {
       setupNotifications();
@@ -428,8 +262,28 @@ export default function App() {
         if (result.synced > 0) fetchData();
       });
       fetchData();
+    } else {
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    let active = true;
+    const userId = currentUser?.userId;
+    if (!userId) {
+      setOnboardingStep(null);
+      return () => { active = false; };
+    }
+
+    AsyncStorage.getItem(`${ONBOARDING_STORAGE_PREFIX}:${userId}`)
+      .then((value) => {
+        if (active && value !== 'done') setOnboardingStep(0);
+      })
+      .catch(() => {
+        if (active) setOnboardingStep(0);
+      });
+
+    return () => { active = false; };
+  }, [currentUser?.userId]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -442,63 +296,6 @@ export default function App() {
     });
     return unsubscribe;
   }, [currentUser]);
-
-  // DİNAMİK HESAPLAMALAR
-  // 1. Bahçe Bazlı İstatistiklerin Dinamik Hesaplanması (Madde 1)
-  const getGardenSummaries = () => {
-    const map: { [key: string]: { name: string; toplamKg: number; toplamKazanc: number; toplamTahsilat: number } } = {};
-
-    harvests.forEach((h) => {
-      const gName = (h.bahce || h.garden || '').trim() || 'Belirtilmeyen Bahçe';
-      if (!map[gName]) {
-        map[gName] = { name: gName, toplamKg: 0, toplamKazanc: 0, toplamTahsilat: 0 };
-      }
-      const kg = Number(h.kg || h.weight) || 0;
-      const pay = Number(h.tahsilat) || 0;
-
-      map[gName].toplamKg += kg;
-      map[gName].toplamKazanc += netTotalOf(h);
-      map[gName].toplamTahsilat += pay;
-    });
-
-    return Object.values(map);
-  };
-
-  // Vadeli / Bekleyen Alacakların Dinamik Hesaplanması
-  const formatVadeMonth = (value: any) => {
-    if (!value) return 'Vadesi Belirtilmeyenler';
-    const s = String(value).trim();
-    let year = 0, month = 0;
-    let m = s.match(/^(\d{4})[-./](\d{1,2})/);
-    if (m) { year = Number(m[1]); month = Number(m[2]); }
-    else { m = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/); if (m) { month = Number(m[2]); year = Number(m[3]); } }
-    if (!year || !month) return s;
-    const names = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
-    return `${names[month - 1] || 'Bilinmeyen Ay'} ${year}`;
-  };
-
-  const getReceivables = () => {
-    const list = harvests.filter((h) => remainingTotalOf(h) > 0.01);
-    const totalReceivables = list.reduce((acc, h) => acc + remainingTotalOf(h), 0);
-
-    return { totalReceivables, list };
-  };
-
-  const receivablesSafe = (items: any[]) => (items || []).filter((h: any) => remainingTotalOf(h) > 0.01);
-
-  const getReceivablesByMonth = () => {
-    const groups: { [key: string]: { label: string; rows: any[] } } = {};
-    receivablesSafe(harvests).forEach((h: any) => {
-      const rawDate = h.vadeTarihi || h.tarih;
-      const normalizedDate = toServerDate(rawDate);
-      const key = normalizedDate ? normalizedDate.slice(0, 7) : '9999-12';
-      if (!groups[key]) groups[key] = { label: formatVadeMonth(rawDate), rows: [] };
-      groups[key].rows.push(h);
-    });
-    return Object.entries(groups)
-      .sort(([first], [second]) => first.localeCompare(second))
-      .map(([, group]) => [group.label, group.rows] as [string, any[]]);
-  };
 
   // Giriş Yap / Kayıt Ol İşlemleri
   const syncProfile = async (phone: string, pin: string) => {
@@ -575,6 +372,7 @@ export default function App() {
     try {
       if (currentUser?.refreshToken) await fetchWithTimeout(`${API_URL}/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: currentUser.refreshToken }) });
     } catch {}
+    if (currentUser?.userId) await clearDueNotifications(currentUser.userId);
     await clearSession();
     setCurrentUser(null);
   };
@@ -584,7 +382,7 @@ export default function App() {
       const response = await authFetch(`${API_URL}/users/me`, { method: 'DELETE', headers: getAuthHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Hesap silinemedi.');
-      if (currentUser?.userId) await clearOfflineData(currentUser.userId);
+      if (currentUser?.userId) await Promise.all([clearOfflineData(currentUser.userId), clearDueNotifications(currentUser.userId)]);
       await clearSession();
       setCurrentUser(null);
       Alert.alert('Hesap Silindi', 'Hesabınız ve ilişkili kayıtlarınız silindi.');
@@ -612,36 +410,56 @@ export default function App() {
     await saveSession(refreshedUser);
   };
 
-  // Genel Hesaplamalar
-  const totalKg = (harvests || []).reduce((acc, c) => acc + (Number(c.kg || c.weight) || 0), 0);
-  const totalSales = (harvests || []).reduce((acc, c) => acc + netTotalOf(c), 0);
-  const totalPay = (harvests || []).reduce((acc, c) => acc + (Number(c.tahsilat) || 0), 0);
-  const totalExp = (expenses || []).reduce((acc, c) => acc + (Number(c.tutar) || 0), 0);
-  const pendingCollection = (harvests || []).reduce((acc, c) => acc + remainingTotalOf(c), 0);
-  const netProfit = totalSales - totalExp;
-
-  // Admin Paneli İçin Üretici Bazlı Gruplama
-  const getAdminProducerSummary = () => {
-    const summaryMap: { [key: string]: { name: string; totalKg: number; totalSales: number; totalPay: number; count: number } } = {};
-
-    harvests.forEach(h => {
-      const key = h.userId || (h.uretici || h.producerName || 'Bilinmeyen Üretici').trim();
-      const pName = (h.uretici || h.producerName || 'Bilinmeyen Üretici').trim();
-
-      if (!summaryMap[key]) {
-        summaryMap[key] = { name: pName, totalKg: 0, totalSales: 0, totalPay: 0, count: 0 };
-      }
-      const kg = Number(h.kg || h.weight) || 0;
-      const pay = Number(h.tahsilat) || 0;
-
-      summaryMap[key].totalKg += kg;
-      summaryMap[key].totalSales += netTotalOf(h);
-      summaryMap[key].totalPay += pay;
-      summaryMap[key].count += 1;
-    });
-
-    return Object.values(summaryMap);
+  const handleExportData = async () => {
+    if (!currentUser) throw new Error('Oturum bulunamadı.');
+    const fileName = `caylik-yedek-${new Date().toISOString().slice(0, 10)}.json`;
+    const uri = `${FileSystem.documentDirectory}${fileName}`;
+    await FileSystem.writeAsStringAsync(uri, JSON.stringify({
+      application: 'Çaylık',
+      exportedAt: new Date().toISOString(),
+      harvests,
+      payments,
+      expenses,
+      gardens,
+      factoryPrices
+    }, null, 2));
+    if (!await Sharing.isAvailableAsync()) throw new Error('Bu cihazda paylaşım kullanılamıyor.');
+    await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Çaylık yedeği' });
   };
+
+  const handleSendFeedback = async (subject: string, message: string) => {
+    const response = await authFetch(`${API_URL}/feedback`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ subject, message })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Mesaj gönderilemedi.');
+  };
+
+  const finishOnboarding = async () => {
+    const userId = currentUser?.userId;
+    setOnboardingStep(null);
+    if (!userId) return;
+    try {
+      await AsyncStorage.setItem(`${ONBOARDING_STORAGE_PREFIX}:${userId}`, 'done');
+    } catch {
+      // Rehber tekrar görünse bile uygulamanın kullanılmasını engelleme.
+    }
+  };
+
+  // Genel Hesaplamalar
+  const {
+    totalKg,
+    totalSales,
+    totalPay,
+    totalExp,
+    pendingCollection,
+    netProfit,
+    totalReceivables,
+    calculatedGardenSummaries,
+    getReceivablesByMonth,
+  } = useHarvestMetrics(harvests, expenses);
 
   // Silme onayı React Native'in kendi penceresiyle gösterilir. Böylece Android,
   // web ve masaüstünde aynı şekilde çalışır.
@@ -677,6 +495,8 @@ export default function App() {
 
   const handlePickReceipt = async (source: 'camera' | 'library') => {
     try {
+      setReceiptDraft(null);
+      setHForm((current) => ({ ...current, receiptFingerprint: '' }));
       const permission = source === 'camera'
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -730,14 +550,15 @@ export default function App() {
 
       const hasKg = Number(data?.netWeightKg) > 0;
       const fields = [data?.date ? 'tarih' : '', data?.company ? 'firma' : '', hasKg ? 'net ağırlık' : ''].filter(Boolean);
-      setHForm((current) => ({
-        ...current,
-        date: data?.date ? formatDisplayDate(data.date) : current.date,
-        firma: data?.company ? String(data.company) : current.firma,
-        kg: hasKg ? String(data.netWeightKg).replace('.', ',') : current.kg
-      }));
+      setReceiptDraft({
+        date: data?.date ? String(data.date) : undefined,
+        company: data?.company ? String(data.company) : undefined,
+        netWeightKg: hasKg ? Number(data.netWeightKg) : null,
+        paymentTerm: data?.paymentTerm ? String(data.paymentTerm) : undefined,
+        receiptFingerprint: data?.receiptFingerprint ? String(data.receiptFingerprint) : undefined
+      });
       setReceiptNotice(fields.length
-        ? `Fişten ${fields.join(', ')} eklendi. Kaydetmeden önce kontrol edin.`
+        ? `Fişten ${fields.join(', ')} okundu. Bilgileri kontrol edip onaylayın.`
         : 'Fişte net okunabilen bilgi bulunamadı. Alanları elle doldurun.');
     } catch (error: any) {
       const message = error?.message || 'Fiş okunamadı. Lütfen alanları elle doldurun.';
@@ -746,6 +567,26 @@ export default function App() {
     } finally {
       setReceiptBusy(false);
     }
+  };
+
+  const handleConfirmReceipt = () => {
+    if (!receiptDraft) return;
+    setHForm((current) => ({
+      ...current,
+      date: receiptDraft.date ? formatDisplayDate(receiptDraft.date) : current.date,
+      firma: receiptDraft.company || current.firma,
+      kg: receiptDraft.netWeightKg && receiptDraft.netWeightKg > 0
+        ? String(receiptDraft.netWeightKg).replace('.', ',')
+        : current.kg,
+      receiptFingerprint: receiptDraft.receiptFingerprint || ''
+    }));
+    setReceiptDraft(null);
+    setReceiptNotice('Fiş bilgileri forma aktarıldı. Kaydetmeden önce kontrol edebilirsiniz.');
+  };
+
+  const handleDismissReceipt = () => {
+    setReceiptDraft(null);
+    setReceiptNotice('Fiş bilgileri aktarılmadı. Alanları elle doldurabilirsiniz.');
   };
 
   // Hasat Kaydetme
@@ -784,14 +625,15 @@ export default function App() {
         aciklama: hForm.aciklama ? hForm.aciklama.trim() : '',
         bahce: hForm.garden ? hForm.garden.trim() : '',
         isVadeli: hForm.isVadeli,
-        vadeTarihi
+        vadeTarihi,
+        receiptFingerprint: hForm.receiptFingerprint || undefined
       };
 
       const result = await postOrQueue('/harvests', payload);
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setReceiptNotice('');
-        setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '' });
+        setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
         setActiveTab('dashboard');
         return;
       }
@@ -812,7 +654,8 @@ export default function App() {
           aciklama: '',
           garden: '',
           isVadeli: false,
-          vadeTarihi: ''
+          vadeTarihi: '',
+          receiptFingerprint: ''
         });
         await fetchData();
         setActiveTab('dashboard');
@@ -1152,7 +995,8 @@ export default function App() {
         tarih,
         kategori: eForm.kategori,
         aciklama: eForm.aciklama ? eForm.aciklama.trim() : '',
-        tutar
+        tutar,
+        bahce: eForm.garden ? eForm.garden.trim() : ''
       });
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Gider kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
@@ -1278,15 +1122,13 @@ export default function App() {
     );
   }
 
-  const { totalReceivables, list: receivablesList } = getReceivables();
-  const calculatedGardenSummaries = getGardenSummaries();
 
   // ANA UYGULAMA EKRANI
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: paperTheme.colors.background }]}>
         <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
-        <View style={isDesktop ? styles.desktopShell : styles.mobileShell}>
+        <View style={[isDesktop ? styles.desktopShell : styles.mobileShell, { backgroundColor: paperTheme.colors.background }]}>
           {isDesktop && (
             <View style={styles.desktopSidebar}>
               <View style={styles.desktopBrand}>
@@ -1343,15 +1185,18 @@ export default function App() {
             </View>
           )}
 
-          <View style={styles.appMain}>
+          <View style={[styles.appMain, { backgroundColor: paperTheme.colors.background }]}>
 
         {/* HEADER */}
         <View style={[styles.header, isDesktop && styles.desktopHeader]}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : 'Çaylık'}</Text>
-            <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>
-              {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : <>Hoş geldin, {currentUser.name} {isAdmin ? '(Yönetici)' : ''}</>}
-            </Text>
+          <View style={styles.headerBrandRow}>
+            {!isDesktop && <View style={styles.headerBrandMark}><Image source={require('../../assets/caylik-icon-v1.png')} style={styles.headerBrandImage} /></View>}
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.headerEyebrow, isDesktop && styles.desktopHeaderSubtitle]}>{isDesktop ? 'ÇAYLIK YÖNETİM' : 'ÇAYLIK · ÜRETİCİ TAKİBİ'}</Text>
+              <Text style={[styles.headerTitle, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : `Merhaba, ${currentUser.name.split(' ')[0] || currentUser.name}`}</Text>
+              <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>
+                {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : isAdmin ? 'Yönetici hesabı' : 'Sezon verilerin güncel'}
+              </Text>
             {pendingSyncCount > 0 && (
               <View style={styles.statusLine}>
                 <AppIcon name="cloud-upload-outline" size={15} color="#46735A" />
@@ -1365,7 +1210,9 @@ export default function App() {
               </TouchableOpacity>
             )}
           </View>
+          </View>
           <TouchableOpacity style={[styles.logoutBtn, isDesktop && styles.desktopLogoutBtn]} onPress={handleLogout}>
+            <AppIcon name="logout-variant" size={20} color="#FFFFFF" />
             <Text style={styles.logoutBtnText}>Çıkış</Text>
           </TouchableOpacity>
         </View>
@@ -1389,9 +1236,50 @@ export default function App() {
         )}
 
         {/* İÇERİK ALANI */}
+        {(['history', 'expense', 'gardens'] as const).includes(activeTab as any) ? (
+          <View style={[styles.content, isDesktop && styles.desktopScroll, { padding: 0, backgroundColor: paperTheme.colors.background }]}>
+            {activeTab === 'history' && (
+            <HarvestHistoryScreen
+              harvests={harvests}
+              openHarvestEditModal={openHarvestEditModal}
+              openPaymentForHarvest={openPaymentForHarvest}
+              handleDelete={handleDelete}
+              refreshing={loading}
+              onRefresh={fetchData}
+              contentContainerStyle={isDesktop ? styles.desktopContent : { padding: 18, paddingBottom: 32 }}
+            />
+            )}
+            {activeTab === 'expense' && (
+              <ExpenseScreen
+                eForm={eForm}
+                expenses={expenses}
+                gardens={gardens}
+                handleDelete={handleDelete}
+                handleSaveExpense={handleSaveExpense}
+                setEForm={setEForm}
+                refreshing={loading}
+                onRefresh={fetchData}
+                contentContainerStyle={isDesktop ? styles.desktopContent : { padding: 18, paddingBottom: 32 }}
+              />
+            )}
+            {activeTab === 'gardens' && (
+              <GardensScreen
+                gForm={gForm}
+                gardens={gardens}
+                calculatedGardenSummaries={calculatedGardenSummaries}
+                handleDelete={handleDelete}
+                handleSaveGarden={handleSaveGarden}
+                setGForm={setGForm}
+                refreshing={loading}
+                onRefresh={fetchData}
+                contentContainerStyle={isDesktop ? styles.desktopContent : { padding: 18, paddingBottom: 32 }}
+              />
+            )}
+          </View>
+        ) : (
         <ScrollView
-          style={[styles.content, isDesktop && styles.desktopScroll]}
-          contentContainerStyle={isDesktop ? styles.desktopContent : undefined}
+          style={[styles.content, isDesktop && styles.desktopScroll, { backgroundColor: paperTheme.colors.background }]}
+          contentContainerStyle={isDesktop ? styles.desktopContent : styles.mobileContent}
           showsVerticalScrollIndicator={isDesktop}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} colors={['#1b4332']} />}
         >
@@ -1412,6 +1300,28 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'assistant' && (
+            <AssistantScreen
+              messages={aiAssistant.messages}
+              credits={aiAssistant.credits}
+              transactions={aiAssistant.transactions}
+              busy={aiAssistant.busy}
+              transcribing={aiAssistant.transcribing}
+              error={aiAssistant.error}
+              onAsk={aiAssistant.ask}
+              onTranscribe={aiAssistant.transcribeVoice}
+              onClear={aiAssistant.clearConversation}
+              onOpenStore={() => setActiveTab('creditStore')}
+            />
+          )}
+          {activeTab === 'creditStore' && (
+            <CreditStoreScreen
+              credits={aiAssistant.credits}
+              onBack={() => setActiveTab('assistant')}
+              onPurchase={handleCreditPurchase}
+              onRestore={handleRestoreCreditPurchases}
+            />
+          )}
           {/* HASAT EKLE TABI */}
           {activeTab === 'harvest' && (
             <HarvestScreen
@@ -1422,15 +1332,9 @@ export default function App() {
               onPickReceipt={handlePickReceipt}
               receiptBusy={receiptBusy}
               receiptNotice={receiptNotice}
-            />
-          )}
-
-          {activeTab === 'history' && (
-            <HarvestHistoryScreen
-              harvests={harvests}
-              openHarvestEditModal={openHarvestEditModal}
-              openPaymentForHarvest={openPaymentForHarvest}
-              handleDelete={handleDelete}
+              receiptDraft={receiptDraft}
+              onConfirmReceipt={handleConfirmReceipt}
+              onDismissReceipt={handleDismissReceipt}
             />
           )}
 
@@ -1464,17 +1368,6 @@ export default function App() {
 
           {activeTab === 'more' && <MoreScreen isAdmin={Boolean(isAdmin)} onNavigate={(tab) => setActiveTab(tab)} />}
 
-          {/* GİDERLER TABI */}
-          {activeTab === 'expense' && (
-            <ExpenseScreen
-              eForm={eForm}
-              expenses={expenses}
-              handleDelete={handleDelete}
-              handleSaveExpense={handleSaveExpense}
-              setEForm={setEForm}
-            />
-          )}
-
           {/* FABRİKA FİYATLARI TABI */}
           {activeTab === 'prices' && (
             <FactoryPricesScreen
@@ -1491,18 +1384,6 @@ export default function App() {
             />
           )}
 
-          {/* BAHÇELER TABI */}
-          {activeTab === 'gardens' && (
-            <GardensScreen
-              gForm={gForm}
-              gardens={gardens}
-              calculatedGardenSummaries={calculatedGardenSummaries}
-              handleDelete={handleDelete}
-              handleSaveGarden={handleSaveGarden}
-              setGForm={setGForm}
-            />
-          )}
-
           {activeTab === 'reports' && (
             <ReportsScreen
               harvests={harvests}
@@ -1511,26 +1392,44 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'settings' && <SettingsScreen currentUser={currentUser} onChangePin={handleChangePin} onDeleteAccount={handleDeleteAccount} />}
+          {activeTab === 'settings' && (
+            <SettingsScreen
+              currentUser={currentUser}
+              onChangePin={handleChangePin}
+              onDeleteAccount={handleDeleteAccount}
+              lastSyncAt={lastSyncAt}
+              onExportData={handleExportData}
+              onSendFeedback={handleSendFeedback}
+            />
+          )}
 
           {/* ADMIN PANELİ TABI */}
           {activeTab === 'admin' && isAdmin && (
             <AdminScreen
               adForm={adForm}
               ads={ads}
-              getAdminProducerSummary={getAdminProducerSummary}
               handleDelete={handleDelete}
               handleSaveAd={handleSaveAd}
               setAdForm={setAdForm}
-              totalKg={totalKg}
-              totalPay={totalPay}
-              totalSales={totalSales}
               currentUser={currentUser}
             />
           )}
         </ScrollView>
+        )}
+        {!isDesktop && activeTab !== 'assistant' && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Çaylık Asistanı aç"
+            activeOpacity={0.86}
+            onPress={() => setActiveTab('assistant')}
+            style={[styles.assistantFab, { backgroundColor: paperTheme.colors.primary }]}
+          >
+            <AppIcon name="robot-outline" size={21} color={paperTheme.colors.onPrimary} />
+            <Text style={[styles.assistantFabText, { color: paperTheme.colors.onPrimary }]}>Asistan{aiAssistant.credits !== null ? ` · ${aiAssistant.credits}` : ''}</Text>
+          </TouchableOpacity>
+        )}
         {!isDesktop && (
-          <View style={styles.mobileBottomNav}>
+          <View style={[styles.mobileBottomNav, { backgroundColor: paperTheme.colors.surface, borderTopColor: paperTheme.colors.outline }]}>
             {mobileNavItems.map((item) => {
               const active = activeTab === item.tab;
               return (
@@ -1542,10 +1441,10 @@ export default function App() {
                   style={styles.mobileBottomNavItem}
                   onPress={() => setActiveTab(item.tab)}
                 >
-                  <View style={[styles.mobileBottomNavIcon, active && styles.mobileBottomNavIconActive]}>
-                    <AppIcon name={item.icon} size={22} color={active ? '#FFFFFF' : '#6D8174'} />
+                  <View style={[styles.mobileBottomNavIcon, active && styles.mobileBottomNavIconActive, active && { backgroundColor: paperTheme.colors.primaryContainer }]}>
+                    <AppIcon name={item.icon} size={22} color={active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant} />
                   </View>
-                  <Text numberOfLines={1} style={[styles.mobileBottomNavText, active && styles.mobileBottomNavTextActive]}>{item.label}</Text>
+                  <Text numberOfLines={1} style={[styles.mobileBottomNavText, active && styles.mobileBottomNavTextActive, { color: active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant }]}>{item.label}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -1553,6 +1452,45 @@ export default function App() {
         )}
           </View>
         </View>
+
+        <Modal
+          visible={onboardingStep !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={finishOnboarding}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.deleteConfirmModal]}>
+              <Text style={styles.modalTitle}>Çaylık kullanımı</Text>
+              <Text style={styles.formHelp}>Adım {(onboardingStep ?? 0) + 1} / {ONBOARDING_STEPS.length}</Text>
+              <Text style={{ fontSize: 22, fontWeight: '700', color: '#174D36', marginTop: 8 }}>
+                {ONBOARDING_STEPS[onboardingStep ?? 0]?.title}
+              </Text>
+              <Text style={[styles.formHelp, { fontSize: 16, lineHeight: 24, marginTop: 12 }]}>
+                {ONBOARDING_STEPS[onboardingStep ?? 0]?.message}
+              </Text>
+              <View style={styles.modalBtnGroup}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={finishOnboarding}>
+                  <Text style={styles.modalBtnText}>Daha Sonra</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteConfirmButton}
+                  onPress={() => {
+                    if ((onboardingStep ?? 0) >= ONBOARDING_STEPS.length - 1) {
+                      finishOnboarding();
+                    } else {
+                      setOnboardingStep((step) => (step ?? 0) + 1);
+                    }
+                  }}
+                >
+                  <Text style={styles.modalBtnText}>
+                    {(onboardingStep ?? 0) >= ONBOARDING_STEPS.length - 1 ? 'Başla' : 'Devam'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <Modal
           visible={Boolean(deleteConfirmation)}

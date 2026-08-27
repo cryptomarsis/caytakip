@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { NativeScrollEvent, NativeSyntheticEvent, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { FlatList, NativeScrollEvent, NativeSyntheticEvent, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { useTheme } from 'react-native-paper';
 import { styles } from '../styles/styles';
+import { AppIcon } from '../components/app-icon';
 import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
 import { PaymentRecord } from '../types';
 
@@ -13,8 +15,10 @@ const recordTime = (value?: string) => {
 };
 
 export default function CollectionsScreen(props: any) {
+  const theme = useTheme();
+  const selectedCardColor = theme.dark ? '#174C38' : theme.colors.primary;
   const { handleSpecificHarvestPayment, harvests, payments, handleDelete, openPaymentEditModal, prepareLegacyPaymentForEdit, payAmount, payDate, payDesc, payHarvestId, setPayAmount, setPayDate, setPayDesc, setPayHarvestId } = props;
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<FlatList<any>>(null);
   const { width } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
   const cardWidth = Math.max(280, width - 64);
@@ -46,7 +50,7 @@ export default function CollectionsScreen(props: any) {
     if (!harvest) return;
     setCurrentIndex(safeIndex);
     setPayHarvestId(harvest._id);
-    if (shouldScroll) scrollRef.current?.scrollTo({ x: safeIndex * cardStep, animated: true });
+    if (shouldScroll) scrollRef.current?.scrollToIndex({ index: safeIndex, animated: true });
   };
 
   const handleSwipeEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -79,23 +83,35 @@ export default function CollectionsScreen(props: any) {
 
   return (
     <View>
-      <View style={styles.formCard}>
-        <Text style={styles.formTitle}>Ödeme Al</Text>
-        <Text style={styles.formHelp}>
+      <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <View style={{ width: 50, height: 50, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primaryContainer }}>
+            <AppIcon name="cash-check" size={27} color={theme.colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.formTitle, { color: theme.colors.onSurface, marginBottom: 2 }]}>Ödeme Al</Text>
+            <Text style={{ color: theme.colors.primary, fontWeight: '800', fontSize: 12, letterSpacing: 0.7 }}>ALACAĞINI KAYDET</Text>
+          </View>
+        </View>
+        <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>
           Her kart bir hasat kaydıdır. Doğru hasadı bulmak için kartları sağa-sola kaydırın veya Önceki / Sonraki düğmelerini kullanın.
         </Text>
 
         {pendingHarvests.length === 0 ? (
-          <Text style={styles.emptyText}>Bekleyen ödemesi olan hasat kaydı yok.</Text>
+          <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>Bekleyen ödemesi olan hasat kaydı yok.</Text>
         ) : (
           <>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text style={styles.label}>Hasat Kaydı</Text>
-              <Text style={{ color: '#1b4332', fontWeight: '800' }}>Kayıt {currentIndex + 1} / {pendingHarvests.length}</Text>
+              <Text style={[styles.label, { color: theme.colors.onSurface }]}>Hasat Kaydı</Text>
+              <View style={{ backgroundColor: theme.colors.primaryContainer, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
+                <Text style={{ color: theme.colors.primary, fontWeight: '900' }}>Kayıt {currentIndex + 1} / {pendingHarvests.length}</Text>
+              </View>
             </View>
 
-            <ScrollView
+            <FlatList
               ref={scrollRef}
+              data={pendingHarvests}
+              keyExtractor={(harvest) => String(harvest._id)}
               horizontal
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
@@ -105,8 +121,8 @@ export default function CollectionsScreen(props: any) {
               onMomentumScrollEnd={handleSwipeEnd}
               contentContainerStyle={{ paddingRight: 12 }}
               style={{ marginBottom: 10 }}
-            >
-              {pendingHarvests.map((harvest: any, index: number) => {
+              getItemLayout={(_, index) => ({ length: cardStep, offset: cardStep * index, index })}
+              renderItem={({ item: harvest, index }) => {
                 const gross = grossTotalOf(harvest);
                 const deduction = deductionTotalOf(harvest);
                 const net = netTotalOf(harvest);
@@ -122,8 +138,8 @@ export default function CollectionsScreen(props: any) {
                     style={{
                       width: cardWidth,
                       minHeight: 255,
-                      backgroundColor: active ? '#1b4332' : '#f4f8f5',
-                      borderColor: active ? '#1b4332' : '#d7e4da',
+                      backgroundColor: active ? selectedCardColor : theme.colors.surfaceVariant,
+                      borderColor: active ? selectedCardColor : theme.colors.outline,
                       borderWidth: 1,
                       borderRadius: 14,
                       padding: 16,
@@ -132,75 +148,80 @@ export default function CollectionsScreen(props: any) {
                   >
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={{ color: active ? '#fff' : '#183a2a', fontWeight: '800', fontSize: 17 }}>
+                        <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 17 }}>
                           {harvest.firma || 'Firma belirtilmedi'}
                         </Text>
-                        <Text style={{ color: active ? '#e5f2e8' : '#57675d', marginTop: 3 }}>
+                        <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: active ? 0.86 : 1, marginTop: 3 }}>
                           {formatDisplayDate(harvest.tarih)} · {harvest.surum || 'Sürüm belirtilmedi'}{createdTime ? ` · ${createdTime}` : ''}
                         </Text>
                       </View>
-                      <View style={{ backgroundColor: active ? '#40916c' : '#dceee0', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5 }}>
-                        <Text style={{ color: active ? '#fff' : '#1b4332', fontWeight: '800', fontSize: 12 }}>#{index + 1}</Text>
+                      <View style={{ backgroundColor: active ? 'rgba(255,255,255,0.18)' : theme.colors.primaryContainer, borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5 }}>
+                        <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.primary, fontWeight: '800', fontSize: 12 }}>#{index + 1}</Text>
                       </View>
                     </View>
 
-                    <View style={{ borderTopWidth: 1, borderTopColor: active ? '#528d70' : '#d7e4da', marginVertical: 12 }} />
-                    <Text style={{ color: active ? '#fff' : '#1f3528', fontWeight: '800', fontSize: 16 }}>{harvest.kg || harvest.weight || 0} KG · {harvest.fiyat || 0} TL/KG brüt</Text>
-                    <Text style={{ color: active ? '#e5f2e8' : '#57675d', marginTop: 5 }}>Bahçe: {harvest.bahce || harvest.garden || 'Belirtilmedi'}</Text>
-                    {harvest.aciklama ? <Text style={{ color: active ? '#e5f2e8' : '#57675d', marginTop: 4 }}>Not: {harvest.aciklama}</Text> : null}
+                    <View style={{ borderTopWidth: 1, borderTopColor: active ? 'rgba(255,255,255,0.24)' : theme.colors.outline, marginVertical: 12 }} />
+                    <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 16 }}>{harvest.kg || harvest.weight || 0} KG · {harvest.fiyat || 0} TL/KG brüt</Text>
+                    <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: active ? 0.86 : 1, marginTop: 5 }}>Bahçe: {harvest.bahce || harvest.garden || 'Belirtilmedi'}</Text>
+                    {harvest.aciklama ? <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: active ? 0.86 : 1, marginTop: 4 }}>Not: {harvest.aciklama}</Text> : null}
 
-                    <View style={{ backgroundColor: active ? '#24583f' : '#e8f3eb', borderRadius: 10, padding: 10, marginTop: 13 }}>
-                      <Text style={{ color: active ? '#e5f2e8' : '#46584d', fontSize: 12 }}>Brüt {formatTL(gross)} · %2 kesinti {formatTL(deduction)}</Text>
-                      <Text style={{ color: active ? '#fff' : '#1b4332', fontWeight: '800', marginTop: 3 }}>Net alacak: {formatTL(net)}</Text>
-                      <Text style={{ color: active ? '#fff' : '#1b4332', fontWeight: '800', marginTop: 3 }}>Kalan ödeme: {formatTL(remaining)}</Text>
+                    <View style={{ backgroundColor: active ? 'rgba(0,0,0,0.16)' : theme.colors.primaryContainer, borderRadius: 12, padding: 11, marginTop: 13 }}>
+                      <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: active ? 0.86 : 1, fontSize: 12 }}>Brüt {formatTL(gross)} · %2 kesinti {formatTL(deduction)}</Text>
+                      <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.primary, fontWeight: '800', marginTop: 3 }}>Net alacak: {formatTL(net)}</Text>
+                      <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.primary, fontWeight: '800', marginTop: 3 }}>Kalan ödeme: {formatTL(remaining)}</Text>
                     </View>
-                    <Text style={{ color: active ? '#d1ebd9' : '#748077', fontSize: 11, marginTop: 10 }}>Kayıt kodu: {String(harvest._id || '').slice(-8).toUpperCase()} · Ödenen: {formatTL(paid)}</Text>
+                    <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: 0.72, fontSize: 11, marginTop: 10 }}>Kayıt kodu: {String(harvest._id || '').slice(-8).toUpperCase()} · Ödenen: {formatTL(paid)}</Text>
                   </TouchableOpacity>
                 );
-              })}
-            </ScrollView>
+              }}
+            />
 
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
               <TouchableOpacity
-                style={[styles.groupBtn, { flex: 1, opacity: currentIndex === 0 ? 0.45 : 1 }]}
+                style={[styles.groupBtn, { flex: 1, opacity: currentIndex === 0 ? 0.45 : 1, backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }]}
                 disabled={currentIndex === 0}
                 onPress={() => selectIndex(currentIndex - 1)}
               >
-                <Text style={styles.groupBtnText}>‹ Önceki Kayıt</Text>
+                <Text style={[styles.groupBtnText, { color: theme.colors.onSurface }]}>‹ Önceki</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.groupBtn, { flex: 1, opacity: currentIndex === pendingHarvests.length - 1 ? 0.45 : 1 }]}
+                style={[styles.groupBtn, { flex: 1, opacity: currentIndex === pendingHarvests.length - 1 ? 0.45 : 1, backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }]}
                 disabled={currentIndex === pendingHarvests.length - 1}
                 onPress={() => selectIndex(currentIndex + 1)}
               >
-                <Text style={styles.groupBtnText}>Sonraki Kayıt ›</Text>
+                <Text style={[styles.groupBtnText, { color: theme.colors.onSurface }]}>Sonraki ›</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.formHelp, { color: '#1b4332', fontWeight: '700' }]}>Seçilen kaydın kalan ödemesi: {formatTL(selectedRemaining)}</Text>
+            <View style={{ backgroundColor: theme.colors.primaryContainer, borderRadius: 14, padding: 13, marginBottom: 12 }}>
+              <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: '900' }}>Kalan ödeme: {formatTL(selectedRemaining)}</Text>
+            </View>
           </>
         )}
 
-        <Text style={styles.label}>Tahsilat Tarihi (GG.AA.YYYY)</Text>
+        <Text style={[styles.label, { color: theme.colors.onSurface }]}>Tahsilat Tarihi (GG.AA.YYYY)</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
+          placeholderTextColor={theme.colors.onSurfaceVariant}
           placeholder="12.08.2026"
           value={payDate}
           onChangeText={setPayDate}
         />
 
-        <Text style={styles.label}>Alınan Tutar (TL)</Text>
+        <Text style={[styles.label, { color: theme.colors.onSurface }]}>Alınan Tutar (TL)</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
+          placeholderTextColor={theme.colors.onSurfaceVariant}
           placeholder="Örn: 5000"
           keyboardType="decimal-pad"
           value={payAmount}
           onChangeText={setPayAmount}
         />
 
-        <Text style={styles.label}>Not (İsteğe Bağlı)</Text>
+        <Text style={[styles.label, { color: theme.colors.onSurface }]}>Not (İsteğe Bağlı)</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
+          placeholderTextColor={theme.colors.onSurfaceVariant}
           placeholder="Örn: Banka havalesi"
           value={payDesc}
           onChangeText={setPayDesc}
@@ -212,11 +233,11 @@ export default function CollectionsScreen(props: any) {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.formCard}>
-        <Text style={styles.formTitle}>Tahsilat Geçmişi</Text>
-        <Text style={styles.formHelp}>Hangi hasada ne zaman ödeme girdiğinizi buradan takip edebilirsiniz.</Text>
+      <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 5 }}><AppIcon name="history" size={24} color={theme.colors.primary} /><Text style={[styles.formTitle, { color: theme.colors.onSurface, marginBottom: 0 }]}>Tahsilat Geçmişi</Text></View>
+        <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>Hangi hasada ne zaman ödeme girdiğinizi buradan takip edebilirsiniz.</Text>
         {(payments || []).length === 0 && legacyPaymentAdjustments.length === 0 ? (
-          <Text style={styles.emptyText}>Henüz kaydedilmiş tahsilat girişi yok.</Text>
+          <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>Henüz kaydedilmiş tahsilat girişi yok.</Text>
         ) : (
           <>
           {(payments as PaymentRecord[]).map((payment) => {
@@ -226,22 +247,22 @@ export default function CollectionsScreen(props: any) {
             const harvestKg = harvest?.kg ?? harvest?.weight;
             const createdTime = recordTime(payment.createdAt);
             return (
-              <View key={payment._id} style={styles.paymentHistoryCard}>
+              <View key={payment._id} style={[styles.paymentHistoryCard, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }]}>
                 <View style={styles.paymentHistoryHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.paymentHistoryTitle}>{firm}</Text>
-                    <Text style={styles.paymentHistoryMeta}>
+                    <Text style={[styles.paymentHistoryTitle, { color: theme.colors.onSurface }]}>{firm}</Text>
+                    <Text style={[styles.paymentHistoryMeta, { color: theme.colors.onSurfaceVariant }]}>
                       Tahsilat: {paymentDate(payment)}{createdTime ? ` · ${createdTime}` : ''}
                     </Text>
                   </View>
-                  <Text style={styles.paymentHistoryAmount}>+ {formatTL(Number(payment.tutar) || 0)}</Text>
+                  <Text style={[styles.paymentHistoryAmount, { color: theme.colors.primary }]}>+ {formatTL(Number(payment.tutar) || 0)}</Text>
                 </View>
                 {harvest ? (
-                  <Text style={styles.paymentHistoryMeta}>
+                  <Text style={[styles.paymentHistoryMeta, { color: theme.colors.onSurfaceVariant }]}>
                     Bağlı hasat: {harvestDate || '-'}{harvestKg !== undefined ? ` · ${harvestKg} KG` : ''}{harvest.bahce || harvest.garden ? ` · ${harvest.bahce || harvest.garden}` : ''}
                   </Text>
-                ) : <Text style={styles.paymentHistoryMeta}>Bağlı hasat kaydı silinmiş veya bulunamıyor.</Text>}
-                {!!payment.aciklama && <Text style={styles.paymentHistoryNote}>Not: {payment.aciklama}</Text>}
+                ) : <Text style={[styles.paymentHistoryMeta, { color: theme.colors.onSurfaceVariant }]}>Bağlı hasat kaydı silinmiş veya bulunamıyor.</Text>}
+                {!!payment.aciklama && <Text style={[styles.paymentHistoryNote, { color: theme.colors.onSurfaceVariant }]}>Not: {payment.aciklama}</Text>}
                 <View style={styles.paymentHistoryActions}>
                   <TouchableOpacity style={styles.paymentEditBtn} onPress={() => openPaymentEditModal(payment)}>
                     <Text style={styles.paymentActionText}>Düzenle</Text>
@@ -254,15 +275,15 @@ export default function CollectionsScreen(props: any) {
             );
           })}
           {legacyPaymentAdjustments.map(({ harvest, amount }) => (
-            <View key={`previous-${harvest._id}`} style={styles.paymentHistoryCard}>
+            <View key={`previous-${harvest._id}`} style={[styles.paymentHistoryCard, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }]}>
               <View style={styles.paymentHistoryHeader}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.paymentHistoryTitle}>{harvest.firma || 'Firma belirtilmedi'}</Text>
-                  <Text style={styles.paymentHistoryMeta}>Önceki tahsilat toplamı · Hasat: {formatDisplayDate(harvest.tarih)}</Text>
+                  <Text style={[styles.paymentHistoryTitle, { color: theme.colors.onSurface }]}>{harvest.firma || 'Firma belirtilmedi'}</Text>
+                  <Text style={[styles.paymentHistoryMeta, { color: theme.colors.onSurfaceVariant }]}>Önceki tahsilat toplamı · Hasat: {formatDisplayDate(harvest.tarih)}</Text>
                 </View>
-                <Text style={styles.paymentHistoryAmount}>+ {formatTL(amount)}</Text>
+                <Text style={[styles.paymentHistoryAmount, { color: theme.colors.primary }]}>+ {formatTL(amount)}</Text>
               </View>
-              <Text style={styles.paymentHistoryMeta}>Bu tahsilat eski uygulama kaydında toplam olarak bulunuyor; tek tek ödeme tarihi/notu daha önce saklanmamış.</Text>
+              <Text style={[styles.paymentHistoryMeta, { color: theme.colors.onSurfaceVariant }]}>Bu tahsilat eski uygulama kaydında toplam olarak bulunuyor; tek tek ödeme tarihi/notu daha önce saklanmamış.</Text>
               <TouchableOpacity style={styles.legacyPaymentEditBtn} onPress={() => prepareLegacyPaymentForEdit(harvest)}>
                 <Text style={styles.legacyPaymentEditText}>Düzenlemeye Aç</Text>
               </TouchableOpacity>

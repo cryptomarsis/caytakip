@@ -137,17 +137,53 @@ export const styles = StyleSheet.create({
     borderRadius: 11
   },
   header: {
-    backgroundColor: '#174E3A',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    backgroundColor: '#124B37',
+    paddingHorizontal: 18,
+    paddingTop: 15,
+    paddingBottom: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#061E15',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 7
+  },
+  headerBrandRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12
+  },
+  headerBrandMark: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#E3F4E8',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)'
+  },
+  headerBrandImage: {
+    width: '100%',
+    height: '100%'
+  },
+  headerEyebrow: {
+    color: '#A9D6B8',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.15,
+    marginBottom: 2
   },
   headerTitle: {
     color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 18
+    fontWeight: '900',
+    fontSize: 20,
+    letterSpacing: -0.3
   },
   headerSubtitle: {
     color: '#D6E9D9',
@@ -162,13 +198,19 @@ export const styles = StyleSheet.create({
   },
   logoutBtn: {
     backgroundColor: 'rgba(255,255,255,0.16)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8
+    minWidth: 48,
+    minHeight: 48,
+    paddingHorizontal: 11,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.13)'
   },
   logoutBtnText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 9,
     fontWeight: 'bold'
   },
   navBar: {
@@ -208,15 +250,38 @@ export const styles = StyleSheet.create({
     color: '#000000',
     fontWeight: 'bold'
   },
+  assistantFab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 82,
+    zIndex: 30,
+    elevation: 12,
+    minHeight: 48,
+    paddingHorizontal: 15,
+    borderRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#102E22',
+    shadowOpacity: 0.24,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 4 }
+  },
+  assistantFabText: {
+    fontSize: 13,
+    fontWeight: '900'
+  },
   mobileBottomNav: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E0E9E2',
-    paddingTop: 8,
-    paddingBottom: 10,
-    paddingHorizontal: 4,
+    paddingTop: 10,
+    paddingBottom: 11,
+    paddingHorizontal: 7,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     shadowColor: '#173F2E',
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -232,14 +297,14 @@ export const styles = StyleSheet.create({
     minHeight: 54
   },
   mobileBottomNavIcon: {
-    height: 33,
-    minWidth: 42,
-    borderRadius: 16.5,
+    height: 34,
+    minWidth: 50,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center'
   },
   mobileBottomNavIconActive: {
-    backgroundColor: '#1F6B4F'
+    backgroundColor: '#DDF1E4'
   },
   mobileBottomNavText: {
     color: '#66786C',
@@ -261,6 +326,9 @@ export const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 18
+  },
+  mobileContent: {
+    paddingBottom: 105
   },
   mobileShell: {
     flex: 1
@@ -452,7 +520,114 @@ export const styles = StyleSheet.create({
   statsGrid: {
     gap: 10
   },
-  quickActionGrid: {
+  dashboardSnapshot: {
+    backgroundColor: '#174D38',
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 20,
+    shadowColor: '#0B2B1F',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    elevation: 5
+  },
+  dashboardSnapshotTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  dashboardSnapshotEyebrow: {
+    color: '#B9DDC6',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1
+  },
+  dashboardSnapshotTitle: {
+    color: '#FFFFFF',
+    fontSize: 19,
+    fontWeight: '800',
+    marginTop: 4
+  },
+  dashboardSnapshotIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  dashboardSnapshotMetrics: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    paddingVertical: 13
+  },
+  dashboardSnapshotMetric: {
+    flex: 1,
+    paddingHorizontal: 13
+  },
+  dashboardSnapshotDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: 'rgba(255,255,255,0.2)'
+  },
+  dashboardSnapshotValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  dashboardSnapshotLabel: {
+    color: '#CBE6D4',
+    fontSize: 11,
+    marginTop: 3,
+    fontWeight: '600'
+  },
+  assistantSpotlight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    marginBottom: 18,
+    backgroundColor: '#DDF3E5',
+    borderWidth: 1,
+    borderColor: '#A9D6B8',
+    shadowColor: '#123D2C',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 7,
+    elevation: 3
+  },
+  assistantSpotlightIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF'
+  },
+  assistantSpotlightEyebrow: {
+    color: '#357255',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    marginBottom: 2
+  },
+  assistantSpotlightTitle: {
+    color: '#174E3A',
+    fontSize: 18,
+    fontWeight: '900'
+  },
+  assistantSpotlightText: {
+    color: '#4D6B59',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3
+  },  quickActionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
@@ -468,11 +643,11 @@ export const styles = StyleSheet.create({
     padding: 15,
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    elevation: 1,
+    elevation: 2,
     shadowColor: '#123D2C',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4
+    shadowOpacity: 0.07,
+    shadowRadius: 6
   },
   quickActionPrimary: {
     width: '100%',
@@ -633,7 +808,7 @@ export const styles = StyleSheet.create({
   statCard: {
     backgroundColor: '#FFFFFF',
     padding: 16,
-    borderRadius: 14,
+    borderRadius: 18,
     borderLeftWidth: 0,
     borderWidth: 1,
     borderColor: '#E1EAE2',
@@ -645,18 +820,20 @@ export const styles = StyleSheet.create({
   },
   statTitle: {
     fontSize: 14,
-    color: '#666',
+    // Sezon Özeti ve Raporlar kartları beyaz yüzey kullandığı için
+    // koyu modda da koyu ve okunabilir kalmalıdır.
+    color: '#526057',
     fontWeight: '600'
   },
   statValue: {
     fontSize: 21,
     fontWeight: 'bold',
-    color: '#1F513D',
+    color: '#174E3A',
     marginTop: 4
   },
   statLabel: {
     fontSize: 14,
-    color: '#47635a',
+    color: '#526057',
     marginTop: 5,
     fontWeight: '600'
   },
@@ -1173,12 +1350,14 @@ export const styles = StyleSheet.create({
   formCard: {
     backgroundColor: '#FFFFFF',
     padding: 18,
-    borderRadius: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#E0E9E2',
+    shadowColor: '#173B2B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
     marginBottom: 16
   },
   formTitle: {

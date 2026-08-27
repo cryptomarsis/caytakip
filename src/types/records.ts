@@ -39,6 +39,8 @@ export interface ExpenseRecord {
   kategori?: string;
   aciklama?: string;
   tutar?: number | string;
+  bahce?: string;
+  garden?: string;
 }
 
 export interface GardenRecord {

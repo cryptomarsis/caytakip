@@ -74,43 +74,47 @@ export const syncOfflineRequests = async (
   userId: string,
   send: (request: OfflineRequest) => Promise<Response>,
 ) => {
-  const queue = await readQueue();
+  // Kuyruğu bir kez okuyor, tüm sonucu bellekte güncelliyor ve sonunda tek
+  // yazma yapıyoruz. Çok sayıda çevrimdışı kayıtta AsyncStorage I/O azalır.
+  let queue = await readQueue();
   const mine = queue.filter((request) => request.userId === userId && request.status !== 'failed');
   let synced = 0;
   let lastError: string | undefined;
   let failed = 0;
+  let changed = false;
 
   for (const request of mine) {
     try {
       const response = await send(request);
       if (!response.ok) {
-        lastError = `Sunucu yanıtı: ${response.status}`;
+        lastError = 'Sunucu yanıtı: ' + response.status;
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-          const latest = await readQueue();
-          await writeQueue(latest.map((item) => item.id === request.id
+          queue = queue.map((item) => item.id === request.id
             ? { ...item, status: 'failed', retryCount: item.retryCount + 1, lastError }
-            : item));
+            : item);
           failed += 1;
+          changed = true;
           continue;
         }
         break;
       }
-      const remaining = (await readQueue()).filter((item) => item.id !== request.id);
-      await writeQueue(remaining);
+      queue = queue.filter((item) => item.id !== request.id);
       synced += 1;
+      changed = true;
     } catch (error) {
       lastError = error instanceof Error ? error.message : 'Bağlantı kurulamadı.';
-      const latest = await readQueue();
-      await writeQueue(latest.map((item) => item.id === request.id
+      queue = queue.map((item) => item.id === request.id
         ? { ...item, status: 'pending', retryCount: item.retryCount + 1, lastError }
-        : item));
+        : item);
+      changed = true;
       break;
     }
   }
 
-  return { synced, failed, pending: await getPendingRequestCount(userId), lastError };
+  if (changed) await writeQueue(queue);
+  const pending = queue.filter((request) => request.userId === userId && request.status !== 'failed').length;
+  return { synced, failed, pending, lastError };
 };
-
 export const saveDataSnapshot = (userId: string, snapshot: Omit<DataSnapshot, 'savedAt'>) =>
   AsyncStorage.setItem(`${SNAPSHOT_PREFIX}${userId}`, JSON.stringify({ ...snapshot, savedAt: new Date().toISOString() }));
 

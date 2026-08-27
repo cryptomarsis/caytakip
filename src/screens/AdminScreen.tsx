@@ -41,6 +41,8 @@ export default function AdminScreen(props: any) {
   const { adForm, ads, handleDelete, handleSaveAd, setAdForm, currentUser } = props;
   const [users, setUsers] = useState<any[]>([]);
   const [query, setQuery] = useState('');
+  const [cityFilter, setCityFilter] = useState('');
+  const [activityFilter, setActivityFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [page, setPage] = useState(1);
@@ -53,7 +55,7 @@ export default function AdminScreen(props: any) {
     setLoadingUsers(true);
     setLoadError('');
     try {
-      const producerUrl = `${API_URL}/admin/producers?page=${requestedPage}&limit=25&search=${encodeURIComponent(query.trim())}`;
+      const producerUrl = `${API_URL}/admin/producers?page=${requestedPage}&limit=25&search=${encodeURIComponent(query.trim())}&city=${encodeURIComponent(cityFilter.trim())}&activity=${encodeURIComponent(activityFilter)}`;
       const [usersResponse, summaryResponse] = await Promise.all([
         fetchWithTimeout(producerUrl, { headers: { Authorization: `Bearer ${currentUser.token}` } }),
         fetchWithTimeout(`${API_URL}/admin/summary`, { headers: { Authorization: `Bearer ${currentUser.token}` } })
@@ -81,9 +83,10 @@ export default function AdminScreen(props: any) {
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => { loadAdminData(page); }, query ? 300 : 0);
+    const hasFilters = Boolean(query || cityFilter || activityFilter !== 'all');
+    const timer = setTimeout(() => { loadAdminData(page); }, hasFilters ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [currentUser?.token, page, query]);
+  }, [currentUser?.token, page, query, cityFilter, activityFilter]);
 
   const toggleUser = async (user: any, active: boolean) => {
     setBusy(true);
@@ -138,11 +141,33 @@ export default function AdminScreen(props: any) {
         <Text style={styles.formTitle}>Üretici Yönetimi</Text>
         <Text style={styles.listSubText}>Toplam {Number(pagination.total || 0).toLocaleString('tr-TR')} üretici. Arama sonuçları sayfalı olarak yüklenir.</Text>
         <TextInput style={styles.input} value={query} onChangeText={(value) => { setQuery(value); setPage(1); }} placeholder="Ad soyad veya telefon ara" />
+        <TextInput style={styles.input} value={cityFilter} onChangeText={(value) => { setCityFilter(value); setPage(1); }} placeholder="Şehir ile filtrele" />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {[
+            { value: 'all', label: 'Tümü' },
+            { value: 'recent', label: 'Son 30 gün' },
+            { value: 'stale', label: 'Uzun süredir pasif' },
+            { value: 'active', label: 'Aktif hesaplar' },
+            { value: 'inactive', label: 'Pasif hesaplar' }
+          ].map((filter) => {
+            const selected = activityFilter === filter.value;
+            return (
+              <TouchableOpacity
+                key={filter.value}
+                style={[styles.secondaryBtn, { paddingHorizontal: 10, paddingVertical: 8, marginTop: 0, backgroundColor: selected ? '#1F724F' : undefined }]}
+                onPress={() => { setActivityFilter(filter.value); setPage(1); }}
+              >
+                <Text style={[styles.secondaryBtnText, { color: selected ? '#FFFFFF' : undefined }]}>{filter.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
         {loadingUsers ? <Text style={styles.emptyText}>Üreticiler yükleniyor...</Text> : users.length === 0 ? <Text style={styles.emptyText}>Üretici bulunamadı.</Text> : users.map((user) => (
           <View key={user._id} style={styles.listItem}>
             <View style={{ flex: 1 }}>
               <Text style={styles.listTitle}>{user.name || 'İsimsiz üretici'}</Text>
-              <Text style={styles.listSubText}>{user.phone} • {user.harvestCount || 0} hasat • {(user.totalKg || 0).toLocaleString('tr-TR')} KG</Text>
+              <Text style={styles.listSubText}>{[user.phone, user.city, user.lastActiveAt ? `Son giriş: ${new Date(user.lastActiveAt).toLocaleDateString('tr-TR')}` : 'Son giriş bilgisi yok'].filter(Boolean).join(' • ')}</Text>
+              <Text style={styles.listSubText}>{user.harvestCount || 0} hasat • {(user.totalKg || 0).toLocaleString('tr-TR')} KG</Text>
               <Text style={styles.listSubText}>Satış: {formatTL(user.totalSales || 0)} • Kalan: {formatTL(user.remaining || 0)}</Text>
             </View>
             <Switch value={user.active !== false} onValueChange={(active) => toggleUser(user, active)} disabled={busy || loadingUsers} />

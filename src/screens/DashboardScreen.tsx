@@ -1,6 +1,8 @@
 import React from 'react';
 import { Image, Linking, Text, View, TouchableOpacity } from 'react-native';
 import { AppIcon, AppIconName } from '../components/app-icon';
+import { CaylikActionCard, CaylikSurface } from '../components/caylik-ui';
+import { useAppTheme } from '../context/app-theme';
 import { formatTL, formatDisplayDate, netTotalOf, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
 
@@ -16,7 +18,7 @@ type DashboardProps = {
   openPaymentForHarvest: (item: any) => void;
   openHarvestEditModal: (item: any) => void;
   handleDelete: (endpoint: string, id: string, label: string) => void;
-  onNavigate: (tab: 'harvest' | 'history' | 'collections' | 'receivables' | 'expense' | 'prices' | 'reports') => void;
+  onNavigate: (tab: 'assistant' | 'harvest' | 'history' | 'collections' | 'receivables' | 'expense' | 'prices' | 'reports') => void;
 };
 
 const imageUrlOf = (value: unknown) => {
@@ -56,6 +58,12 @@ function SponsorBanner({ ad }: { ad: any }) {
 }
 
 export default function DashboardScreen({ ads, harvests, totalKg, totalSales, totalPay, pendingCollection, totalExp, netProfit, openPaymentForHarvest, openHarvestEditModal, handleDelete, onNavigate }: DashboardProps) {
+  const { paperTheme: theme, isDark: darkCards } = useAppTheme();
+  // Kart yüzeyi ve metni aynı tema çiftinden seçilir. Sabit açık tema rengi
+  // kullanmak, koyu modda beyaz kart üzerinde silik yazı oluşmasına neden olur.
+  const summaryCard = { backgroundColor: darkCards ? '#18251F' : '#FFFFFF', borderColor: darkCards ? '#476356' : '#DDE8DF' };
+  const summaryLabel = { color: darkCards ? '#E5EDE7' : '#526057' };
+  const summaryValue = { color: darkCards ? '#FFFFFF' : '#174E3A' };
   const pendingCount = harvests.filter((item) => remainingTotalOf(item) > 0.01).length;
   const quickActions = [
     { tab: 'harvest' as const, label: 'Hasat Ekle', detail: 'Yeni satış kaydı', primary: true, icon: 'leaf' as AppIconName, tint: '#FFFFFF', background: 'rgba(255,255,255,0.18)' },
@@ -68,80 +76,118 @@ export default function DashboardScreen({ ads, harvests, totalKg, totalSales, to
   return (
     <View>
       {ads.filter((ad) => ad.slot === 'dashboard_top' || ad.slot === 'dashboard_middle').slice(0, 2).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
+      <View style={styles.dashboardSnapshot}>
+        <View style={styles.dashboardSnapshotTop}>
+          <View>
+            <Text style={styles.dashboardSnapshotEyebrow}>ÇAYLIK ÖZETİ</Text>
+            <Text style={styles.dashboardSnapshotTitle}>
+              {pendingCollection > 0 ? 'Bekleyen alacaklarınızı takip edin' : 'Sezon durumunuz güncel'}
+            </Text>
+          </View>
+          <View style={styles.dashboardSnapshotIcon}>
+            <AppIcon name={pendingCollection > 0 ? 'calendar-clock' : 'check-circle'} size={23} color="#FFFFFF" />
+          </View>
+        </View>
+        <View style={styles.dashboardSnapshotMetrics}>
+          <View style={styles.dashboardSnapshotMetric}>
+            <Text style={styles.dashboardSnapshotValue}>{totalKg.toLocaleString('tr-TR')} KG</Text>
+            <Text style={styles.dashboardSnapshotLabel}>Toplam hasat</Text>
+          </View>
+          <View style={styles.dashboardSnapshotDivider} />
+          <View style={styles.dashboardSnapshotMetric}>
+            <Text style={styles.dashboardSnapshotValue}>{formatTL(pendingCollection)}</Text>
+            <Text style={styles.dashboardSnapshotLabel}>Bekleyen alacak</Text>
+          </View>
+        </View>
+      </View>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Çaylık Asistanı aç"
+        activeOpacity={0.86}
+        style={[styles.assistantSpotlight, { backgroundColor: theme.colors.primaryContainer, borderColor: theme.colors.outline }]}
+        onPress={() => onNavigate('assistant')}
+      >
+        <View style={[styles.assistantSpotlightIcon, { backgroundColor: theme.colors.surface }]}><AppIcon name="robot-outline" size={29} color={theme.colors.primary} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.assistantSpotlightEyebrow, { color: theme.colors.primary }]}>YAPAY ZEKÂ DESTEĞİ</Text>
+          <Text style={[styles.assistantSpotlightTitle, { color: theme.colors.onPrimaryContainer }]}>Çaylık Asistan’a Sor</Text>
+          <Text style={[styles.assistantSpotlightText, { color: theme.colors.onSurfaceVariant }]}>Çay yetiştiriciliği ve kendi kayıtlarınız hakkında yardım alın.</Text>
+        </View>
+        <AppIcon name="chevron-right" size={25} color={theme.colors.primary} />
+      </TouchableOpacity>
       {harvests.length === 0 && (
-        <View style={styles.gettingStartedCard}>
+        <CaylikSurface style={styles.gettingStartedCard}>
           <View style={styles.gettingStartedHead}>
-            <View style={styles.gettingStartedIcon}><AppIcon name="hand-wave" size={22} color="#1F6B4F" /></View>
+            <View style={[styles.gettingStartedIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="hand-wave" size={22} color={theme.colors.primary} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.gettingStartedTitle}>Başlamak çok kolay</Text>
-              <Text style={styles.gettingStartedText}>İlk kaydınızı birkaç dakikada tamamlayabilirsiniz.</Text>
+              <Text style={[styles.gettingStartedTitle, { color: theme.colors.onSurface }]}>Başlamak çok kolay</Text>
+              <Text style={[styles.gettingStartedText, { color: theme.colors.onSurfaceVariant }]}>İlk kaydınızı birkaç dakikada tamamlayabilirsiniz.</Text>
             </View>
           </View>
           <View style={styles.gettingStartedSteps}>
-            <Text style={styles.gettingStartedStep}><Text style={styles.gettingStartedNumber}>1</Text> Hasat Ekle ile kilo ve satış fiyatını yazın.</Text>
-            <Text style={styles.gettingStartedStep}><Text style={styles.gettingStartedNumber}>2</Text> Net alacak tutarı otomatik hesaplansın.</Text>
-            <Text style={styles.gettingStartedStep}><Text style={styles.gettingStartedNumber}>3</Text> Ödeme geldiğinde Tahsilat Ekle’ye dokunun.</Text>
+            <Text style={[styles.gettingStartedStep, { color: theme.colors.onSurfaceVariant }]}><Text style={[styles.gettingStartedNumber, { color: theme.colors.primary }]}>1</Text> Hasat Ekle ile kilo ve satış fiyatını yazın.</Text>
+            <Text style={[styles.gettingStartedStep, { color: theme.colors.onSurfaceVariant }]}><Text style={[styles.gettingStartedNumber, { color: theme.colors.primary }]}>2</Text> Net alacak tutarı otomatik hesaplansın.</Text>
+            <Text style={[styles.gettingStartedStep, { color: theme.colors.onSurfaceVariant }]}><Text style={[styles.gettingStartedNumber, { color: theme.colors.primary }]}>3</Text> Ödeme geldiğinde Tahsilat Ekle’ye dokunun.</Text>
           </View>
-        </View>
+        </CaylikSurface>
       )}
-      <Text style={styles.sectionTitle}>Bugün ne yapmak istersiniz?</Text>
+      <Text style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Bugün ne yapmak istersiniz?</Text>
       <View style={styles.quickActionGrid}>
         {quickActions.map((action) => (
-          <TouchableOpacity
+          <CaylikActionCard
             key={action.tab}
-            accessibilityRole="button"
             accessibilityLabel={action.label}
-            style={[styles.quickAction, action.primary && styles.quickActionPrimary]}
+            style={[styles.quickAction, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }, action.primary && styles.quickActionPrimary, action.primary && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }]}
             onPress={() => onNavigate(action.tab)}
           >
             <View style={[styles.quickActionIconWrap, action.primary && styles.quickActionPrimaryIconWrap, { backgroundColor: action.background }]}>
               <AppIcon name={action.icon} size={action.primary ? 28 : 24} color={action.tint} />
             </View>
             <View style={styles.quickActionCopy}>
-              <Text style={[styles.quickActionText, action.primary && styles.quickActionPrimaryText]}>{action.label}</Text>
-              <Text style={[styles.quickActionSubText, action.primary && styles.quickActionPrimarySubText]}>{action.detail}</Text>
+              <Text style={[styles.quickActionText, { color: theme.colors.onSurface }, action.primary && styles.quickActionPrimaryText, action.primary && { color: theme.colors.onPrimary }]}>{action.label}</Text>
+              <Text style={[styles.quickActionSubText, { color: theme.colors.onSurfaceVariant }, action.primary && styles.quickActionPrimarySubText, action.primary && { color: theme.colors.onPrimary }]}>{action.detail}</Text>
             </View>
-          </TouchableOpacity>
+          </CaylikActionCard>
         ))}
       </View>
 
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Bekleyen tahsilatları aç"
-        style={[styles.dashboardNotice, pendingCollection <= 0 && styles.dashboardNoticePositive]}
+        style={[styles.dashboardNotice, { backgroundColor: pendingCollection > 0 ? theme.colors.secondaryContainer : theme.colors.primaryContainer, borderColor: theme.colors.outline }]}
         onPress={() => onNavigate(pendingCollection > 0 ? 'collections' : 'history')}
       >
         <View style={[styles.dashboardNoticeIcon, pendingCollection <= 0 && styles.dashboardNoticeIconPositive]}>
           <AppIcon name={pendingCollection > 0 ? 'clock-alert-outline' : 'check-circle'} size={22} color={pendingCollection > 0 ? '#9A6515' : '#237044'} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.dashboardNoticeTitle}>{pendingCollection > 0 ? `${pendingCount} kayıtta tahsilat bekliyor` : 'Bekleyen tahsilat yok'}</Text>
-          <Text style={styles.dashboardNoticeText}>{pendingCollection > 0 ? `${formatTL(pendingCollection)} alacak için tahsilat ekranını açın.` : 'Tüm kayıtların ödemesi tamamlanmış görünüyor.'}</Text>
+          <Text style={[styles.dashboardNoticeTitle, { color: pendingCollection > 0 ? theme.colors.onSecondaryContainer : theme.colors.onPrimaryContainer }]}>{pendingCollection > 0 ? `${pendingCount} kayıtta tahsilat bekliyor` : 'Bekleyen tahsilat yok'}</Text>
+          <Text style={[styles.dashboardNoticeText, { color: theme.colors.onSurfaceVariant }]}>{pendingCollection > 0 ? `${formatTL(pendingCollection)} alacak için tahsilat ekranını açın.` : 'Tüm kayıtların ödemesi tamamlanmış görünüyor.'}</Text>
         </View>
-        <Text style={styles.dashboardNoticeAction}>{pendingCollection > 0 ? 'Aç' : 'Geçmiş'}</Text>
+        <Text style={[styles.dashboardNoticeAction, { color: theme.colors.primary }]}>{pendingCollection > 0 ? 'Aç' : 'Geçmiş'}</Text>
       </TouchableOpacity>
 
-      <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Sezon Özeti</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 22, color: theme.colors.onBackground }]}>Sezon Özeti</Text>
       <View style={styles.statsGrid}>
-        <View style={[styles.statCard, { borderLeftColor: '#2a9d8f' }]}><Text style={styles.statTitle}>Toplam Hasat</Text><Text style={styles.statValue}>{totalKg.toLocaleString('tr-TR')} KG</Text></View>
-        <View style={[styles.statCard, { borderLeftColor: '#e76f51' }]}><Text style={styles.statTitle}>Net Satış / Alacak</Text><Text style={styles.statValue}>{formatTL(totalSales)}</Text></View>
-        <View style={[styles.statCard, { borderLeftColor: '#38b000' }]}><Text style={styles.statTitle}>Yapılan Tahsilat</Text><Text style={styles.statValue}>{formatTL(totalPay)}</Text></View>
-        <View style={[styles.statCard, { borderLeftColor: '#d62828' }]}><Text style={styles.statTitle}>Kalan Alacak / Bekleyen</Text><Text style={[styles.statValue, { color: pendingCollection > 0 ? '#d62828' : '#2b9348' }]}>{formatTL(pendingCollection)}</Text></View>
-        <View style={[styles.statCard, { borderLeftColor: '#f4a261' }]}><Text style={styles.statTitle}>Toplam Gider</Text><Text style={styles.statValue}>{formatTL(totalExp)}</Text></View>
-        <View style={[styles.statCard, { borderLeftColor: '#1d3557' }]}><Text style={styles.statTitle}>Tahmini Net Kazanç</Text><Text style={[styles.statValue, { color: netProfit >= 0 ? '#2b9348' : '#d62828' }]}>{formatTL(netProfit)}</Text></View>
+        <View style={[styles.statCard, summaryCard]}><Text style={[styles.statTitle, summaryLabel]}>Toplam Hasat</Text><Text style={[styles.statValue, summaryValue]}>{totalKg.toLocaleString('tr-TR')} KG</Text></View>
+        <View style={[styles.statCard, summaryCard]}><Text style={[styles.statTitle, summaryLabel]}>Net Satış / Alacak</Text><Text style={[styles.statValue, summaryValue]}>{formatTL(totalSales)}</Text></View>
+        <View style={[styles.statCard, summaryCard]}><Text style={[styles.statTitle, summaryLabel]}>Yapılan Tahsilat</Text><Text style={[styles.statValue, summaryValue]}>{formatTL(totalPay)}</Text></View>
+        <View style={[styles.statCard, summaryCard]}><Text style={[styles.statTitle, summaryLabel]}>Kalan Alacak / Bekleyen</Text><Text style={[styles.statValue, { color: pendingCollection > 0 ? (darkCards ? '#FFB4AB' : theme.colors.error) : (darkCards ? '#8AD9A8' : theme.colors.primary) }]}>{formatTL(pendingCollection)}</Text></View>
+        <View style={[styles.statCard, summaryCard]}><Text style={[styles.statTitle, summaryLabel]}>Toplam Gider</Text><Text style={[styles.statValue, summaryValue]}>{formatTL(totalExp)}</Text></View>
+        <View style={[styles.statCard, summaryCard]}><Text style={[styles.statTitle, summaryLabel]}>Tahmini Net Kazanç</Text><Text style={[styles.statValue, { color: netProfit >= 0 ? (darkCards ? '#8AD9A8' : theme.colors.primary) : (darkCards ? '#FFB4AB' : theme.colors.error) }]}>{formatTL(netProfit)}</Text></View>
       </View>
       <View style={styles.dashboardSectionHeader}>
-        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Son Hasat Kayıtları</Text>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Tüm hasat kayıtlarını aç" onPress={() => onNavigate('history')}><Text style={styles.dashboardSectionLink}>Tümünü gör</Text></TouchableOpacity>
+        <Text style={[styles.sectionTitle, { marginBottom: 0, color: theme.colors.onBackground }]}>Son Hasat Kayıtları</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Tüm hasat kayıtlarını aç" onPress={() => onNavigate('history')}><Text style={[styles.dashboardSectionLink, { color: theme.colors.primary }]}>Tümünü gör</Text></TouchableOpacity>
       </View>
-      {harvests.length === 0 ? <Text style={styles.emptyText}>Henüz kaydedilmiş bir hasat yok.</Text> : harvests.slice(0, 10).map((item, index) => {
+      {harvests.length === 0 ? <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>Henüz kaydedilmiş bir hasat yok.</Text> : harvests.slice(0, 10).map((item, index) => {
         const saleVal = netTotalOf(item); const remaining = remainingTotalOf(item);
-        return <View key={item._id || index} style={styles.listItem}>
+        return <View key={item._id || index} style={[styles.listItem, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.outline }]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.listTitle}>{item.uretici || item.producerName || 'Bilinmeyen Üretici'} ({item.surum || '1. Sürüm'})</Text>
-            <Text style={styles.listSubText}>{formatDisplayDate(item.tarih)} · {item.kg || item.weight || 0} KG · {item.fiyat || 0} TL/KG</Text>
-            {item.bahce ? <Text style={styles.listSubText}>Bahçe: {item.bahce}</Text> : null}
-            <Text style={styles.listSubText}>Net satış: {formatTL(saleVal)}</Text>
+            <Text style={[styles.listTitle, { color: theme.colors.onSurface }]}>{item.uretici || item.producerName || 'Bilinmeyen Üretici'} ({item.surum || '1. Sürüm'})</Text>
+            <Text style={[styles.listSubText, { color: theme.colors.onSurfaceVariant }]}>{formatDisplayDate(item.tarih)} · {item.kg || item.weight || 0} KG · {item.fiyat || 0} TL/KG</Text>
+            {item.bahce ? <Text style={[styles.listSubText, { color: theme.colors.onSurfaceVariant }]}>Bahçe: {item.bahce}</Text> : null}
+            <Text style={[styles.listSubText, { color: theme.colors.onSurfaceVariant }]}>Net satış: {formatTL(saleVal)}</Text>
             <Text style={[styles.dashboardRecordStatus, { color: remaining > 0 ? '#A84646' : '#237044' }]}>{remaining > 0 ? `Kalan alacak: ${formatTL(remaining)}` : 'Ödeme tamamlandı'}</Text>
           </View>
         </View>;

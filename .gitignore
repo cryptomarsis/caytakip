@@ -1,4 +1,5 @@
 node_modules/
+.npm-cache/
 .env
 .env.*
 !.env.example
@@ -21,3 +22,5 @@ service-account*.json
 secrets/
 src.rar
 android/app/debug.keystore
+.expo-export-*/
+backups/

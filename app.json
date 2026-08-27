@@ -23,7 +23,6 @@
       "backgroundColor": "#F8F3E7",
       "allowBackup": false,
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "adaptiveIcon": {
@@ -40,6 +39,12 @@
       "expo-sharing",
       "expo-notifications",
       "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Çaylık Asistan'a sesli soru sorabilmeniz için mikrofon erişimi gerekir."
+        }
+      ],
       [
         "expo-image-picker",
         {
