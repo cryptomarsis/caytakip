@@ -1,4 +1,4 @@
-import { AppIconName } from '../components/app-icon';
+import { AppIconName } from './components/app-icon';
 
 export type ActiveTab =
   | 'dashboard' | 'harvest' | 'history' | 'collections' | 'receivables'

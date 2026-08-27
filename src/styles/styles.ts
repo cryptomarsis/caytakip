@@ -6,8 +6,15 @@ export const styles = StyleSheet.create({
     backgroundColor: '#F4F7F2'
   },
   authScreen: {
+    paddingHorizontal: 18
+  },
+  authKeyboardAvoider: {
+    flex: 1,
+    width: '100%'
+  },
+  authScrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    paddingHorizontal: 18,
     paddingVertical: 24
   },
   authCard: {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions } from 'react-native';
+import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions, Keyboard, KeyboardAvoidingView } from 'react-native';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -21,7 +21,7 @@ import { useHarvestMetrics } from '../hooks/useHarvestMetrics';
 import { useAiAssistant } from '../hooks/useAiAssistant';
 import { useAppData } from '../hooks/useAppData';
 import { useOfflineSync } from '../hooks/useOfflineSync';
-import { ActiveTab, getDesktopMenuItems, mobileNavItems } from './navigation';
+import { ActiveTab, getDesktopMenuItems, mobileNavItems } from '../navigation';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
 import HarvestHistoryScreen from '../screens/HarvestHistoryScreen';
@@ -331,6 +331,9 @@ export default function App() {
   };
 
   const handleAuth = async () => {
+    // iPhone'da sayı klavyesinde "Bitti" tuşu yoktur. Butona basıldığında
+    // klavyeyi kapatıp işlemi görünür ve tek dokunuşla başlatırız.
+    Keyboard.dismiss();
     const cleanPhone = normalizePhone(authPhone);
     const cleanPin = authPin.replace(/\D/g, '');
     setAuthFeedback(null);
@@ -1035,6 +1038,17 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={[styles.container, styles.authScreen]}>
           <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
+          <KeyboardAvoidingView
+            style={styles.authKeyboardAvoider}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          >
+          <ScrollView
+            contentContainerStyle={styles.authScrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+          >
           <View style={styles.authCard}>
             <View style={styles.authBrand}>
               <View style={styles.authBrandMark}>
@@ -1117,6 +1131,8 @@ export default function App() {
               </Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </SafeAreaProvider>
     );
