@@ -277,11 +277,13 @@ const ExpenseSchema = new mongoose.Schema({
   tarih: String,
   kategori: String,
   aciklama: String,
-  tutar: Number
+  tutar: Number,
+  bahce: String
 }, { timestamps: true });
 ExpenseSchema.index({ userId: 1, createdAt: -1 });
 ExpenseSchema.index({ userPhone: 1, createdAt: -1 });
 ExpenseSchema.index({ userId: 1, tarih: -1 });
+ExpenseSchema.index({ userId: 1, bahce: 1, tarih: -1 });
 
 const GardenSchema = new mongoose.Schema({
   userId: { type: String, required: false },
@@ -512,7 +514,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-27-receipt-dedup',
+    version: '2026-08-27-garden-profitability',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -1859,7 +1861,8 @@ app.post('/api/expenses', requireAuth, idempotencyMiddleware, async (req, res) =
       tarih,
       kategori: String(req.body.kategori || 'Diğer').trim(),
       aciklama: String(req.body.aciklama || '').trim(),
-      tutar
+      tutar,
+      bahce: String(req.body.bahce || req.body.garden || '').trim().slice(0, 120)
     };
 
     const newExpense = new Expense(payload);
