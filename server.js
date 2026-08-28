@@ -2067,9 +2067,11 @@ const toAdminProducer = (profile = {}, metric = {}) => {
   };
 };
 
-const listAdminProducers = async ({ page = 1, limit = 25, search = '', city = '', activity = 'all' } = {}) => {
+const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '', activity = 'all' } = {}) => {
   const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
-  const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 25));
+  // Eski uygulama sürümleri limit=25 gönderse de yönetici listesi her cihazda
+  // aynı şekilde yedişer kişi gösterilsin.
+  const safeLimit = Math.min(7, Math.max(1, Number.parseInt(limit, 10) || 7));
   const profileFilter = getAdminProducerFilter(search, city, activity);
   const total = await UserProfile.countDocuments(profileFilter);
   const totalPages = Math.max(1, Math.ceil(total / safeLimit));
