@@ -66,7 +66,7 @@ export function CaylikSurface({ children, style }: { children: React.ReactNode; 
   const { paperTheme: theme } = useAppTheme();
   // Paper Card kendi iç yüzeyini bazı sürümlerde beyaz bırakabildiği için
   // tema yüzeylerini doğrudan View üzerinde çiziyoruz.
-  return <View style={[ui.surface, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }, style]}><View pointerEvents="none" style={[ui.surfaceAccent, { backgroundColor: theme.colors.primary }]} />{children}</View>;
+  return <View style={[ui.surface, style, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}><View pointerEvents="none" style={[ui.surfaceAccent, { backgroundColor: theme.colors.primary }]} />{children}</View>;
 }
 
 export function CaylikActionCard({
@@ -86,7 +86,7 @@ export function CaylikActionCard({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
-      style={({ pressed }) => [ui.actionCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }, style, pressed && ui.actionCardPressed]}
+      style={({ pressed }) => [ui.actionCard, style, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }, pressed && ui.actionCardPressed]}
     >
       {children}
     </Pressable>

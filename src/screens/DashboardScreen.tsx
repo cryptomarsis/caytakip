@@ -173,13 +173,13 @@ export default function DashboardScreen({
         <DashboardMetricCard label="Tahmini net kazanç" value={formatTL(netProfit)} icon="chart-areaspline" tone={netProfit < 0 ? 'danger' : 'primary'} detail={`Gider: ${formatTL(totalExp)}`} />
       </View>
 
-      <Pressable accessibilityRole="button" accessibilityLabel="Hızlı yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.newRecordButton, caylikDesign.shadow.soft, { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary, shadowColor: theme.colors.shadow }, pressed && local.pressed]}>
-        <View style={[local.newRecordIcon, { backgroundColor: 'rgba(255,255,255,0.16)' }]}><AppIcon name="leaf-circle-outline" size={27} color={theme.colors.onPrimary} /></View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Hızlı yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.newRecordButton, caylikDesign.shadow.soft, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant, shadowColor: theme.colors.shadow }, pressed && local.pressed]}>
+        <View style={[local.newRecordIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="leaf-circle-outline" size={27} color={theme.colors.secondary} /></View>
         <View style={local.newRecordCopy}>
-          <Text style={[local.newRecordTitle, { color: theme.colors.onPrimary }]}>Yeni hasat kaydı</Text>
-          <Text style={[local.newRecordDetail, { color: theme.colors.onPrimary, opacity: 0.82 }]}>Kilo, firma ve fiyat bilgilerini ekleyin</Text>
+          <Text style={[local.newRecordTitle, { color: theme.colors.onSurface }]}>Yeni hasat kaydı</Text>
+          <Text style={[local.newRecordDetail, { color: theme.colors.onSurfaceVariant }]}>Kilo, firma ve fiyat bilgilerini ekleyin</Text>
         </View>
-        <View style={[local.newRecordArrow, { backgroundColor: theme.colors.onPrimary }]}><AppIcon name="plus" size={21} color={theme.colors.primary} /></View>
+        <View style={[local.newRecordArrow, { backgroundColor: theme.colors.primary }]}><AppIcon name="plus" size={21} color={theme.colors.onPrimary} /></View>
       </Pressable>
 
       <AssistantEntry credits={assistantCredits} onPress={() => onNavigate('assistant')} />
