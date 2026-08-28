@@ -1,15 +1,13 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 
 import { AppIcon } from '../components/app-icon';
 import { CaylikButton, CaylikSurface } from '../components/caylik-ui';
+import { API_ORIGIN } from '../services/api';
+import type { StoreProductId } from '../services/inAppPurchases';
 
-export type CreditProductId =
-  | 'caylik_credits_250'
-  | 'caylik_credits_750'
-  | 'caylik_credits_2000'
-  | 'caylik_pro_monthly';
+export type CreditProductId = StoreProductId;
 
 const products: {
   id: CreditProductId;
@@ -31,9 +29,13 @@ type Props = {
   onBack: () => void;
   onPurchase: (productId: CreditProductId) => void;
   onRestore: () => void;
+  prices?: Partial<Record<CreditProductId, string>>;
+  purchasingProductId?: CreditProductId | null;
+  restoring?: boolean;
+  storeStatus?: string;
 };
 
-export default function CreditStoreScreen({ credits, onBack, onPurchase, onRestore }: Props) {
+export default function CreditStoreScreen({ credits, onBack, onPurchase, onRestore, prices = {}, purchasingProductId = null, restoring = false, storeStatus = '' }: Props) {
   const theme = useTheme();
 
   return (
@@ -75,15 +77,27 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
                 {product.subscription && <AppIcon name="crown-outline" size={25} color="#B7791F" />}
               </View>
               <Text style={[local.detail, { color: theme.colors.onSurfaceVariant }]}>{product.detail}</Text>
-              <Text style={[local.price, { color: theme.colors.onSurface }]}>{product.price}</Text>
-              <CaylikButton icon={product.subscription ? 'crown-outline' : 'cart-outline'} onPress={() => onPurchase(product.id)}>{product.subscription ? 'Pro’ya Geç' : 'Satın Al'}</CaylikButton>
+              <Text style={[local.price, { color: theme.colors.onSurface }]}>{prices[product.id] || product.price}</Text>
+              <CaylikButton
+                icon={product.subscription ? 'crown-outline' : 'cart-outline'}
+                disabled={Boolean(purchasingProductId) || restoring}
+                onPress={() => onPurchase(product.id)}
+              >
+                {purchasingProductId === product.id ? 'İşleniyor…' : product.subscription ? 'Pro’ya Geç' : 'Satın Al'}
+              </CaylikButton>
             </View>
           </CaylikSurface>
         ))}
       </View>
 
-      <CaylikButton icon="restore" mode="text" onPress={onRestore}>Satın Alımları Geri Yükle</CaylikButton>
-      <Text style={[local.legal, { color: theme.colors.onSurfaceVariant }]}>Ödeme Apple App Store veya Google Play hesabınız üzerinden güvenli biçimde alınır. Gösterilen fiyat mağaza ve bölgeye göre son ödeme ekranında doğrulanır. Tek seferlik kredi paketleri sona ermez.</Text>
+      <CaylikButton icon="restore" mode="text" disabled={Boolean(purchasingProductId) || restoring} onPress={onRestore}>{restoring ? 'Kontrol Ediliyor…' : 'Satın Alımları Geri Yükle'}</CaylikButton>
+      {!!storeStatus && <Text accessibilityLiveRegion="polite" style={[local.status, { color: theme.colors.onSurfaceVariant }]}>{storeStatus}</Text>}
+      <Text style={[local.legal, { color: theme.colors.onSurfaceVariant }]}>Ödeme iPhone ve iPad’de Apple App Store hesabınız üzerinden güvenli biçimde alınır. Satın alma onaylanmadan kredi eklenmez. Mağazanın gösterdiği yerel fiyat geçerlidir. Tek seferlik kredi paketlerinin kullanım süresi yoktur.</Text>
+      <View style={local.legalLinks}>
+        <TouchableOpacity accessibilityRole="link" onPress={() => void Linking.openURL(`${API_ORIGIN}/privacy`)}><Text style={[local.legalLink, { color: theme.colors.primary }]}>Gizlilik Politikası</Text></TouchableOpacity>
+        <Text style={{ color: theme.colors.onSurfaceVariant }}>·</Text>
+        <TouchableOpacity accessibilityRole="link" onPress={() => void Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/')}><Text style={[local.legalLink, { color: theme.colors.primary }]}>Kullanım Koşulları</Text></TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -110,5 +124,8 @@ const local = StyleSheet.create({
   badge: { overflow: 'hidden', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: '900' },
   detail: { fontSize: 12, lineHeight: 18, minHeight: 36, marginTop: 13, marginBottom: 8 },
   price: { fontSize: 24, fontWeight: '900', marginBottom: 12 },
+  status: { fontSize: 12, lineHeight: 17, textAlign: 'center', marginHorizontal: 10, marginBottom: 4 },
   legal: { fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 5, marginBottom: 24, paddingHorizontal: 10 },
+  legalLinks: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: -15, marginBottom: 28 },
+  legalLink: { fontSize: 12, fontWeight: '800', textDecorationLine: 'underline' },
 });

@@ -4,7 +4,7 @@
     "slug": "cay-ureticisi",
     "description": "Çaylık; çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
     "scheme": "cayureticisi",
-    "version": "1.0.11",
+    "version": "1.0.12",
     "orientation": "portrait",
     "backgroundColor": "#F8F3E7",
     "icon": "./assets/caylik-icon-v1.png",
@@ -61,7 +61,8 @@
         }
       ],
       "expo-image",
-      "expo-asset"
+      "expo-asset",
+      "expo-iap"
     ],
     "extra": {
       "router": {},

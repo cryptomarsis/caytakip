@@ -22,6 +22,7 @@ import { useHarvestMetrics } from '../hooks/useHarvestMetrics';
 import { useAiAssistant } from '../hooks/useAiAssistant';
 import { useAppData } from '../hooks/useAppData';
 import { useOfflineSync } from '../hooks/useOfflineSync';
+import { useStorePurchases } from '../hooks/useStorePurchases';
 import { ActiveTab, getDesktopMenuItems, mobileNavItems } from '../navigation';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
@@ -36,7 +37,7 @@ import ReportsScreen from '../screens/ReportsScreen';
 import MoreScreen from '../screens/MoreScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AssistantScreen from '../screens/AssistantScreen';
-import CreditStoreScreen, { CreditProductId } from '../screens/CreditStoreScreen';
+import CreditStoreScreen from '../screens/CreditStoreScreen';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
 const ONBOARDING_STEPS = [
@@ -201,20 +202,7 @@ export default function App() {
   } = useOfflineSync({ currentUser, authFetch, getAuthHeaders });
 
   const aiAssistant = useAiAssistant(currentUser?.userId, authFetch);
-
-  const handleCreditPurchase = (productId: CreditProductId) => {
-    const labels: Record<CreditProductId, string> = {
-      caylik_credits_250: '250 kredi · 39,99 TL',
-      caylik_credits_750: '750 kredi · 89,99 TL',
-      caylik_credits_2000: '2.000 kredi · 199,99 TL',
-      caylik_pro_monthly: 'Çaylık Pro · 119,99 TL / ay',
-    };
-    Alert.alert('Mağaza bağlantısı hazırlanıyor', `${labels[productId]} paketi seçildi. App Store ve Google Play ürünleri tanımlandıktan sonra ödeme bu düğmeden güvenli şekilde tamamlanacak.`);
-  };
-
-  const handleRestoreCreditPurchases = () => {
-    Alert.alert('Satın alımları geri yükle', 'App Store ve Google Play bağlantısı tamamlandığında önceki Pro aboneliğiniz bu düğmeden geri yüklenecek.');
-  };
+  const storePurchases = useStorePurchases(currentUser?.userId, authFetch, aiAssistant.refreshWallet);
 
   useEffect(() => {
     if (activeTab === 'assistant' && currentUser?.userId) void aiAssistant.refreshWallet();
@@ -1348,8 +1336,12 @@ export default function App() {
             <CreditStoreScreen
               credits={aiAssistant.credits}
               onBack={() => setActiveTab('assistant')}
-              onPurchase={handleCreditPurchase}
-              onRestore={handleRestoreCreditPurchases}
+              onPurchase={(productId) => void storePurchases.purchase(productId)}
+              onRestore={() => void storePurchases.restore()}
+              prices={storePurchases.prices}
+              purchasingProductId={storePurchases.purchasingProductId}
+              restoring={storePurchases.restoring}
+              storeStatus={storePurchases.status}
             />
           )}
           {/* HASAT EKLE TABI */}

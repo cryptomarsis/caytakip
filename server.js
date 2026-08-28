@@ -5,6 +5,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { AppStoreServerAPIClient, Environment } = require('@apple/app-store-server-library');
 
 const app = express();
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
@@ -102,6 +103,58 @@ const AI_MAX_RESERVED_CREDITS = Math.max(5, Number(process.env.AI_MAX_RESERVED_C
 const MAX_RECEIPT_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_VOICE_AUDIO_BYTES = 3 * 1024 * 1024;
 const AI_VOICE_TRANSCRIPTION_CREDITS = 6;
+const APPLE_IAP_BUNDLE_ID = String(process.env.APPLE_IAP_BUNDLE_ID || 'com.cryptomarsis.cayureticisi').trim();
+const APPLE_IAP_ISSUER_ID = String(process.env.APPLE_IAP_ISSUER_ID || '').trim();
+const APPLE_IAP_KEY_ID = String(process.env.APPLE_IAP_KEY_ID || '').trim();
+const APPLE_IAP_PRIVATE_KEY = String(process.env.APPLE_IAP_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
+const APPLE_IAP_PRODUCTS = Object.freeze({
+  caylik_credits_250: { credits: 250, kind: 'consumable', label: '250 kredi paketi' },
+  caylik_credits_750: { credits: 750, kind: 'consumable', label: '750 kredi paketi' },
+  caylik_credits_2000: { credits: 2000, kind: 'consumable', label: '2.000 kredi paketi' },
+  caylik_pro_monthly: { credits: 1500, kind: 'subscription', label: 'Çaylık Pro aylık kredi' }
+});
+const isAppleIapConfigured = () => Boolean(APPLE_IAP_ISSUER_ID && APPLE_IAP_KEY_ID && APPLE_IAP_PRIVATE_KEY && APPLE_IAP_BUNDLE_ID);
+
+const makeAppleAppAccountToken = (userId) => {
+  const bytes = crypto.createHmac('sha256', JWT_SECRET).update(`apple-iap:${userId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
+const decodeJwsPayload = (jws) => {
+  const encoded = String(jws || '').split('.')[1];
+  if (!encoded) throw new Error('Apple işlem yanıtı okunamadı.');
+  return JSON.parse(Buffer.from(encoded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+};
+
+let appleIapClients = null;
+const getAppleIapClients = () => {
+  if (!isAppleIapConfigured()) return [];
+  if (!appleIapClients) {
+    appleIapClients = [
+      { environment: Environment.PRODUCTION, client: new AppStoreServerAPIClient(APPLE_IAP_PRIVATE_KEY, APPLE_IAP_KEY_ID, APPLE_IAP_ISSUER_ID, APPLE_IAP_BUNDLE_ID, Environment.PRODUCTION) },
+      { environment: Environment.SANDBOX, client: new AppStoreServerAPIClient(APPLE_IAP_PRIVATE_KEY, APPLE_IAP_KEY_ID, APPLE_IAP_ISSUER_ID, APPLE_IAP_BUNDLE_ID, Environment.SANDBOX) }
+    ];
+  }
+  return appleIapClients;
+};
+
+const fetchVerifiedAppleTransaction = async (transactionId) => {
+  let lastError = null;
+  for (const entry of getAppleIapClients()) {
+    try {
+      const response = await entry.client.getTransactionInfo(transactionId);
+      const transaction = decodeJwsPayload(response.signedTransactionInfo);
+      return { transaction, environment: entry.environment };
+    } catch (error) {
+      lastError = error;
+      if (Number(error?.httpStatusCode) !== 404) throw error;
+    }
+  }
+  throw lastError || new Error('Apple işlemi bulunamadı.');
+};
 
 if (isProduction) {
   if (JWT_SECRET.length < 32) throw new Error('JWT_SECRET üretimde en az 32 karakter olmalıdır.');
@@ -354,6 +407,23 @@ const AiCreditTransactionSchema = new mongoose.Schema({
 AiCreditTransactionSchema.index({ userId: 1, requestId: 1 }, { unique: true });
 AiCreditTransactionSchema.index({ userId: 1, createdAt: -1 });
 const AiCreditTransaction = mongoose.model('AiCreditTransaction', AiCreditTransactionSchema);
+const InAppPurchaseSchema = new mongoose.Schema({
+  platform: { type: String, enum: ['apple'], required: true },
+  transactionId: { type: String, required: true },
+  originalTransactionId: { type: String, default: '' },
+  userId: { type: String, required: true, index: true },
+  appAccountToken: { type: String, default: '' },
+  productId: { type: String, required: true },
+  kind: { type: String, enum: ['consumable', 'subscription'], required: true },
+  environment: { type: String, default: '' },
+  creditsGranted: { type: Number, required: true, min: 0 },
+  purchaseDate: { type: Date, default: null },
+  expiresDate: { type: Date, default: null },
+  status: { type: String, enum: ['completed', 'revoked'], default: 'completed' }
+}, { timestamps: true });
+InAppPurchaseSchema.index({ platform: 1, transactionId: 1 }, { unique: true });
+InAppPurchaseSchema.index({ originalTransactionId: 1, createdAt: -1 });
+const InAppPurchase = mongoose.model('InAppPurchase', InAppPurchaseSchema);
 const SessionSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true },
   userId: { type: String, required: true, index: true },
@@ -514,7 +584,8 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-28-admin-totals-pagination-v2',
+    version: '2026-08-28-apple-iap-v1',
+    appleIap: isAppleIapConfigured() ? 'configured' : 'not-configured',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -1037,6 +1108,112 @@ app.get('/api/ai/wallet', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('AI WALLET ERROR:', error.message);
     res.status(500).json({ error: 'Kredi bilgisi alınamadı.' });
+  }
+});
+
+app.get('/api/iap/config', requireAuth, (req, res) => {
+  res.json({
+    platform: 'apple',
+    configured: isAppleIapConfigured(),
+    appAccountToken: makeAppleAppAccountToken(req.auth.userId),
+    productIds: Object.keys(APPLE_IAP_PRODUCTS)
+  });
+});
+
+app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30, 60 * 60 * 1000), async (req, res) => {
+  const requestedTransactionId = String(req.body?.transactionId || '').trim();
+  const requestedProductId = String(req.body?.productId || '').trim();
+  try {
+    if (!isAppleIapConfigured()) {
+      return res.status(503).json({ error: 'App Store satın alma doğrulaması henüz yapılandırılmadı.', code: 'IAP_NOT_CONFIGURED' });
+    }
+    if (!/^\d{8,40}$/.test(requestedTransactionId)) {
+      return res.status(400).json({ error: 'Geçerli bir App Store işlem numarası alınamadı.' });
+    }
+    const catalogProduct = APPLE_IAP_PRODUCTS[requestedProductId];
+    if (!catalogProduct) return res.status(400).json({ error: 'Bu kredi paketi tanınmıyor.' });
+
+    const existing = await InAppPurchase.findOne({ platform: 'apple', transactionId: requestedTransactionId }).lean();
+    if (existing) {
+      if (existing.userId !== req.auth.userId) return res.status(409).json({ error: 'Bu satın alma başka bir Çaylık hesabına bağlı.' });
+      const profile = await ensureAiWallet(req.auth.userId);
+      return res.json({ verified: true, replayed: true, creditsGranted: 0, credits: Number(profile?.aiCredits || 0) });
+    }
+
+    const { transaction, environment } = await fetchVerifiedAppleTransaction(requestedTransactionId);
+    const verifiedTransactionId = String(transaction?.transactionId || '');
+    const verifiedProductId = String(transaction?.productId || '');
+    const expectedAccountToken = makeAppleAppAccountToken(req.auth.userId).toLowerCase();
+    const verifiedAccountToken = String(transaction?.appAccountToken || '').toLowerCase();
+
+    if (verifiedTransactionId !== requestedTransactionId || verifiedProductId !== requestedProductId) {
+      return res.status(400).json({ error: 'App Store işlemi seçilen paketle eşleşmiyor.' });
+    }
+    if (String(transaction?.bundleId || '') !== APPLE_IAP_BUNDLE_ID) {
+      return res.status(400).json({ error: 'App Store işlemi bu uygulamaya ait değil.' });
+    }
+    if (!verifiedAccountToken || verifiedAccountToken !== expectedAccountToken) {
+      return res.status(403).json({ error: 'Satın alma bu Çaylık hesabıyla eşleşmiyor.' });
+    }
+    if (transaction?.revocationDate) return res.status(409).json({ error: 'Bu App Store işlemi iade edilmiş veya iptal edilmiş.' });
+    if (catalogProduct.kind === 'subscription' && Number(transaction?.expiresDate || 0) <= Date.now()) {
+      return res.status(409).json({ error: 'Çaylık Pro aboneliğinin süresi dolmuş.' });
+    }
+
+    await ensureAiWallet(req.auth.userId);
+    const quantity = Math.max(1, Math.min(10, Number(transaction?.quantity || 1)));
+    const creditsToGrant = catalogProduct.credits * quantity;
+    const session = await mongoose.startSession();
+    let balanceAfter = 0;
+    try {
+      await session.withTransaction(async () => {
+        const duplicate = await InAppPurchase.findOne({ platform: 'apple', transactionId: verifiedTransactionId }).session(session).lean();
+        if (duplicate) {
+          if (duplicate.userId !== req.auth.userId) throw Object.assign(new Error('PURCHASE_OWNED_BY_ANOTHER_USER'), { code: 'PURCHASE_OWNED_BY_ANOTHER_USER' });
+          const wallet = await UserProfile.findOne({ userId: req.auth.userId }).session(session).select('aiCredits').lean();
+          balanceAfter = Number(wallet?.aiCredits || 0);
+          return;
+        }
+
+        const wallet = await UserProfile.findOneAndUpdate(
+          { userId: req.auth.userId },
+          { $inc: { aiCredits: creditsToGrant } },
+          { returnDocument: 'after', session }
+        ).select('aiCredits').lean();
+        if (!wallet) throw new Error('Üretici profili bulunamadı.');
+        balanceAfter = Number(wallet.aiCredits || 0);
+
+        await InAppPurchase.create([{
+          platform: 'apple', transactionId: verifiedTransactionId,
+          originalTransactionId: String(transaction?.originalTransactionId || verifiedTransactionId),
+          userId: req.auth.userId, appAccountToken: verifiedAccountToken,
+          productId: verifiedProductId, kind: catalogProduct.kind,
+          environment: String(environment || transaction?.environment || ''), creditsGranted: creditsToGrant,
+          purchaseDate: transaction?.purchaseDate ? new Date(Number(transaction.purchaseDate)) : null,
+          expiresDate: transaction?.expiresDate ? new Date(Number(transaction.expiresDate)) : null,
+          status: 'completed'
+        }], { session });
+        await AiCreditTransaction.create([{
+          userId: req.auth.userId, requestId: `purchase:apple:${verifiedTransactionId}`,
+          type: 'purchase', status: 'completed', amount: creditsToGrant,
+          balanceAfter, description: `App Store · ${catalogProduct.label}`
+        }], { session });
+      });
+    } finally {
+      await session.endSession();
+    }
+    res.json({ verified: true, replayed: false, creditsGranted: creditsToGrant, credits: balanceAfter });
+  } catch (error) {
+    if (error?.code === 'PURCHASE_OWNED_BY_ANOTHER_USER') return res.status(409).json({ error: 'Bu satın alma başka bir Çaylık hesabına bağlı.' });
+    if (error?.code === 11000) {
+      const duplicate = await InAppPurchase.findOne({ platform: 'apple', transactionId: requestedTransactionId }).lean();
+      if (duplicate?.userId === req.auth.userId) {
+        const profile = await ensureAiWallet(req.auth.userId);
+        return res.json({ verified: true, replayed: true, creditsGranted: 0, credits: Number(profile?.aiCredits || 0) });
+      }
+    }
+    console.error('APPLE IAP VERIFY ERROR:', error?.httpStatusCode || '', error?.apiError || '', error?.message || error);
+    res.status(502).json({ error: 'Satın alma Apple üzerinden doğrulanamadı. Ücret alındıysa işlem daha sonra otomatik olarak yeniden denenecek.' });
   }
 });
 
@@ -2175,10 +2352,10 @@ app.patch('/api/admin/users/:id/status', requireAuth, requireAdmin, async (req, 
 
 app.get('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions] = await Promise.all([
-      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AiCreditTransaction.find().lean()
+    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases] = await Promise.all([
+      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
     ]);
-    res.json({ version: 'V17.1', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions });
+    res.json({ version: 'V18', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2186,7 +2363,7 @@ app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
     const models = [
-      [UserProfile, body.users], [Harvest, body.harvests], [Payment, body.payments], [Expense, body.expenses], [Garden, body.gardens], [FactoryPrice, body.factoryPrices], [Ad, body.ads], [AiCreditTransaction, body.aiCreditTransactions]
+      [UserProfile, body.users], [Harvest, body.harvests], [Payment, body.payments], [Expense, body.expenses], [Garden, body.gardens], [FactoryPrice, body.factoryPrices], [Ad, body.ads], [AiCreditTransaction, body.aiCreditTransactions], [InAppPurchase, body.inAppPurchases]
     ];
     let restored = 0;
     for (const [Model, rows] of models) {
@@ -2216,10 +2393,10 @@ app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
 
 const runAutomaticBackup = async () => {
   try {
-    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions] = await Promise.all([
-      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AiCreditTransaction.find().lean()
+    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases] = await Promise.all([
+      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
     ]);
-    const payload = { version: 'V17.1', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions };
+    const payload = { version: 'V18', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases };
     if (BACKUP_WEBHOOK_URL) {
       const encrypted = createEncryptedBackup(payload);
       if (!encrypted) throw new Error('Dış yedek için BACKUP_ENCRYPTION_KEY zorunludur.');
