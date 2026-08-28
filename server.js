@@ -514,7 +514,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-28-admin-totals-pagination',
+    version: '2026-08-28-admin-totals-pagination-v2',
     service: 'cay-ureticisi-takip'
   });
 });
