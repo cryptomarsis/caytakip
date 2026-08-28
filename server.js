@@ -514,7 +514,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-27-garden-profitability',
+    version: '2026-08-28-admin-totals-pagination',
     service: 'cay-ureticisi-takip'
   });
 });
@@ -1953,20 +1953,54 @@ app.post('/api/feedback', requireAuth, async (req, res) => {
 
 // ADMIN ROUTES
 // ADMIN / PRODUCER MANAGEMENT
+const mongoNumeric = (input, fallback = 0) => ({
+  $convert: {
+    input: { $ifNull: [input, fallback] },
+    to: 'double',
+    onError: fallback,
+    onNull: fallback
+  }
+});
+
 const adminMetricPipeline = (match = {}) => [
   { $match: match },
   { $project: {
     userId: { $ifNull: ['$userId', ''] },
     userPhone: { $ifNull: ['$userPhone', ''] },
-    kgValue: { $ifNull: ['$kg', { $ifNull: ['$weight', 0] }] },
+    kgValue: mongoNumeric({ $ifNull: ['$kg', '$weight'] }),
+    priceValue: mongoNumeric('$fiyat'),
+    storedNetValue: mongoNumeric({ $ifNull: ['$toplamTutar', null] }, null),
+    storedDeductionValue: mongoNumeric({
+      $ifNull: ['$kesintiTutar', { $ifNull: ['$gelirVergisiKesintisi', null] }]
+    }, null),
+    withholdingRate: mongoNumeric('$gelirVergisiOrani', HARVEST_WITHHOLDING_RATE),
+    paidValue: mongoNumeric('$tahsilat')
+  } },
+  { $set: {
+    grossValue: { $multiply: ['$kgValue', '$priceValue'] }
+  } },
+  { $set: {
     netValue: {
-      $cond: [
-        { $gt: [{ $ifNull: ['$toplamTutar', 0] }, 0] },
-        { $ifNull: ['$toplamTutar', 0] },
-        { $multiply: [{ $ifNull: ['$kg', { $ifNull: ['$weight', 0] }] }, { $ifNull: ['$fiyat', 0] }, 0.98] }
+      $max: [
+        0,
+        {
+          $ifNull: [
+            '$storedNetValue',
+            {
+              $subtract: [
+                '$grossValue',
+                {
+                  $ifNull: [
+                    '$storedDeductionValue',
+                    { $multiply: ['$grossValue', { $divide: ['$withholdingRate', 100] }] }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
       ]
-    },
-    paidValue: { $ifNull: ['$tahsilat', 0] }
+    }
   } },
   { $group: {
     _id: { userId: '$userId', userPhone: '$userPhone' },
@@ -1976,19 +2010,6 @@ const adminMetricPipeline = (match = {}) => [
     harvestCount: { $sum: 1 }
   } }
 ];
-
-const getAdminHarvestFilter = async () => {
-  const admins = await UserProfile.find({ role: 'admin' }).select('userId phone').lean();
-  const adminIdentifiers = admins.flatMap((admin) => {
-    const matches = [];
-    const userId = String(admin.userId || '').trim();
-    const phone = String(admin.phone || '').trim();
-    if (userId) matches.push({ userId });
-    if (phone) matches.push({ userPhone: phone });
-    return matches;
-  });
-  return adminIdentifiers.length ? { $nor: adminIdentifiers } : {};
-};
 
 const getAdminProducerFilter = (search = '', city = '', activity = 'all') => {
   const filters = [{ role: { $ne: 'admin' } }];
@@ -2069,22 +2090,26 @@ const listAdminProducers = async ({ page = 1, limit = 25, search = '', city = ''
   });
   let rows = [];
   if (identifiers.length) {
-    const adminHarvestFilter = await getAdminHarvestFilter();
-    rows = await Harvest.aggregate(adminMetricPipeline({
-      $and: [adminHarvestFilter, { $or: identifiers }]
-    }));
+    rows = await Harvest.aggregate(adminMetricPipeline({ $or: identifiers }));
   }
 
-  const byUserId = new Map();
-  const byPhone = new Map();
-  rows.forEach((row) => {
-    if (row?._id?.userId) byUserId.set(String(row._id.userId).trim(), row);
-    if (row?._id?.userPhone) byPhone.set(String(row._id.userPhone).trim(), row);
+  const items = profiles.map((profile) => {
+    const userId = String(profile.userId || '').trim();
+    const phone = String(profile.phone || '').trim();
+    const matchingRows = rows.filter((row) => {
+      const metricUserId = String(row?._id?.userId || '').trim();
+      const metricPhone = String(row?._id?.userPhone || '').trim();
+      return Boolean((userId && metricUserId === userId) || (phone && metricPhone === phone));
+    });
+    const metric = matchingRows.reduce((totalMetric, row) => ({
+      _id: { userId, userPhone: phone },
+      totalKg: numericValue(totalMetric.totalKg) + numericValue(row.totalKg),
+      totalSales: numericValue(totalMetric.totalSales) + numericValue(row.totalSales),
+      totalPaid: numericValue(totalMetric.totalPaid) + numericValue(row.totalPaid),
+      harvestCount: numericValue(totalMetric.harvestCount) + numericValue(row.harvestCount)
+    }), {});
+    return toAdminProducer(profile, metric);
   });
-  const items = profiles.map((profile) => toAdminProducer(
-    profile,
-    byUserId.get(String(profile.userId || '').trim()) || byPhone.get(String(profile.phone || '').trim()) || {}
-  ));
   return { items, page: currentPage, limit: safeLimit, total, totalPages };
 };
 
@@ -2093,9 +2118,10 @@ let adminSummaryCache = { expiresAt: 0, value: null };
 
 const getAdminSummary = async () => {
   if (adminSummaryCache.value && adminSummaryCache.expiresAt > Date.now()) return adminSummaryCache.value;
-  const adminHarvestFilter = await getAdminHarvestFilter();
   const [rows, producerCount] = await Promise.all([
-    Harvest.aggregate(adminMetricPipeline(adminHarvestFilter)),
+    // Yönetici hesabı da hasat kaydı girebildiği için genel işletme toplamı,
+    // rol ayrımı yapmadan sistemdeki bütün hasat kayıtlarını kapsar.
+    Harvest.aggregate(adminMetricPipeline({})),
     UserProfile.countDocuments({ role: { $ne: 'admin' } })
   ]);
   const totals = rows.reduce((result, metric) => ({

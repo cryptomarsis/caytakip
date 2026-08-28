@@ -4,6 +4,11 @@ import { API_URL, fetchWithTimeout } from '../services/api';
 import { styles } from '../styles/styles';
 import { formatTL } from '../utils/format';
 
+const ADMIN_PAGE_SIZE = 7;
+const sortProducersByName = (items: any[]) => [...items].sort((left, right) =>
+  String(left?.name || '').localeCompare(String(right?.name || ''), 'tr', { sensitivity: 'base' })
+);
+
 const imageUrlOf = (value: unknown) => {
   const url = String(value || '').trim();
   return /^https?:\/\/\S+$/i.test(url) ? url : '';
@@ -55,7 +60,7 @@ export default function AdminScreen(props: any) {
     setLoadingUsers(true);
     setLoadError('');
     try {
-      const producerUrl = `${API_URL}/admin/producers?page=${requestedPage}&limit=25&search=${encodeURIComponent(query.trim())}&city=${encodeURIComponent(cityFilter.trim())}&activity=${encodeURIComponent(activityFilter)}`;
+      const producerUrl = `${API_URL}/admin/producers?page=${requestedPage}&limit=${ADMIN_PAGE_SIZE}&search=${encodeURIComponent(query.trim())}&city=${encodeURIComponent(cityFilter.trim())}&activity=${encodeURIComponent(activityFilter)}`;
       const [usersResponse, summaryResponse] = await Promise.all([
         fetchWithTimeout(producerUrl, { headers: { Authorization: `Bearer ${currentUser.token}` } }),
         fetchWithTimeout(`${API_URL}/admin/summary`, { headers: { Authorization: `Bearer ${currentUser.token}` } })
@@ -66,8 +71,10 @@ export default function AdminScreen(props: any) {
       ]);
       if (!usersResponse.ok) throw new Error(usersData.error || 'Üretici listesi yüklenemedi.');
       if (!summaryResponse.ok) throw new Error(summaryData.error || 'Yönetici toplamları yüklenemedi.');
-      setUsers(Array.isArray(usersData.items) ? usersData.items : []);
-      setPagination(usersData.pagination || { page: requestedPage, total: 0, totalPages: 1 });
+      const nextPagination = usersData.pagination || { page: requestedPage, total: 0, totalPages: 1 };
+      setUsers(sortProducersByName(Array.isArray(usersData.items) ? usersData.items : []));
+      setPagination(nextPagination);
+      setPage(Number(nextPagination.page || requestedPage));
       setSummary({
         producerCount: Number(summaryData?.producerCount || 0),
         totalKg: Number(summaryData?.totalKg || 0),
@@ -131,7 +138,7 @@ export default function AdminScreen(props: any) {
       <Text style={styles.sectionTitle}>YÖNETİCİ PANELİ</Text>
       <View style={styles.statsGrid}>
         <View style={styles.statCard}><Text style={styles.statValue}>{Number(summary.producerCount || 0).toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Üretici</Text></View>
-        <View style={styles.statCard}><Text style={styles.statValue}>{Number(summary.totalKg || 0).toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Toplam KG</Text></View>
+        <View style={styles.statCard}><Text style={styles.statValue}>{Number(summary.totalKg || 0).toLocaleString('tr-TR')}</Text><Text style={styles.statLabel}>Toplam Net KG</Text></View>
         <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(summary.totalSales || 0)}</Text><Text style={styles.statLabel}>Net Satış</Text></View>
         <View style={styles.statCard}><Text style={styles.statValue}>{formatTL(summary.totalPaid || 0)}</Text><Text style={styles.statLabel}>Tahsilat</Text></View>
       </View>
@@ -139,7 +146,7 @@ export default function AdminScreen(props: any) {
 
       <View style={styles.formCard}>
         <Text style={styles.formTitle}>Üretici Yönetimi</Text>
-        <Text style={styles.listSubText}>Toplam {Number(pagination.total || 0).toLocaleString('tr-TR')} üretici. Arama sonuçları sayfalı olarak yüklenir.</Text>
+        <Text style={styles.listSubText}>Toplam {Number(pagination.total || 0).toLocaleString('tr-TR')} üretici. Her sayfada en fazla {ADMIN_PAGE_SIZE} kişi alfabetik sıralanır.</Text>
         <TextInput style={styles.input} value={query} onChangeText={(value) => { setQuery(value); setPage(1); }} placeholder="Ad soyad veya telefon ara" />
         <TextInput style={styles.input} value={cityFilter} onChangeText={(value) => { setCityFilter(value); setPage(1); }} placeholder="Şehir ile filtrele" />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -174,11 +181,11 @@ export default function AdminScreen(props: any) {
           </View>
         ))}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1, marginRight: 8, opacity: page <= 1 ? 0.45 : 1 }]} disabled={page <= 1 || loadingUsers} onPress={() => setPage(Math.max(1, page - 1))}>
+          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1, marginRight: 8, opacity: Number(pagination.page || page) <= 1 ? 0.45 : 1 }]} disabled={Number(pagination.page || page) <= 1 || loadingUsers} onPress={() => setPage((current) => Math.max(1, current - 1))}>
             <Text style={styles.secondaryBtnText}>ÖNCEKİ</Text>
           </TouchableOpacity>
           <Text style={[styles.listSubText, { textAlign: 'center' }]}>Sayfa {pagination.page || page} / {pagination.totalPages || 1}</Text>
-          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1, marginLeft: 8, opacity: page >= Number(pagination.totalPages || 1) ? 0.45 : 1 }]} disabled={page >= Number(pagination.totalPages || 1) || loadingUsers} onPress={() => setPage(page + 1)}>
+          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1, marginLeft: 8, opacity: Number(pagination.page || page) >= Number(pagination.totalPages || 1) ? 0.45 : 1 }]} disabled={Number(pagination.page || page) >= Number(pagination.totalPages || 1) || loadingUsers} onPress={() => setPage((current) => Math.min(Number(pagination.totalPages || 1), current + 1))}>
             <Text style={styles.secondaryBtnText}>SONRAKİ</Text>
           </TouchableOpacity>
         </View>
