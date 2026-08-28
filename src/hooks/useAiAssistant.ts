@@ -28,6 +28,8 @@ export const useAiAssistant = (userId: string | undefined, authFetch: AuthFetch)
   };
 
   useEffect(() => {
+    // Reset assistant state when a different account becomes active.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([]);
     setCredits(null);
     setTransactions([]);

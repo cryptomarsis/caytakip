@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 import { HarvestRecord } from '../types';
-import { formatDisplayDate } from '../utils/format';
+import { formatTL, remainingTotalOf } from '../utils/format';
 
 const STORAGE_PREFIX = '@caylik_due_notifications_v1:';
 
@@ -65,7 +65,7 @@ export const syncDueNotifications = async (userId: string, harvests: HarvestReco
     if (permission.status !== 'granted') return;
 
     const existing = await readStored(userId);
-    const desired: Record<string, { signature: string; reminder: Date; harvest: HarvestRecord }> = {};
+    const desired: Record<string, { signature: string; reminder: Date; harvest: HarvestRecord; title: string; body: string }> = {};
     const now = Date.now();
 
     for (const harvest of harvests) {
@@ -74,29 +74,62 @@ export const syncDueNotifications = async (userId: string, harvests: HarvestReco
       if (!match) continue;
 
       const due = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3] || 1), 9, 0, 0);
-      const reminder = new Date(due.getTime() - 24 * 60 * 60 * 1000);
-      if (reminder.getTime() <= now) continue;
+      const remaining = remainingTotalOf(harvest);
+      if (remaining <= 0.01) continue;
 
-      const signature = [harvest.firma || '', harvest.vadeTarihi, harvest.tahsilat || 0, harvest.toplamTutar || 0].join('|');
-      desired[harvest._id] = { signature, reminder, harvest };
-    }
+      const company = harvest.firma || 'Fabrika';
+      const signatureBase = [company, harvest.vadeTarihi, harvest.tahsilat || 0, harvest.toplamTutar || 0, remaining].join('|');
+      const reminders = [
+        {
+          key: 'two-days',
+          date: new Date(due.getTime() - 2 * 24 * 60 * 60 * 1000),
+          title: 'Çaylık Asistan · Vade yaklaşıyor',
+          body: `${company} ödemesine 2 gün kaldı. Bekleyen tutar: ${formatTL(remaining)}.`,
+        },
+        {
+          key: 'due-day',
+          date: due,
+          title: 'Çaylık Asistan · Ödeme günü',
+          body: `${company} için ${formatTL(remaining)} tutarındaki alacağınızın vadesi bugün.`,
+        },
+        {
+          key: 'overdue',
+          date: new Date(due.getTime() + 24 * 60 * 60 * 1000),
+          title: 'Çaylık Asistan · Geciken alacak',
+          body: `${company} için ${formatTL(remaining)} tutarındaki ödeme gecikmiş görünüyor. Tahsilat durumunu kontrol edin.`,
+        },
+      ];
 
-    const next: StoredNotifications = {};
-    for (const [harvestId, stored] of Object.entries(existing)) {
-      const target = desired[harvestId];
-      if (!target || target.signature !== stored.signature) {
-        await Notifications.cancelScheduledNotificationAsync(stored.notificationId).catch(() => undefined);
-      } else {
-        next[harvestId] = stored;
+      for (const item of reminders) {
+        if (item.date.getTime() <= now) continue;
+        const desiredKey = `${harvest._id}:${item.key}`;
+        desired[desiredKey] = {
+          signature: `${signatureBase}|${item.key}`,
+          reminder: item.date,
+          harvest,
+          title: item.title,
+          body: item.body,
+        };
       }
     }
 
-    for (const [harvestId, target] of Object.entries(desired)) {
-      if (next[harvestId]) continue;
+    const next: StoredNotifications = {};
+    for (const [notificationKey, stored] of Object.entries(existing)) {
+      const target = desired[notificationKey];
+      if (!target || target.signature !== stored.signature) {
+        await Notifications.cancelScheduledNotificationAsync(stored.notificationId).catch(() => undefined);
+      } else {
+        next[notificationKey] = stored;
+      }
+    }
+
+    for (const [notificationKey, target] of Object.entries(desired)) {
+      if (next[notificationKey]) continue;
+      const harvestId = target.harvest._id as string;
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Çaylık - Vade Yaklaşıyor',
-          body: (target.harvest.firma || 'Fabrika') + ' ödemesinin vadesi ' + formatDisplayDate(target.harvest.vadeTarihi) + '.',
+          title: target.title,
+          body: target.body,
           data: { type: 'vade', harvestId },
           sound: 'default',
         },
@@ -106,7 +139,7 @@ export const syncDueNotifications = async (userId: string, harvests: HarvestReco
           ...(Platform.OS === 'android' ? { channelId: 'cay-takip' } : {}),
         },
       });
-      next[harvestId] = { notificationId, signature: target.signature };
+      next[notificationKey] = { notificationId, signature: target.signature };
     }
 
     await AsyncStorage.setItem(notificationKey(userId), JSON.stringify(next));

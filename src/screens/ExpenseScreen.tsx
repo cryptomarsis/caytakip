@@ -6,6 +6,7 @@ import { styles } from '../styles/styles';
 import { formatTL, formatDisplayDate } from '../utils/format';
 import { AppIcon } from '../components/app-icon';
 import { IconHeading } from '../components/icon-heading';
+import { CaylikScreenHeader } from '../components/caylik-ui';
 
 export default function ExpenseScreen(props: any) {
   const { eForm, expenses, gardens, handleDelete, handleSaveExpense, setEForm, refreshing = false, onRefresh, contentContainerStyle } = props;
@@ -14,8 +15,9 @@ export default function ExpenseScreen(props: any) {
 
   const header = (
     <View>
+      <CaylikScreenHeader icon="receipt-text-outline" eyebrow="MASRAF TAKİBİ" title="Giderler" description="Sezon masraflarınızı kategori ve bahçeye göre kaydedin." />
       <View style={[styles.formCard, { backgroundColor: theme.colors.surface }]}>
-        <IconHeading icon="receipt-text" title="Gider Ekle" compact />
+        <IconHeading icon="plus-circle-outline" title="Yeni gider" compact />
         <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>Gider türünü ve tutarı yazıp kaydedin.</Text>
 
         <Text style={[styles.label, { color: theme.colors.onSurface }]}>Tarih (GG.AA.YYYY)</Text>
@@ -82,7 +84,7 @@ export default function ExpenseScreen(props: any) {
           <View style={styles.submitBtnContent}><AppIcon name="content-save" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>GİDERİ KAYDET</Text></View>
         </TouchableOpacity>
       </View>
-      <Text style={[styles.sectionTitle, { marginTop: 20, color: theme.colors.onSurface }]}>GİDER LİSTESİ</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 20, color: theme.colors.onSurface }]}>Gider geçmişi</Text>
     </View>
   );
 

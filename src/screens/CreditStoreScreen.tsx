@@ -11,20 +11,19 @@ export type CreditProductId =
   | 'caylik_credits_2000'
   | 'caylik_pro_monthly';
 
-const products: Array<{
+const products: {
   id: CreditProductId;
   title: string;
   credits: string;
-  usage: string;
   price: string;
   detail: string;
   popular?: boolean;
   subscription?: boolean;
-}> = [
-  { id: 'caylik_credits_250', title: 'Başlangıç', credits: '250 kredi', usage: 'Yaklaşık 25 yanıt', price: '39,99 TL', detail: 'Kredilerinizin kullanım süresi yoktur.' },
-  { id: 'caylik_credits_750', title: 'Avantajlı', credits: '750 kredi', usage: 'Yaklaşık 75 yanıt', price: '89,99 TL', detail: 'En çok tercih edilen kredi paketi.', popular: true },
-  { id: 'caylik_credits_2000', title: 'Büyük Paket', credits: '2.000 kredi', usage: 'Yaklaşık 200 yanıt', price: '199,99 TL', detail: 'Kredi başına en avantajlı tek seferlik paket.' },
-  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', usage: 'Yaklaşık 150 yanıt / ay', price: '119,99 TL / ay', detail: 'Abonelik her ay yenilenir; istediğiniz zaman mağazadan iptal edebilirsiniz.', subscription: true },
+}[] = [
+  { id: 'caylik_credits_250', title: 'Başlangıç', credits: '250 kredi', price: '39,99 TL', detail: 'Kredilerinizin kullanım süresi yoktur.' },
+  { id: 'caylik_credits_750', title: 'Avantajlı', credits: '750 kredi', price: '89,99 TL', detail: 'En çok tercih edilen kredi paketi.', popular: true },
+  { id: 'caylik_credits_2000', title: 'Büyük Paket', credits: '2.000 kredi', price: '199,99 TL', detail: 'Kredi başına en avantajlı tek seferlik paket.' },
+  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', price: '119,99 TL / ay', detail: 'Abonelik her ay yenilenir; istediğiniz zaman mağazadan iptal edebilirsiniz.', subscription: true },
 ];
 
 type Props = {
@@ -75,16 +74,15 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
                 {product.popular && <Text style={[local.badge, { backgroundColor: theme.colors.primary, color: theme.colors.onPrimary }]}>POPÜLER</Text>}
                 {product.subscription && <AppIcon name="crown-outline" size={25} color="#B7791F" />}
               </View>
-              <Text style={[local.usage, { color: theme.colors.onSurface }]}>{product.usage}</Text>
               <Text style={[local.detail, { color: theme.colors.onSurfaceVariant }]}>{product.detail}</Text>
               <Text style={[local.price, { color: theme.colors.onSurface }]}>{product.price}</Text>
-              <CaylikButton onPress={() => onPurchase(product.id)}>{product.subscription ? 'Pro’ya Geç' : 'Satın Al'}</CaylikButton>
+              <CaylikButton icon={product.subscription ? 'crown-outline' : 'cart-outline'} onPress={() => onPurchase(product.id)}>{product.subscription ? 'Pro’ya Geç' : 'Satın Al'}</CaylikButton>
             </View>
           </CaylikSurface>
         ))}
       </View>
 
-      <CaylikButton mode="text" onPress={onRestore}>Satın Alımları Geri Yükle</CaylikButton>
+      <CaylikButton icon="restore" mode="text" onPress={onRestore}>Satın Alımları Geri Yükle</CaylikButton>
       <Text style={[local.legal, { color: theme.colors.onSurfaceVariant }]}>Ödeme Apple App Store veya Google Play hesabınız üzerinden güvenli biçimde alınır. Gösterilen fiyat mağaza ve bölgeye göre son ödeme ekranında doğrulanır. Tek seferlik kredi paketleri sona ermez.</Text>
     </View>
   );
@@ -110,8 +108,7 @@ const local = StyleSheet.create({
   productTitle: { fontSize: 20, fontWeight: '900' },
   credits: { fontSize: 16, fontWeight: '900', marginTop: 3 },
   badge: { overflow: 'hidden', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: '900' },
-  usage: { fontSize: 14, fontWeight: '800', marginTop: 13 },
-  detail: { fontSize: 12, lineHeight: 18, minHeight: 36, marginTop: 3, marginBottom: 8 },
+  detail: { fontSize: 12, lineHeight: 18, minHeight: 36, marginTop: 13, marginBottom: 8 },
   price: { fontSize: 24, fontWeight: '900', marginBottom: 12 },
   legal: { fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 5, marginBottom: 24, paddingHorizontal: 10 },
 });

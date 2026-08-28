@@ -35,13 +35,13 @@ export function useOfflineSync({ currentUser, authFetch, getAuthHeaders }: Optio
     ]);
     setPendingCount(pending);
     setFailedCount(failed);
-  }, [currentUser?.userId]);
+  }, [currentUser]);
 
   const queueRequest = useCallback(async (endpoint: string, body: Record<string, unknown>) => {
     if (!currentUser?.userId) throw new Error('Oturum bulunamadı.');
     await enqueueOfflineRequest({ userId: currentUser.userId, endpoint, method: 'POST', body });
     await refreshCounts();
-  }, [currentUser?.userId, refreshCounts]);
+  }, [currentUser, refreshCounts]);
 
   const syncQueue = useCallback(async () => {
     if (!currentUser?.userId || syncing.current) return { synced: 0, pending: 0 };
@@ -63,7 +63,7 @@ export function useOfflineSync({ currentUser, authFetch, getAuthHeaders }: Optio
     } finally {
       syncing.current = false;
     }
-  }, [authFetch, currentUser?.userId, getAuthHeaders]);
+  }, [authFetch, currentUser, getAuthHeaders]);
 
   const manageFailedRequests = useCallback(async () => {
     if (!currentUser?.userId) return;
@@ -79,7 +79,7 @@ export function useOfflineSync({ currentUser, authFetch, getAuthHeaders }: Optio
         { text: 'Tekrar Dene', onPress: async () => { await retryOfflineRequest(currentUser.userId, first.id); await syncQueue(); await refreshCounts(); } },
       ],
     );
-  }, [currentUser?.userId, refreshCounts, syncQueue]);
+  }, [currentUser, refreshCounts, syncQueue]);
 
   return {
     pendingCount,

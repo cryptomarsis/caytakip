@@ -5,6 +5,7 @@ import { styles } from '../styles/styles';
 import { AppIcon } from '../components/app-icon';
 import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
 import { PaymentRecord } from '../types';
+import { CaylikScreenHeader } from '../components/caylik-ui';
 
 const recordTime = (value?: string) => {
   if (!value) return '';
@@ -29,6 +30,8 @@ export default function CollectionsScreen(props: any) {
     [harvests],
   );
 
+  /* Selection state mirrors the currently available server records. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const selectedIndex = pendingHarvests.findIndex((harvest: any) => harvest._id === payHarvestId);
     if (selectedIndex >= 0) {
@@ -43,6 +46,7 @@ export default function CollectionsScreen(props: any) {
       if (payHarvestId) setPayHarvestId('');
     }
   }, [pendingHarvests, payHarvestId, setPayHarvestId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const selectIndex = (index: number, shouldScroll = true) => {
     const safeIndex = Math.max(0, Math.min(index, pendingHarvests.length - 1));
@@ -78,15 +82,16 @@ export default function CollectionsScreen(props: any) {
       const detailTotal = paidByHarvest.get(harvest._id) || 0;
       const missingDetail = totalPaid - detailTotal;
       return missingDetail > 0.01 ? { harvest, amount: missingDetail } : null;
-    }).filter(Boolean) as Array<{ harvest: any; amount: number }>;
+    }).filter(Boolean) as { harvest: any; amount: number }[];
   }, [harvests, payments]);
 
   return (
     <View>
+      <CaylikScreenHeader icon="hand-coin-outline" eyebrow="TAHSİLAT YÖNETİMİ" title="Ödeme Al" description="Bekleyen hasadı seçin ve alınan ödemeyi güvenle kaydedin." />
       <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           <View style={{ width: 50, height: 50, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primaryContainer }}>
-            <AppIcon name="cash-check" size={27} color={theme.colors.primary} />
+            <AppIcon name="wallet-bifold-outline" size={27} color={theme.colors.primary} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.formTitle, { color: theme.colors.onSurface, marginBottom: 2 }]}>Ödeme Al</Text>
@@ -141,7 +146,7 @@ export default function CollectionsScreen(props: any) {
                       backgroundColor: active ? selectedCardColor : theme.colors.surfaceVariant,
                       borderColor: active ? selectedCardColor : theme.colors.outline,
                       borderWidth: 1,
-                      borderRadius: 14,
+                      borderRadius: 24,
                       padding: 16,
                       marginRight: 12,
                     }}
@@ -229,7 +234,7 @@ export default function CollectionsScreen(props: any) {
         />
 
         <TouchableOpacity style={[styles.submitBtn, { opacity: pendingHarvests.length === 0 ? 0.5 : 1 }]} disabled={pendingHarvests.length === 0} onPress={handleSpecificHarvestPayment}>
-          <Text style={styles.submitBtnText}>Ödemeyi Kaydet</Text>
+          <View style={styles.submitBtnContent}><AppIcon name="hand-coin-outline" size={21} color="#FFFFFF" /><Text style={styles.submitBtnText}>Ödemeyi Kaydet</Text></View>
         </TouchableOpacity>
       </View>
 

@@ -4,6 +4,7 @@ import { SegmentedButtons, useTheme } from 'react-native-paper';
 import { type ThemePreference, useAppTheme } from '../context/app-theme';
 import { API_ORIGIN, API_URL, fetchWithTimeout } from '../services/api';
 import { styles } from '../styles/styles';
+import { CaylikScreenHeader } from '../components/caylik-ui';
 
 type Props = {
   currentUser: { token?: string } | null;
@@ -78,7 +79,7 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
   };
 
   return <View>
-    <Text style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Ayarlar ve Gizlilik</Text>
+    <CaylikScreenHeader icon="cog-outline" eyebrow="HESAP VE UYGULAMA" title="Ayarlar ve Gizlilik" description="Görünüm, veri güvenliği ve hesap seçeneklerinizi yönetin." />
     <View style={[styles.formCard, themeStyles.card]}>
       <Text style={[styles.formTitle, themeStyles.title]}>Görünüm</Text>
       <Text style={[styles.formHelp, themeStyles.body]}>Uygulamanın renk düzenini seçin.</Text>
@@ -97,7 +98,7 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
       <Text style={[styles.formTitle, themeStyles.title]}>Verilerim güvende mi?</Text>
       <Text style={[styles.formHelp, themeStyles.body]}>Kayıtlarınız hesabınıza bağlı olarak güvenli sunucuda saklanır. İnternet olduğunda cihazlarınız arasında eşitlenir.</Text>
       <Text style={[styles.listSubText, themeStyles.body]}>Son senkronizasyon: {lastSyncAt ? new Date(lastSyncAt).toLocaleString('tr-TR') : 'Henüz senkronize edilmedi'}</Text>
-      {!!onExportData && <TouchableOpacity style={[styles.secondaryBtn, { marginTop: 10 }]} onPress={() => onExportData().catch((error: any) => Alert.alert('Dışa aktarma', error?.message || 'Veriler hazırlanamadı.'))}><Text style={styles.secondaryBtnText}>Verilerimi yedekle / dışa aktar</Text></TouchableOpacity>}
+      {!!onExportData && <TouchableOpacity style={[styles.secondaryBtn, { marginTop: 10, backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.primary }]} onPress={() => onExportData().catch((error: any) => Alert.alert('Dışa aktarma', error?.message || 'Veriler hazırlanamadı.'))}><Text style={[styles.secondaryBtnText, { color: theme.colors.primary }]}>Verilerimi yedekle / dışa aktar</Text></TouchableOpacity>}
     </View>
     <View style={[styles.formCard, themeStyles.card]}>
       <Text style={[styles.formTitle, themeStyles.title]}>Gizlilik</Text>
@@ -107,16 +108,16 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
           <Text style={[styles.legalText, themeStyles.body]}>{section.body}</Text>
         </View>
       ))}
-      <TouchableOpacity style={styles.secondaryBtn} onPress={() => Linking.openURL(`${API_ORIGIN}/privacy`)}>
-        <Text style={styles.secondaryBtnText}>Gizlilik politikasını tarayıcıda aç</Text>
+      <TouchableOpacity style={[styles.secondaryBtn, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.primary }]} onPress={() => Linking.openURL(`${API_ORIGIN}/privacy`)}>
+        <Text style={[styles.secondaryBtnText, { color: theme.colors.primary }]}>Gizlilik politikasını tarayıcıda aç</Text>
       </TouchableOpacity>
       {privacy?.contactEmail && !String(privacy.contactEmail).startsWith('Destek') && <>
           <Text style={[styles.listSubText, themeStyles.body]}>Destek: {privacy.contactEmail}</Text>
           <TouchableOpacity
-            style={[styles.secondaryBtn, { marginTop: 8 }]}
+            style={[styles.secondaryBtn, { marginTop: 8, backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.primary }]}
             onPress={() => Linking.openURL(`mailto:${String(privacy.contactEmail).trim()}?subject=${encodeURIComponent('Çaylık destek talebi')}`).catch(() => undefined)}
           >
-            <Text style={styles.secondaryBtnText}>Destek ekibine e-posta gönder</Text>
+            <Text style={[styles.secondaryBtnText, { color: theme.colors.primary }]}>Destek ekibine e-posta gönder</Text>
           </TouchableOpacity>
         </>}
     </View>
@@ -149,9 +150,9 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
       }}><Text style={styles.submitBtnText}>{sendingFeedback ? 'GÖNDERİLİYOR...' : 'GERİ BİLDİRİMİ GÖNDER'}</Text></TouchableOpacity>
     </View>}
 
-    {currentUser?.token && <View style={styles.dangerCard}>
-      <Text style={styles.dangerTitle}>Hesabı sil</Text>
-      <Text style={styles.dangerText}>Hesabınız ve ilişkili kayıtlarınız sunucudan kalıcı olarak silinir.</Text>
+    {currentUser?.token && <View style={[styles.dangerCard, { backgroundColor: theme.colors.errorContainer, borderColor: theme.colors.error }]}>
+      <Text style={[styles.dangerTitle, { color: theme.colors.onErrorContainer }]}>Hesabı sil</Text>
+      <Text style={[styles.dangerText, { color: theme.colors.onErrorContainer }]}>Hesabınız ve ilişkili kayıtlarınız sunucudan kalıcı olarak silinir.</Text>
       <TouchableOpacity style={styles.dangerBtn} onPress={confirmDelete}>
         <Text style={styles.dangerBtnText}>Hesabımı ve kayıtlarımı sil</Text>
       </TouchableOpacity>

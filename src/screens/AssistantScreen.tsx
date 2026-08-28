@@ -123,7 +123,7 @@ export default function AssistantScreen({ messages, credits, transactions, busy,
     <View>
       <View style={local.headerRow}>
         <View style={[local.iconWrap, { backgroundColor: theme.colors.primaryContainer }]}>
-          <AppIcon name="robot-outline" size={28} color={theme.colors.primary} />
+          <AppIcon name="robot-happy-outline" size={29} color={theme.colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[local.title, { color: theme.colors.onSurface }]}>Çaylık Asistan</Text>
@@ -156,7 +156,7 @@ export default function AssistantScreen({ messages, credits, transactions, busy,
                 onPress={() => void submit(suggestion)}
                 style={[local.suggestion, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surfaceVariant }]}
               >
-                <AppIcon name="leaf" size={18} color={theme.colors.primary} />
+                <AppIcon name="sprout-outline" size={18} color={theme.colors.primary} />
                 <Text style={[local.suggestionText, { color: theme.colors.onSurface }]}>{suggestion}</Text>
               </TouchableOpacity>
             ))}
@@ -235,8 +235,8 @@ export default function AssistantScreen({ messages, credits, transactions, busy,
             </View>
           </TouchableOpacity>
           <View style={local.actionRow}>
-            {messages.length > 0 && <CaylikButton mode="text" disabled={busy || transcribing || recorderState.isRecording} onPress={onClear} style={{ flex: 1 }}>Sohbeti Temizle</CaylikButton>}
-            <CaylikButton disabled={busy || transcribing || recorderState.isRecording || input.trim().length < 2 || credits === 0} onPress={() => void submit()} style={{ flex: 1 }}>
+            {messages.length > 0 && <CaylikButton icon="broom" mode="text" disabled={busy || transcribing || recorderState.isRecording} onPress={onClear} style={{ flex: 1 }}>Sohbeti Temizle</CaylikButton>}
+            <CaylikButton icon="send-outline" disabled={busy || transcribing || recorderState.isRecording || input.trim().length < 2 || credits === 0} onPress={() => void submit()} style={{ flex: 1 }}>
               {busy ? 'Bekleyin' : 'Gönder'}
             </CaylikButton>
           </View>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions, Keyboard, KeyboardAvoidingView } from 'react-native';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,6 +10,7 @@ import * as Sharing from 'expo-sharing';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useTheme } from 'react-native-paper';
 import { AppIcon } from '../components/app-icon';
+import DatePickerField from '../components/date-picker-field';
 import { API_TIMEOUTS, API_URL, fetchWithTimeout } from '../services/api';
 import { clearDueNotifications, setupNotifications } from '../services/dueNotifications';
 import { saveSession, getSession, clearSession } from '../services/session';
@@ -51,6 +52,7 @@ export default function App() {
   const { width: windowWidth } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && windowWidth >= 960;
   const paperTheme = useTheme();
+  const refreshPromiseRef = useRef<Promise<UserSession | null> | null>(null);
   // Kullanıcı Giriş / Kayıt State'leri
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -167,7 +169,14 @@ export default function App() {
     if (!currentUser?.token) throw new Error('Oturum bulunamadı.');
     let res = await fetchWithTimeout(url, makeOptions(currentUser), timeout);
     if (res.status !== 401) return res;
-    const nextUser = await refreshAccessToken();
+    // Birden fazla veri isteği aynı anda 401 alırsa refresh token yalnızca bir
+    // kez kullanılmalıdır. Diğer istekler aynı yenileme sonucunu bekler.
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = refreshAccessToken().finally(() => {
+        refreshPromiseRef.current = null;
+      });
+    }
+    const nextUser = await refreshPromiseRef.current;
     if (!nextUser) return res;
     return fetchWithTimeout(url, makeOptions(nextUser), timeout);
   };
@@ -270,6 +279,8 @@ export default function App() {
     let active = true;
     const userId = currentUser?.userId;
     if (!userId) {
+      // Onboarding progress belongs to the active account and resets on logout.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnboardingStep(null);
       return () => { active = false; };
     }
@@ -1204,13 +1215,14 @@ export default function App() {
           <View style={[styles.appMain, { backgroundColor: paperTheme.colors.background }]}>
 
         {/* HEADER */}
-        <View style={[styles.header, isDesktop && styles.desktopHeader]}>
+        <View style={[styles.header, !isDesktop && { backgroundColor: paperTheme.colors.background, borderBottomColor: paperTheme.colors.outlineVariant }, isDesktop && styles.desktopHeader]}>
+          {!isDesktop && <><View pointerEvents="none" style={styles.headerDecorLarge} /><View pointerEvents="none" style={styles.headerDecorSmall} /></>}
           <View style={styles.headerBrandRow}>
             {!isDesktop && <View style={styles.headerBrandMark}><Image source={require('../../assets/caylik-icon-v1.png')} style={styles.headerBrandImage} /></View>}
             <View style={{ flex: 1 }}>
-              <Text style={[styles.headerEyebrow, isDesktop && styles.desktopHeaderSubtitle]}>{isDesktop ? 'ÇAYLIK YÖNETİM' : 'ÇAYLIK · ÜRETİCİ TAKİBİ'}</Text>
-              <Text style={[styles.headerTitle, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : `Merhaba, ${currentUser.name.split(' ')[0] || currentUser.name}`}</Text>
-              <Text style={[styles.headerSubtitle, isDesktop && styles.desktopHeaderSubtitle]}>
+              <Text style={[styles.headerEyebrow, !isDesktop && { color: paperTheme.colors.primary }, isDesktop && styles.desktopHeaderSubtitle]}>{isDesktop ? 'ÇAYLIK YÖNETİM' : 'ÇAYLIK · ÜRETİCİ TAKİBİ'}</Text>
+              <Text style={[styles.headerTitle, !isDesktop && { color: paperTheme.colors.onBackground }, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : `Merhaba, ${currentUser.name.split(' ')[0] || currentUser.name}`}</Text>
+              <Text style={[styles.headerSubtitle, !isDesktop && { color: paperTheme.colors.onSurfaceVariant }, isDesktop && styles.desktopHeaderSubtitle]}>
                 {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : isAdmin ? 'Yönetici hesabı' : 'Sezon verilerin güncel'}
               </Text>
             {pendingSyncCount > 0 && (
@@ -1227,9 +1239,9 @@ export default function App() {
             )}
           </View>
           </View>
-          <TouchableOpacity style={[styles.logoutBtn, isDesktop && styles.desktopLogoutBtn]} onPress={handleLogout}>
-            <AppIcon name="logout-variant" size={20} color="#FFFFFF" />
-            <Text style={styles.logoutBtnText}>Çıkış</Text>
+          <TouchableOpacity style={[styles.logoutBtn, !isDesktop && { backgroundColor: paperTheme.colors.surfaceVariant, borderColor: paperTheme.colors.outlineVariant }, isDesktop && styles.desktopLogoutBtn]} onPress={handleLogout}>
+            <AppIcon name="logout-variant" size={20} color={isDesktop ? '#FFFFFF' : paperTheme.colors.onSurface} />
+            <Text style={[styles.logoutBtnText, !isDesktop && { color: paperTheme.colors.onSurface }]}>Çıkış</Text>
           </TouchableOpacity>
         </View>
 
@@ -1303,6 +1315,8 @@ export default function App() {
             <DashboardScreen
               ads={ads}
               harvests={harvests}
+              userName={currentUser.name}
+              assistantCredits={aiAssistant.credits}
               totalKg={totalKg}
               totalSales={totalSales}
               totalPay={totalPay}
@@ -1432,7 +1446,7 @@ export default function App() {
           )}
         </ScrollView>
         )}
-        {!isDesktop && activeTab !== 'assistant' && (
+        {!isDesktop && activeTab !== 'assistant' && activeTab !== 'dashboard' && (
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Çaylık Asistanı aç"
@@ -1440,7 +1454,7 @@ export default function App() {
             onPress={() => setActiveTab('assistant')}
             style={[styles.assistantFab, { backgroundColor: paperTheme.colors.primary }]}
           >
-            <AppIcon name="robot-outline" size={21} color={paperTheme.colors.onPrimary} />
+            <AppIcon name="robot-happy-outline" size={22} color={paperTheme.colors.onPrimary} />
             <Text style={[styles.assistantFabText, { color: paperTheme.colors.onPrimary }]}>Asistan{aiAssistant.credits !== null ? ` · ${aiAssistant.credits}` : ''}</Text>
           </TouchableOpacity>
         )}
@@ -1448,19 +1462,26 @@ export default function App() {
           <View style={[styles.mobileBottomNav, { backgroundColor: paperTheme.colors.surface, borderTopColor: paperTheme.colors.outline }]}>
             {mobileNavItems.map((item) => {
               const active = activeTab === item.tab;
+              const centerAction = item.tab === 'harvest';
               return (
                 <TouchableOpacity
                   key={item.tab}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={item.label}
-                  style={styles.mobileBottomNavItem}
+                  style={[styles.mobileBottomNavItem, centerAction && styles.mobileBottomNavCenterItem]}
                   onPress={() => setActiveTab(item.tab)}
                 >
-                  <View style={[styles.mobileBottomNavIcon, active && styles.mobileBottomNavIconActive, active && { backgroundColor: paperTheme.colors.primaryContainer }]}>
-                    <AppIcon name={item.icon} size={22} color={active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant} />
+                  <View style={[
+                    styles.mobileBottomNavIcon,
+                    centerAction && styles.mobileBottomNavCenterButton,
+                    active && !centerAction && styles.mobileBottomNavIconActive,
+                    active && !centerAction && { backgroundColor: paperTheme.colors.primaryContainer },
+                    centerAction && { backgroundColor: paperTheme.colors.primary, borderColor: paperTheme.colors.surface },
+                  ]}>
+                    <AppIcon name={item.icon} size={centerAction ? 27 : 23} color={centerAction ? paperTheme.colors.onPrimary : active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant} />
                   </View>
-                  <Text numberOfLines={1} style={[styles.mobileBottomNavText, active && styles.mobileBottomNavTextActive, { color: active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant }]}>{item.label}</Text>
+                  <Text numberOfLines={1} style={[styles.mobileBottomNavText, centerAction && styles.mobileBottomNavCenterText, active && styles.mobileBottomNavTextActive, { color: active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant }]}>{item.label}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -1575,7 +1596,7 @@ export default function App() {
                 <Text style={styles.label}>Bahçe</Text>
                 <TextInput style={styles.input} value={editHarvestForm.garden} onChangeText={(garden) => setEditHarvestForm({ ...editHarvestForm, garden })} placeholder="Örn: Arka Bahçe" />
                 <View style={styles.switchRow}><Text style={styles.switchLabel}>Vadeli satış mı?</Text><Switch value={editHarvestForm.isVadeli} onValueChange={(isVadeli) => setEditHarvestForm({ ...editHarvestForm, isVadeli })} trackColor={{ false: '#767577', true: '#2a9d8f' }} /></View>
-                {editHarvestForm.isVadeli && <><Text style={styles.label}>Vade Tarihi (GG.AA.YYYY)</Text><TextInput style={styles.input} value={editHarvestForm.vadeTarihi} onChangeText={(vadeTarihi) => setEditHarvestForm({ ...editHarvestForm, vadeTarihi })} placeholder="15.09.2026" /></>}
+                {editHarvestForm.isVadeli && <DatePickerField label="Vade Tarihi" value={editHarvestForm.vadeTarihi} onChange={(vadeTarihi) => setEditHarvestForm({ ...editHarvestForm, vadeTarihi })} />}
                 <Text style={styles.label}>Açıklama</Text>
                 <TextInput style={styles.input} value={editHarvestForm.aciklama} onChangeText={(aciklama) => setEditHarvestForm({ ...editHarvestForm, aciklama })} placeholder="Notlar..." />
                 <View style={styles.modalBtnGroup}>

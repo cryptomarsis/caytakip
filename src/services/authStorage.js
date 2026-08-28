@@ -40,10 +40,6 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    checkToken();
-  }, []);
-
   const checkToken = async () => {
     try {
       const storedUser = await getSession();
@@ -56,6 +52,12 @@ export const AuthProvider = ({ children }) => {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Restoring the persisted session is the provider's mount-time side effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    checkToken();
+  }, []);
 
   const login = async (userData) => {
     try {

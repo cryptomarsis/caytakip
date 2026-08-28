@@ -7,13 +7,14 @@ import { styles } from '../styles/styles';
 import { AppIcon } from '../components/app-icon';
 import { IconHeading } from '../components/icon-heading';
 import { useAppTheme } from '../context/app-theme';
+import { CaylikScreenHeader } from '../components/caylik-ui';
 type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: unknown };
 
 type DesktopBridge = {
   saveBase64File: (payload: {
     defaultFileName: string;
     base64: string;
-    filters: Array<{ name: string; extensions: string[] }>;
+    filters: { name: string; extensions: string[] }[];
   }) => Promise<{ canceled: boolean; filePath?: string }>;
   printPdf: (payload: {
     defaultFileName: string;
@@ -57,8 +58,8 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
     return [...values].sort((a,b) => b-a);
   }, [harvests, expenses]);
   const [year, setYear] = useState(new Date().getFullYear());
-  const selected = harvests.filter(h => yearOf(h.tarih) === year);
-  const selectedExpenses = expenses.filter(e => yearOf(e.tarih) === year);
+  const selected = useMemo(() => harvests.filter(h => yearOf(h.tarih) === year), [harvests, year]);
+  const selectedExpenses = useMemo(() => expenses.filter(e => yearOf(e.tarih) === year), [expenses, year]);
   const totalKg = selected.reduce((s,h) => s + kgOf(h), 0);
   const totalSales = selected.reduce((s,h) => s + saleOf(h), 0);
   const totalPaid = selected.reduce((s,h) => s + paidOf(h), 0);
@@ -214,7 +215,7 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
   };
 
   return <View>
-    <IconHeading icon="chart-box-outline" title="RAPORLAR" />
+    <CaylikScreenHeader icon="chart-areaspline" eyebrow="SEZON ANALİZİ" title="Raporlar" description="Hasat, satış, tahsilat ve bahçe performansınızı inceleyin." />
     <View style={styles.rowBtnGroup}>{years.map(y=><TouchableOpacity key={y} style={[styles.groupBtn,{backgroundColor:theme.colors.surfaceVariant,borderColor:theme.colors.outline},year===y&&styles.groupBtnActive]} onPress={()=>setYear(y)}><Text style={[styles.groupBtnText,{color:theme.colors.onSurface},year===y&&styles.groupBtnTextActive]}>{y}</Text></TouchableOpacity>)}</View>
 
     <View style={styles.statsGrid}>

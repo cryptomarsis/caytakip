@@ -7,26 +7,47 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 const THEME_PREFERENCE_KEY = '@caylik_theme_preference';
 
+/** Çaylık arayüzünde ekranlar arasında ortak kullanılan tasarım ölçüleri. */
+export const caylikDesign = {
+  spacing: { xxs: 4, xs: 8, sm: 12, md: 16, lg: 20, xl: 24, xxl: 32 },
+  radius: { sm: 12, md: 16, lg: 20, xl: 26, pill: 999 },
+  type: { caption: 12, body: 14, bodyLarge: 16, title: 20, headline: 26, display: 34 },
+  touchTarget: 48,
+  contentMaxWidth: 760,
+  shadow: {
+    soft: { shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
+  },
+} as const;
+
 export const caylikLightTheme = {
   ...MD3LightTheme,
-  roundness: 3,
+  roundness: 5,
   colors: {
     ...MD3LightTheme.colors,
-    primary: '#1F6B4F', onPrimary: '#FFFFFF', primaryContainer: '#E4F3E8', onPrimaryContainer: '#123D2C',
-    secondary: '#A96A17', secondaryContainer: '#FFF3D7', error: '#B23A3A', surface: '#FFFFFF',
-    surfaceVariant: '#F4F7F2', outline: '#D7E1D7', background: '#F4F7F2',
+    primary: '#155B42', onPrimary: '#FFFFFF', primaryContainer: '#DDEFE5', onPrimaryContainer: '#103D2D',
+    secondary: '#B47A20', onSecondary: '#FFFFFF', secondaryContainer: '#F9EBCB', onSecondaryContainer: '#513500',
+    error: '#BA3B43', errorContainer: '#FFE8E8', onErrorContainer: '#64151B',
+    surface: '#FFFEFA', surfaceVariant: '#EEF2EC', onSurface: '#18221D', onSurfaceVariant: '#58645D',
+    outline: '#D8DED7', outlineVariant: '#E8ECE7', background: '#F6F5EF', onBackground: '#18221D',
   },
 };
 
 export const caylikDarkTheme = {
   ...MD3DarkTheme,
-  roundness: 3,
+  roundness: 5,
   colors: {
     ...MD3DarkTheme.colors,
-    primary: '#8AD9A8', onPrimary: '#0D2A1B', primaryContainer: '#1D5137', onPrimaryContainer: '#D6F9E1',
-    secondary: '#FFD08A', secondaryContainer: '#65450F', onSecondaryContainer: '#FFE6B6', error: '#FFB4AB',
-    surface: '#101916', surfaceVariant: '#24352C', onSurface: '#E5EDE7', onSurfaceVariant: '#C4D0C6',
-    outline: '#8EA094', background: '#101916', onBackground: '#E5EDE7',
+    primary: '#55D49A', onPrimary: '#062A1B', primaryContainer: '#173D2D', onPrimaryContainer: '#D9F8E8',
+    secondary: '#F0C66D', onSecondary: '#382B00', secondaryContainer: '#453817', onSecondaryContainer: '#FFE9AE',
+    tertiary: '#79D6C5', onTertiary: '#00382F', tertiaryContainer: '#164A42', onTertiaryContainer: '#C5F7EC',
+    error: '#FFB4AB', errorContainer: '#5A2423', onErrorContainer: '#FFDAD6',
+    surface: '#171C19', surfaceVariant: '#222824', onSurface: '#F4F7F5', onSurfaceVariant: '#B9C3BD',
+    surfaceDisabled: '#242A26', onSurfaceDisabled: '#7F8983',
+    outline: '#46514B', outlineVariant: '#2B332F', background: '#0F1411', onBackground: '#F4F7F5',
+    elevation: {
+      ...MD3DarkTheme.colors.elevation,
+      level0: '#0F1411', level1: '#171C19', level2: '#1B211D', level3: '#202722', level4: '#222A25', level5: '#27302A',
+    },
   },
 };
 

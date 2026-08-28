@@ -5,6 +5,8 @@ import { useTheme } from 'react-native-paper';
 import { styles } from '../styles/styles';
 import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
 import { HarvestRecord } from '../types';
+import { CaylikScreenHeader } from '../components/caylik-ui';
+import { AppIcon } from '../components/app-icon';
 
 type Props = {
   harvests: HarvestRecord[];
@@ -66,10 +68,7 @@ export default function HarvestHistoryScreen({
 
   const header = (
     <View>
-      <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>Hasat Geçmişi</Text>
-      <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>
-        Eski kayıtları firma, bahçe, tarih veya kilo yazarak bulun. Her kaydı buradan düzenleyebilirsiniz.
-      </Text>
+      <CaylikScreenHeader icon="timeline-clock-outline" eyebrow="KAYIT ARŞİVİ" title="Hasat Geçmişi" description="Firma, bahçe, tarih veya kilo ile kayıtlarınızı hızla bulun." />
       <TextInput
         style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
         value={query}
@@ -136,9 +135,9 @@ export default function HarvestHistoryScreen({
               </Text>
             </View>
             <View style={styles.historyActions}>
-              <TouchableOpacity style={styles.editBtn} onPress={() => openHarvestEditModal(harvest)}><Text style={styles.actionBtnText}>Düzenle</Text></TouchableOpacity>
-              {remaining > 0.01 && <TouchableOpacity style={styles.historyPayBtn} onPress={() => openPaymentForHarvest(harvest)}><Text style={styles.actionBtnText}>Ödeme</Text></TouchableOpacity>}
-              <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete('harvests', harvest._id, 'Hasat')}><Text style={styles.actionBtnText}>Sil</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityLabel="Hasadı düzenle" style={styles.editBtn} onPress={() => openHarvestEditModal(harvest)}><AppIcon name="pencil-outline" size={18} color="#FFFFFF" /></TouchableOpacity>
+              {remaining > 0.01 && <TouchableOpacity accessibilityLabel="Ödeme kaydet" style={styles.historyPayBtn} onPress={() => openPaymentForHarvest(harvest)}><AppIcon name="hand-coin-outline" size={18} color="#FFFFFF" /></TouchableOpacity>}
+              <TouchableOpacity accessibilityLabel="Hasadı sil" style={styles.deleteBtn} onPress={() => handleDelete('harvests', harvest._id, 'Hasat')}><AppIcon name="trash-can-outline" size={18} color="#FFFFFF" /></TouchableOpacity>
             </View>
           </View>
         );

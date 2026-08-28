@@ -107,7 +107,9 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
       const sourceNames = ['hasatlar', 'tahsilatlar', 'giderler', 'bahçeler', 'fabrika fiyatları', 'reklamlar'];
       const failedSources = failed.map((index) => sourceNames[index]);
       if (failedSources.length > 0 && !allRequestsFailed) {
-        onFeedback('Kısmi Güncelleme', failedSources.join(', ') + ' şu an güncellenemedi. Ekranda son kaydedilmiş bilgiler korunuyor.', 'info');
+        // Geçici Render gecikmeleri kullanıcıya hata olarak gösterilmez. Başarılı
+        // bölümler yenilenir, diğerlerinde son güvenli cihaz kopyası korunur.
+        console.log('Arka planda güncellenemeyen veri kaynakları:', failedSources.join(', '));
       }
       if (allRequestsFailed) onFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error');
     } catch (error: unknown) {
@@ -120,6 +122,8 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
   useEffect(() => {
     const userId = currentUser?.userId;
     if (!userId) {
+      // Clear the account-specific timestamp immediately after logout.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastSyncAt(null);
       return;
     }

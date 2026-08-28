@@ -13,10 +13,10 @@ export function IconHeading({ icon, title, compact = false }: IconHeadingProps) 
   const { paperTheme: theme } = useAppTheme();
   return (
     <View style={[styles.iconHeading, compact && styles.iconHeadingCompact]}>
-      <View style={[styles.iconHeadingBadge, compact && styles.iconHeadingBadgeCompact, { backgroundColor: theme.colors.primaryContainer }]}>
-        <AppIcon name={icon} size={compact ? 18 : 21} color={theme.colors.primary} />
+      <View style={[styles.iconHeadingBadge, compact && styles.iconHeadingBadgeCompact, { backgroundColor: compact ? theme.colors.primaryContainer : theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
+        <AppIcon name={icon} size={compact ? 19 : 23} color={theme.colors.primary} />
       </View>
-      <Text style={[compact ? styles.formTitle : styles.sectionTitle, { color: theme.colors.onSurface }]}>{title}</Text>
+      <Text style={[compact ? styles.formTitle : styles.sectionTitle, { color: theme.colors.onSurface, marginBottom: 0, flex: 1 }]}>{title}</Text>
     </View>
   );
 }

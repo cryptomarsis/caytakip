@@ -1,16 +1,17 @@
 import React, { useMemo } from 'react';
 import { Text, View, TextInput, TouchableOpacity } from 'react-native';
-import { SymbolView } from 'expo-symbols';
 import { useTheme } from 'react-native-paper';
+import { AppIcon } from '../components/app-icon';
+import { CaylikScreenHeader } from '../components/caylik-ui';
 import { styles } from '../styles/styles';
 import { formatTL, formatDisplayDate } from '../utils/format';
 
 const dateValue = (value:any) => { const raw=String(value||'').trim(); const m=raw.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/); if(m) return new Date(Number(m[3]),Number(m[2])-1,Number(m[1])).getTime(); const d=new Date(raw).getTime(); return Number.isNaN(d)?0:d; };
+const PRICE_TYPES = ['Peşin', 'Haftalık', 'Aylık', 'Vadeli'] as const;
 
 export default function FactoryPricesScreen(props: any) {
   const theme = useTheme();
   const { factoryPrices, handleDelete, handleSaveFactoryPrice, isAdmin, priceForm, setPriceForm } = props;
-  const types = ['Peşin','Haftalık','Aylık','Vadeli'];
   const latestByFactory = useMemo(() => {
     const map = new Map<string, any>();
     [...factoryPrices].sort((a,b) => dateValue(b.tarih || b.createdAt) - dateValue(a.tarih || a.createdAt)).forEach(p => {
@@ -24,18 +25,17 @@ export default function FactoryPricesScreen(props: any) {
   const factories = useMemo(() => [...new Set<string>(factoryPrices.map((p:any): string => String(p.firma||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'tr')), [factoryPrices]);
   const currentRows = useMemo(() => factories.map(firma => ({
     firma,
-    rows: types.map(type => latestByFactory.find((p:any)=>String(p.firma||'').trim()===firma && String(p.fiyatTuru||'Peşin')===type) || null)
+    rows: PRICE_TYPES.map(type => latestByFactory.find((p:any)=>String(p.firma||'').trim()===firma && String(p.fiyatTuru||'Peşin')===type) || null)
   })), [factories, latestByFactory]);
   const best = useMemo(() => {
-    const rows = latestByFactory.filter(p => types.includes(String(p.fiyatTuru||'Peşin')));
+    const rows = latestByFactory.filter(p => PRICE_TYPES.includes(String(p.fiyatTuru||'Peşin') as typeof PRICE_TYPES[number]));
     return rows.sort((a:any,b:any)=>Number(b.fiyat||0)-Number(a.fiyat||0))[0] || null;
   }, [latestByFactory]);
 
   return <View>
-    <Text style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Fabrika Fiyatları</Text>
-    <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>{isAdmin
+    <CaylikScreenHeader icon="factory" eyebrow="FİYAT KARŞILAŞTIRMA" title="Fabrika Fiyatları" description={isAdmin
       ? 'Her fabrikanın en güncel fiyatı burada gösterilir.'
-      : 'Fiyatlar yönetici tarafından güncellenir; burada güncel fiyatları görüntüleyebilirsiniz.'}</Text>
+      : 'Yönetici tarafından yayınlanan güncel alım fiyatlarını karşılaştırın.'} />
     {isAdmin && <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
       <Text style={[styles.formTitle, { color: theme.colors.onSurface }]}>Yeni Fiyat Ekle</Text>
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Fabrika</Text>
@@ -43,17 +43,17 @@ export default function FactoryPricesScreen(props: any) {
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Fiyat (TL/KG)</Text>
       <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.fiyat} onChangeText={(t)=>setPriceForm({...priceForm,fiyat:t})} keyboardType="decimal-pad" placeholder="Örn: 35,00" />
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Fiyat Türü</Text>
-      <View style={styles.rowBtnGroup}>{types.map(t=><TouchableOpacity key={t} style={[styles.groupBtn, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline },priceForm.fiyatTuru===t&&styles.groupBtnActive]} onPress={()=>setPriceForm({...priceForm,fiyatTuru:t})}><Text style={[styles.groupBtnText, { color: theme.colors.onSurface },priceForm.fiyatTuru===t&&styles.groupBtnTextActive]}>{t}</Text></TouchableOpacity>)}</View>
+      <View style={styles.rowBtnGroup}>{PRICE_TYPES.map(t=><TouchableOpacity key={t} style={[styles.groupBtn, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline },priceForm.fiyatTuru===t&&styles.groupBtnActive]} onPress={()=>setPriceForm({...priceForm,fiyatTuru:t})}><Text style={[styles.groupBtnText, { color: theme.colors.onSurface },priceForm.fiyatTuru===t&&styles.groupBtnTextActive]}>{t}</Text></TouchableOpacity>)}</View>
       {priceForm.fiyatTuru==='Vadeli' && <><Text style={[styles.label, { color: theme.colors.onSurface }]}>Vade (Gün)</Text><TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.vadeGun} onChangeText={(t)=>setPriceForm({...priceForm,vadeGun:t})} keyboardType="numeric" placeholder="Örn: 30" /></>}
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Geçerlilik Başlangıcı (GG.AA.YYYY)</Text>
       <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.gecerlilikBaslangic || priceForm.tarih} onChangeText={(t)=>setPriceForm({...priceForm,tarih:t,gecerlilikBaslangic:t})} placeholder="12.08.2026" />
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Açıklama</Text><TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.politika} onChangeText={(t)=>setPriceForm({...priceForm,politika:t})} placeholder="Prim, vade, kampanya vb." />
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Kaynak</Text><TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.kaynak} onChangeText={(t)=>setPriceForm({...priceForm,kaynak:t})} placeholder="Firma duyurusu / telefon..." />
-      <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><Text style={styles.submitBtnText}>Fiyatı Kaydet</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><View style={styles.submitBtnContent}><AppIcon name="content-save-outline" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>Fiyatı Kaydet</Text></View></TouchableOpacity>
     </View>}
 
     {best && <View style={[styles.bestPriceCard, { backgroundColor: theme.colors.secondaryContainer, borderColor: theme.colors.outline }]}>
-      <View style={styles.bestPriceIcon}><SymbolView name={{ ios: 'star.fill', android: 'star', web: 'star' }} size={22} tintColor="#9B6A20" /></View>
+      <View style={[styles.bestPriceIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="star-four-points" size={22} color={theme.colors.secondary} /></View>
       <View style={{ flex: 1 }}><Text style={[styles.bestPriceLabel, { color: theme.colors.onSecondaryContainer }]}>En yüksek güncel fiyat</Text><Text style={[styles.bestPriceValue, { color: theme.colors.onSecondaryContainer }]}>{best.firma} · {formatTL(Number(best.fiyat)||0)} / KG</Text><Text style={[styles.bestPriceMeta, { color: theme.colors.onSurfaceVariant }]}>{best.fiyatTuru || 'Peşin'} · {formatDisplayDate(best.tarih)}</Text></View>
     </View>}
 
@@ -62,7 +62,7 @@ export default function FactoryPricesScreen(props: any) {
       const otherPrices = f.rows.slice(1).filter(Boolean);
       return <View key={f.firma} style={[styles.factoryCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
         <View style={styles.factoryCardHeader}>
-          <View style={styles.factoryIcon}><SymbolView name={{ ios: 'building.2.fill', android: 'factory', web: 'factory' }} size={21} tintColor="#246548" /></View>
+          <View style={[styles.factoryIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="factory" size={22} color={theme.colors.primary} /></View>
           <Text style={[styles.factoryName, { color: theme.colors.onSurface }]}>{f.firma}</Text>
         </View>
         {cashPrice ? <View style={[styles.factoryMainPrice, { backgroundColor: theme.colors.primaryContainer }]}>

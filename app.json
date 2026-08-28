@@ -8,7 +8,7 @@
     "orientation": "portrait",
     "backgroundColor": "#F8F3E7",
     "icon": "./assets/caylik-icon-v1.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cryptomarsis.cayureticisi",
@@ -60,7 +60,8 @@
           "backgroundColor": "#F8F3E7"
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-asset"
     ],
     "extra": {
       "router": {},

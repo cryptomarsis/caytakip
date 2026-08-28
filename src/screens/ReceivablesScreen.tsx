@@ -3,15 +3,14 @@ import { Text, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import { styles } from '../styles/styles';
 import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
-import { IconHeading } from '../components/icon-heading';
-import { CaylikSurface } from '../components/caylik-ui';
+import { CaylikScreenHeader, CaylikSurface } from '../components/caylik-ui';
 
 export default function ReceivablesScreen(props: any) {
   const { getReceivablesByMonth, totalReceivables } = props;
   const theme = useTheme();
   return (
     <View>
-      <IconHeading icon="calendar-clock" title="VADELİ ALACAKLAR • AYLIK TAKİP" />
+      <CaylikScreenHeader icon="cash-clock" eyebrow="ÖDEME TAKİBİ" title="Alacaklar" description="Yaklaşan ve bekleyen tahsilatlarınızı takvim sırasıyla izleyin." />
       <CaylikSurface style={[styles.statCard, { borderLeftColor: '#d62828', marginBottom: 15 }]}>
         <Text style={[styles.statTitle, { color: theme.colors.onSurfaceVariant }]}>Toplam Bekleyen Vadeli / Açık Alacak</Text>
         <Text style={[styles.statValue, { color: '#d62828' }]}>{formatTL(totalReceivables)}</Text>
@@ -23,7 +22,7 @@ export default function ReceivablesScreen(props: any) {
         getReceivablesByMonth().map(([month, items]: any) => {
           const monthTotal = items.reduce((sum: number, item: any) => sum + remainingTotalOf(item), 0);
           return (
-            <CaylikSurface key={month} style={[styles.monthCard, { backgroundColor: theme.colors.primaryContainer }]}>
+            <CaylikSurface key={month} style={[styles.monthCard, { backgroundColor: theme.colors.surface }]}>
               <View style={styles.monthHeader}>
                 <Text style={[styles.monthTitle, { color: theme.colors.onSurface }]}>{month}</Text>
                 <Text style={[styles.monthTotal, { color: theme.colors.error }]}>{formatTL(monthTotal)}</Text>

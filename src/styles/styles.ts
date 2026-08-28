@@ -88,21 +88,27 @@ export const styles = StyleSheet.create({
     backgroundColor: '#F8FAF7',
     borderWidth: 1,
     borderColor: '#D7E1D7',
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    borderRadius: 18,
+    minHeight: 56,
+    paddingHorizontal: 16,
     paddingVertical: 14,
-    fontSize: 17,
+    fontSize: 16,
     color: '#333',
     marginBottom: 6
   },
   submitBtn: {
     width: '100%',
     backgroundColor: '#1F6B4F',
-    minHeight: 54,
+    minHeight: 58,
     paddingVertical: 15,
-    borderRadius: 14,
+    borderRadius: 20,
     alignItems: 'center',
-    marginTop: 18
+    marginTop: 18,
+    shadowColor: '#092A1D',
+    shadowOpacity: 0.16,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3
   },
   submitBtnText: {
     color: '#ffffff',
@@ -131,33 +137,49 @@ export const styles = StyleSheet.create({
     marginBottom: 10
   },
   iconHeadingBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#E7F4EC'
   },
   iconHeadingBadgeCompact: {
-    width: 32,
-    height: 32,
-    borderRadius: 11
+    width: 38,
+    height: 38,
+    borderRadius: 13
   },
   header: {
-    backgroundColor: '#124B37',
-    paddingHorizontal: 18,
-    paddingTop: 15,
-    paddingBottom: 18,
+    backgroundColor: '#0E4633',
+    paddingHorizontal: 17,
+    paddingTop: 12,
+    paddingBottom: 13,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    shadowColor: '#061E15',
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 7
+    borderBottomWidth: 1,
+    shadowOpacity: 0,
+    elevation: 0,
+    overflow: 'hidden'
+  },
+  headerDecorLarge: {
+    position: 'absolute',
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    right: -72,
+    top: -88,
+    backgroundColor: 'rgba(255,255,255,0.075)'
+  },
+  headerDecorSmall: {
+    position: 'absolute',
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    right: 72,
+    bottom: -48,
+    backgroundColor: 'rgba(218,178,77,0.16)'
   },
   headerBrandRow: {
     flex: 1,
@@ -167,9 +189,9 @@ export const styles = StyleSheet.create({
     gap: 12
   },
   headerBrandMark: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
+    width: 43,
+    height: 43,
+    borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: '#E3F4E8',
     borderWidth: 1,
@@ -205,10 +227,10 @@ export const styles = StyleSheet.create({
   },
   logoutBtn: {
     backgroundColor: 'rgba(255,255,255,0.16)',
-    minWidth: 48,
-    minHeight: 48,
-    paddingHorizontal: 11,
-    borderRadius: 16,
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 9,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 1,
@@ -260,12 +282,12 @@ export const styles = StyleSheet.create({
   assistantFab: {
     position: 'absolute',
     right: 16,
-    bottom: 82,
+    bottom: 94,
     zIndex: 30,
     elevation: 12,
     minHeight: 48,
     paddingHorizontal: 15,
-    borderRadius: 24,
+    borderRadius: 18,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -282,18 +304,21 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
+    borderWidth: 1,
     borderTopColor: '#E0E9E2',
     paddingTop: 10,
     paddingBottom: 11,
     paddingHorizontal: 7,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    marginHorizontal: 10,
+    marginBottom: 8,
+    borderRadius: 25,
     shadowColor: '#173F2E',
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: -3 },
-    elevation: 10
+    elevation: 8,
+    position: 'relative',
+    overflow: 'visible'
   },
   mobileBottomNavItem: {
     flex: 1,
@@ -303,15 +328,32 @@ export const styles = StyleSheet.create({
     gap: 3,
     minHeight: 54
   },
+  mobileBottomNavCenterItem: {
+    justifyContent: 'flex-start',
+    minHeight: 62
+  },
   mobileBottomNavIcon: {
-    height: 34,
+    height: 38,
     minWidth: 50,
-    borderRadius: 17,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center'
   },
   mobileBottomNavIconActive: {
     backgroundColor: '#DDF1E4'
+  },
+  mobileBottomNavCenterButton: {
+    width: 62,
+    height: 62,
+    minWidth: 62,
+    borderRadius: 22,
+    borderWidth: 5,
+    marginTop: -30,
+    shadowColor: '#082A1D',
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12
   },
   mobileBottomNavText: {
     color: '#66786C',
@@ -324,6 +366,10 @@ export const styles = StyleSheet.create({
     color: '#174E3A',
     fontWeight: '800'
   },
+  mobileBottomNavCenterText: {
+    marginTop: 1,
+    fontWeight: '900'
+  },
   statusLine: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -332,7 +378,7 @@ export const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 18
+    padding: 16
   },
   mobileContent: {
     paddingBottom: 105
@@ -519,19 +565,69 @@ export const styles = StyleSheet.create({
     paddingBottom: 48
   },
   sectionTitle: {
-    fontSize: 19,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '900',
     color: '#1b4332',
-    marginBottom: 12
+    marginBottom: 14,
+    letterSpacing: -0.35
   },
   statsGrid: {
     gap: 10
   },
+  seasonSummaryCard: {
+    overflow: 'hidden',
+    padding: 0,
+  },
+  seasonSummaryLead: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 17,
+  },
+  seasonSummaryLeadLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  seasonSummaryLeadValue: {
+    fontSize: 29,
+    lineHeight: 36,
+    fontWeight: '900',
+    letterSpacing: -0.7,
+    marginTop: 4,
+  },
+  seasonSummaryLeadHint: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  seasonSummaryDivider: {
+    height: 1,
+    marginHorizontal: 20,
+  },
+  seasonSummaryRow: {
+    minHeight: 52,
+    marginHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  seasonSummaryRowLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  seasonSummaryRowValue: {
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
   dashboardSnapshot: {
-    backgroundColor: '#174D38',
-    borderRadius: 22,
-    padding: 18,
+    backgroundColor: '#103F2F',
+    borderRadius: 28,
+    padding: 20,
     marginBottom: 20,
+    overflow: 'hidden',
     shadowColor: '#0B2B1F',
     shadowOffset: { width: 0, height: 7 },
     shadowOpacity: 0.16,
@@ -543,6 +639,15 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12
+  },
+  dashboardSnapshotArt: {
+    position: 'absolute',
+    width: 190,
+    height: 190,
+    right: -48,
+    top: -38,
+    opacity: 0.18,
+    borderRadius: 95,
   },
   dashboardSnapshotEyebrow: {
     color: '#B9DDC6',
@@ -569,7 +674,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 18,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 16,
+    borderRadius: 18,
     paddingVertical: 13
   },
   dashboardSnapshotMetric: {
@@ -592,11 +697,36 @@ export const styles = StyleSheet.create({
     marginTop: 3,
     fontWeight: '600'
   },
+  dashboardHarvestButton: {
+    minHeight: 78,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    shadowColor: '#12392C',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 4,
+  },
+  dashboardHarvestButtonIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dashboardHarvestButtonTitle: { fontSize: 19, fontWeight: '900' },
+  dashboardHarvestButtonText: { fontSize: 12, fontWeight: '600', opacity: 0.82, marginTop: 2 },
   assistantSpotlight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 13,
-    borderRadius: 18,
+    borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: 15,
     marginBottom: 18,
@@ -605,7 +735,7 @@ export const styles = StyleSheet.create({
     borderColor: '#A9D6B8',
     shadowColor: '#123D2C',
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 7,
     elevation: 3
   },
@@ -642,19 +772,21 @@ export const styles = StyleSheet.create({
   },
   quickAction: {
     width: '48%',
-    minHeight: 126,
+    minHeight: 118,
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: '#DCE8DD',
     padding: 15,
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    elevation: 2,
+    elevation: 1,
     shadowColor: '#123D2C',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.07,
-    shadowRadius: 6
+    shadowRadius: 6,
+    position: 'relative',
+    overflow: 'hidden'
   },
   quickActionPrimary: {
     width: '100%',
@@ -682,7 +814,18 @@ export const styles = StyleSheet.create({
     borderRadius: 18
   },
   quickActionCopy: {
-    flexShrink: 1
+    flexShrink: 1,
+    paddingRight: 22
+  },
+  quickActionChevron: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   quickActionText: {
     color: '#1F513D',
@@ -707,7 +850,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    borderRadius: 16,
+    borderRadius: 20,
     backgroundColor: '#FFF6E4',
     borderWidth: 1,
     borderColor: '#F1D9A4',
@@ -814,15 +957,15 @@ export const styles = StyleSheet.create({
   },
   statCard: {
     backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 18,
+    padding: 18,
+    borderRadius: 24,
     borderLeftWidth: 0,
     borderWidth: 1,
     borderColor: '#E1EAE2',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
     elevation: 2
   },
   statTitle: {
@@ -1033,9 +1176,9 @@ export const styles = StyleSheet.create({
   },
   monthCard: {
     backgroundColor: '#eef7f1',
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 14
+    borderRadius: 26,
+    padding: 16,
+    marginBottom: 16
   },
   monthHeader: {
     flexDirection: 'row',
@@ -1109,9 +1252,9 @@ export const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E0E9E1',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 26,
+    padding: 18,
+    marginBottom: 14,
     shadowColor: '#153828',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
@@ -1125,9 +1268,9 @@ export const styles = StyleSheet.create({
     marginBottom: 14
   },
   factoryIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 15,
     backgroundColor: '#E7F2E9',
     alignItems: 'center',
     justifyContent: 'center'
@@ -1139,7 +1282,7 @@ export const styles = StyleSheet.create({
   },
   factoryMainPrice: {
     backgroundColor: '#F2F7F2',
-    borderRadius: 12,
+    borderRadius: 18,
     padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1221,16 +1364,16 @@ export const styles = StyleSheet.create({
   listItem: {
     backgroundColor: '#FFFFFF',
     padding: 16,
-    borderRadius: 14,
-    marginBottom: 10,
+    borderRadius: 22,
+    marginBottom: 11,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1
+    shadowOpacity: 0.06,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2
   },
   listTitle: {
     fontSize: 16,
@@ -1246,13 +1389,17 @@ export const styles = StyleSheet.create({
     backgroundColor: '#3E7C5D',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6
+    minHeight: 38,
+    borderRadius: 12,
+    justifyContent: 'center'
   },
   deleteBtn: {
     backgroundColor: '#B44B4B',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6
+    minHeight: 38,
+    borderRadius: 12,
+    justifyContent: 'center'
   },
   actionBtnText: {
     color: '#ffffff',
@@ -1357,18 +1504,18 @@ export const styles = StyleSheet.create({
   formCard: {
     backgroundColor: '#FFFFFF',
     padding: 18,
-    borderRadius: 22,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: '#E0E9E2',
     shadowColor: '#173B2B',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
     elevation: 3,
-    marginBottom: 16
+    marginBottom: 18
   },
   formTitle: {
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#1b4332',
     marginBottom: 12
@@ -1413,7 +1560,8 @@ export const styles = StyleSheet.create({
   groupBtn: {
     paddingHorizontal: 15,
     paddingVertical: 11,
-    borderRadius: 8,
+    minHeight: 44,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: '#D7E1D7',
     backgroundColor: '#F8FAF7'

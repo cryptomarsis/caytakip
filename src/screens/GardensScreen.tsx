@@ -4,6 +4,7 @@ import { useTheme } from 'react-native-paper';
 
 import { AppIcon } from '../components/app-icon';
 import { IconHeading } from '../components/icon-heading';
+import { CaylikScreenHeader } from '../components/caylik-ui';
 import { styles } from '../styles/styles';
 import { formatTL } from '../utils/format';
 
@@ -24,7 +25,7 @@ export default function GardensScreen(props: any) {
 
   const header = (
     <View>
-      <IconHeading icon="tree" title="BAHÇE BAZLI TOPLAM TOPLAMA VE KAZANÇ" />
+      <CaylikScreenHeader icon="greenhouse" eyebrow="BAHÇE PERFORMANSI" title="Bahçeler" description="Bahçelerinizi ve üretim sonuçlarını tek yerden yönetin." />
       {calculatedGardenSummaries.length === 0 ? (
         <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>Henüz bahçelerden yapılmış bir hasat verisi bulunamadı.</Text>
       ) : (
@@ -46,7 +47,7 @@ export default function GardensScreen(props: any) {
       )}
 
       <View style={[styles.formCard, { marginTop: 20, backgroundColor: theme.colors.surface }]}>
-        <IconHeading icon="tree" title="YENİ BAHÇE TANIMLA" compact />
+        <IconHeading icon="sprout-outline" title="Yeni bahçe tanımla" compact />
 
         <Text style={[styles.label, { color: theme.colors.onSurface }]}>Bahçe Adı</Text>
         <TextInput
@@ -83,7 +84,7 @@ export default function GardensScreen(props: any) {
         </TouchableOpacity>
       </View>
 
-      <Text style={[styles.sectionTitle, { marginTop: 20, color: theme.colors.onSurface }]}>KAYITLI BAHÇE LİSTESİ</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 20, color: theme.colors.onSurface }]}>Kayıtlı bahçeler</Text>
     </View>
   );
 
