@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import type { Product, ProductSubscription, Purchase } from 'expo-iap';
@@ -9,7 +9,6 @@ import {
   ALL_IAP_PRODUCT_IDS,
   fetchIapConfig,
   IAP_PRODUCT_IDS,
-  IAP_SUBSCRIPTION_IDS,
   isStoreProductId,
   type StoreProductId,
   verifyApplePurchase,
@@ -41,6 +40,19 @@ export const useStorePurchases = (
 
   useEffect(() => { authFetchRef.current = authFetch; }, [authFetch]);
   useEffect(() => { refreshWalletRef.current = refreshWallet; }, [refreshWallet]);
+
+  const fetchStoreProducts = useCallback(async () => {
+    const iap = iapRef.current;
+    if (!iap) throw new Error('App Store bağlantısı kapalı.');
+    const items = await iap.fetchProducts({ skus: [...ALL_IAP_PRODUCT_IDS], type: 'all' }) || [];
+    const nextProducts = items.filter((item) => item.type === 'in-app') as Product[];
+    const nextSubscriptions = items.filter((item) => item.type === 'subs') as ProductSubscription[];
+    setProducts(nextProducts);
+    setSubscriptions(nextSubscriptions);
+    if (items.length) setStatus(`${items.length} App Store ürünü hazır.`);
+    else setStatus('App Store ürünleri henüz bu cihazın mağazasında görünmüyor.');
+    return items;
+  }, []);
 
   const processPurchase = async (purchase: Purchase) => {
     const productId = String(purchase.productId || '');
@@ -124,16 +136,8 @@ export const useStorePurchases = (
 
   useEffect(() => {
     if (!connected || !userId || Platform.OS !== 'ios') return;
-    const iap = iapRef.current;
-    if (!iap) return;
-    void Promise.all([
-      iap.fetchProducts({ skus: [...IAP_PRODUCT_IDS], type: 'in-app' }),
-      iap.fetchProducts({ skus: [...IAP_SUBSCRIPTION_IDS], type: 'subs' }),
-    ]).then(([storeProducts, storeSubscriptions]) => {
-      setProducts((storeProducts || []) as Product[]);
-      setSubscriptions((storeSubscriptions || []) as ProductSubscription[]);
-    }).catch((error) => setStatus(error instanceof Error ? error.message : 'App Store ürünleri alınamadı.'));
-  }, [connected, userId]);
+    void fetchStoreProducts().catch((error) => setStatus(error instanceof Error ? error.message : 'App Store ürünleri alınamadı.'));
+  }, [connected, fetchStoreProducts, userId]);
 
   const prices = [...products, ...subscriptions].reduce<Partial<Record<StoreProductId, string>>>((result, product) => {
     if (isStoreProductId(product.id)) result[product.id] = product.displayPrice;
@@ -145,8 +149,19 @@ export const useStorePurchases = (
     if (!connected) return Alert.alert('App Store bağlantısı yok', 'İnternet bağlantınızı kontrol edip tekrar deneyin.');
     if (!configured || !appAccountToken) return Alert.alert('Satın alma hazır değil', 'Apple doğrulama ayarları tamamlandıktan sonra paketler satın alınabilir.');
     if (!ALL_IAP_PRODUCT_IDS.includes(productId)) return;
-    const available = [...products, ...subscriptions].some((product) => product.id === productId);
-    if (!available) return Alert.alert('Paket bulunamadı', 'Bu ürün App Store’da henüz satışa hazır değil. Birkaç dakika sonra tekrar deneyin.');
+    let available = [...products, ...subscriptions].some((product) => product.id === productId);
+    if (!available) {
+      setStatus('App Store ürün listesi yenileniyor…');
+      try {
+        const refreshedItems = await fetchStoreProducts();
+        available = refreshedItems.some((product) => product.id === productId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'App Store ürünleri alınamadı.';
+        setStatus(message);
+        return Alert.alert('App Store bağlantısı kurulamadı', message);
+      }
+    }
+    if (!available) return Alert.alert('Paket Apple’da görünmüyor', `App Store bu cihaz için ${productId} ürününü döndürmedi. Ürünün fiyat, ülke ve sözleşme durumunu App Store Connect’te kontrol edin.`);
     setPurchasingProductId(productId);
     try {
       const iap = iapRef.current;
