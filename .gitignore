@@ -24,4 +24,5 @@ secrets/
 src.rar
 android/app/debug.keystore
 .expo-export-*/
+dist-iap-check*/
 backups/
