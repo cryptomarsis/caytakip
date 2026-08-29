@@ -619,7 +619,7 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-28-apple-iap-v1',
+    version: '2026-08-29-apple-iap-sandbox-v2',
     appleIap: isAppleIapConfigured() ? 'configured' : 'not-configured',
     service: 'cay-ureticisi-takip'
   });
