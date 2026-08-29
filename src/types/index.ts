@@ -5,6 +5,7 @@ export interface UserSession {
   role: 'admin' | 'user';
   token: string;
   refreshToken: string;
+  workTypes?: Array<'producer' | 'sharecropper' | 'worker' | string>;
 }
 
 export * from './records';

@@ -1,6 +1,12 @@
 export interface HarvestRecord {
   _id: string;
   userId?: string;
+  workType?: 'producer' | 'sharecropper' | 'worker' | string;
+  employerName?: string;
+  shareRate?: number | string | null;
+  workMode?: 'daily' | 'per_kg' | 'share' | 'fixed_kg' | 'custom' | string;
+  dailyWage?: number | string | null;
+  earnedAmount?: number | string | null;
   tarih?: string;
   surum?: string;
   uretici?: string;
