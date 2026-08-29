@@ -54,6 +54,34 @@ export default function HarvestScreen(props: any) {
 
       <CaylikSurface style={[local.sectionCard, { backgroundColor: theme.colors.surface }]}>
         <View style={local.cardContent}>
+          <Text style={[local.fieldLabel, { color: theme.colors.onSurface }]}>Kayıt türü</Text>
+          <Text style={[local.sectionDescription, { color: theme.colors.onSurfaceVariant }]}>Aynı hesapta farklı işlerinizi ayrı ayrı takip edin.</Text>
+          <View style={local.typeChoices}>
+            {[
+              ['producer', 'Müstahsil'],
+              ['sharecropper', 'Yarıcılık'],
+              ['worker', 'İşçilik'],
+            ].filter(([value]) => !currentUser?.workTypes?.length || currentUser.workTypes.includes(value)).map(([value, label]) => (
+              <TouchableOpacity key={value} onPress={() => setHForm({ ...hForm, workType: value })} style={[local.typeChoice, { backgroundColor: hForm.workType === value ? theme.colors.primary : theme.colors.surfaceVariant, borderColor: hForm.workType === value ? theme.colors.primary : theme.colors.outline }]}>
+                <Text style={{ color: hForm.workType === value ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 13 }}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {hForm.workType !== 'producer' && (
+            <>
+              <FormField icon="account-outline" label={hForm.workType === 'worker' ? 'Müstahsil / İşveren *' : 'Müstahsil *'} value={hForm.employerName} onChangeText={(employerName) => setHForm({ ...hForm, employerName })} placeholder="Ad Soyad" />
+              {hForm.workType === 'sharecropper' && <FormField icon="percent-outline" label="Paylaşım oranı (%) *" value={hForm.shareRate} onChangeText={(shareRate) => setHForm({ ...hForm, shareRate })} placeholder="Örn: 50" keyboardType="decimal-pad" />}
+              {hForm.workType === 'worker' && <View style={local.typeChoices}>
+                {[['daily', 'Yevmiye'], ['per_kg', 'Kg başı']].map(([value, label]) => <TouchableOpacity key={value} onPress={() => setHForm({ ...hForm, workMode: value })} style={[local.typeChoice, { backgroundColor: hForm.workMode === value ? theme.colors.primary : theme.colors.surfaceVariant, borderColor: hForm.workMode === value ? theme.colors.primary : theme.colors.outline }]}><Text style={{ color: hForm.workMode === value ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 12 }}>{label}</Text></TouchableOpacity>)}
+              </View>}
+              {hForm.workType === 'worker' && hForm.workMode === 'daily' && <><FormField icon="calendar-range" label="Çalışılan gün *" value={hForm.workDays} onChangeText={(workDays) => setHForm({ ...hForm, workDays })} placeholder="Örn: 5" keyboardType="decimal-pad" /><FormField icon="cash" label="Günlük yevmiye (TL) *" value={hForm.dailyWage} onChangeText={(dailyWage) => setHForm({ ...hForm, dailyWage })} placeholder="Örn: 1000" keyboardType="decimal-pad" /></>}
+            </>
+          )}
+        </View>
+      </CaylikSurface>
+
+      <CaylikSurface style={[local.sectionCard, { backgroundColor: theme.colors.surface }]}>
+        <View style={local.cardContent}>
           <View style={local.sectionHead}>
             <View style={[local.sectionIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="line-scan" size={22} color={theme.colors.primary} /></View>
             <View style={{ flex: 1 }}>
@@ -152,6 +180,8 @@ const local = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.2 },
   sectionDescription: { fontSize: 12, lineHeight: 17, marginTop: 2 },
   receiptActions: { flexDirection: 'row', gap: 9, marginTop: 5 },
+  typeChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, marginBottom: 8 },
+  typeChoice: { minHeight: 42, borderRadius: 13, borderWidth: 1, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
   receiptButton: { flex: 1 },
   receiptResult: { marginTop: 13, borderRadius: 16, padding: 13, borderWidth: 1 },
   receiptResultHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 5 },

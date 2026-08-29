@@ -347,6 +347,7 @@ const HarvestSchema = new mongoose.Schema({
   employerName: { type: String, default: '' },
   shareRate: { type: Number, default: null },
   workMode: { type: String, enum: ['daily', 'per_kg', 'share', 'fixed_kg', 'custom', ''], default: '' },
+  workDays: { type: Number, default: null },
   dailyWage: { type: Number, default: null },
   earnedAmount: { type: Number, default: null },
   tarih: String,
@@ -1601,6 +1602,8 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     const shareRate = req.body.shareRate === undefined || req.body.shareRate === '' ? null : Number(req.body.shareRate);
     const dailyWage = req.body.dailyWage === undefined || req.body.dailyWage === '' ? null : Number(req.body.dailyWage);
     const earnedAmount = req.body.earnedAmount === undefined || req.body.earnedAmount === '' ? null : Number(req.body.earnedAmount);
+    const workDays = req.body.workDays === undefined || req.body.workDays === '' ? null : Number(req.body.workDays);
+    const isProducerRecord = workType === 'producer';
     const receiptFingerprint = /^[a-f0-9]{64}$/i.test(String(req.body.receiptFingerprint || ''))
       ? String(req.body.receiptFingerprint).toLowerCase()
       : undefined;
@@ -1610,13 +1613,29 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     if (shareRate !== null && (!Number.isFinite(shareRate) || shareRate < 0 || shareRate > 100)) return res.status(400).json({ error: 'Paylaşım oranı 0 ile 100 arasında olmalıdır.' });
     if (dailyWage !== null && (!Number.isFinite(dailyWage) || dailyWage < 0)) return res.status(400).json({ error: 'Geçerli bir yevmiye girin.' });
     if (earnedAmount !== null && (!Number.isFinite(earnedAmount) || earnedAmount < 0)) return res.status(400).json({ error: 'Geçerli bir hakediş girin.' });
+    if (workDays !== null && (!Number.isFinite(workDays) || workDays <= 0)) return res.status(400).json({ error: 'Çalışma günü 0’dan büyük olmalıdır.' });
+    if (!isProducerRecord && !String(req.body.bahce || req.body.garden || '').trim()) return res.status(400).json({ error: 'Çalışılan bahçe veya yer bilgisini girin.' });
+    if (!isProducerRecord && !String(req.body.employerName || '').trim()) return res.status(400).json({ error: 'Müstahsil veya işveren adını girin.' });
+    if (workType === 'sharecropper' && shareRate === null) return res.status(400).json({ error: 'Yarıcılık paylaşım oranını girin.' });
+    if (workType === 'worker' && workMode === 'daily' && (dailyWage === null || workDays === null)) return res.status(400).json({ error: 'Yevmiye ve çalışma günü bilgilerini girin.' });
+    if (workType === 'worker' && workMode === 'per_kg' && (!Number.isFinite(fiyatVal) || fiyatVal <= 0)) return res.status(400).json({ error: 'Kg başı işçilik ücretini girin.' });
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (receiptFingerprint) {
       const duplicateReceipt = await Harvest.exists({ userId: req.auth.userId, receiptFingerprint });
       if (duplicateReceipt) return res.status(409).json({ error: 'Bu fiş daha önce hasat kaydı olarak eklenmiş.', code: 'DUPLICATE_RECEIPT' });
     }
-    const amounts = calculateHarvestAmounts(kgVal, fiyatVal);
+    const standardAmounts = calculateHarvestAmounts(kgVal, fiyatVal);
+    const workEarned = workType === 'sharecropper'
+      ? standardAmounts.brutTutar * Number(shareRate || 0) / 100
+      : workType === 'worker' && workMode === 'daily'
+        ? Number(dailyWage || 0) * Number(workDays || 0)
+        : workType === 'worker' && workMode === 'per_kg'
+          ? kgVal * fiyatVal
+          : Number(earnedAmount || 0);
+    const amounts = isProducerRecord
+      ? standardAmounts
+      : { brutTutar: workEarned, gelirVergisiOrani: 0, gelirVergisiKesintisi: 0, kesintiTutar: 0, netTutar: workEarned };
     const toplam = amounts.netTutar;
     if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
     const kalan = toplam - tahsilatVal;
@@ -1632,6 +1651,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       employerName: String(req.body.employerName || '').trim(),
       shareRate,
       workMode,
+      workDays,
       dailyWage,
       earnedAmount,
       tarih,
@@ -1640,7 +1660,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       producerName: String(req.body.producerName || req.body.uretici || '').trim(),
       kg: kgVal,
       weight: kgVal,
-      firma: String(req.body.firma || '').trim(),
+      firma: String(req.body.firma || (isProducerRecord ? '' : req.body.employerName || '')).trim(),
       fiyat: fiyatVal,
       brutTutar: amounts.brutTutar,
       gelirVergisiOrani: amounts.gelirVergisiOrani,
