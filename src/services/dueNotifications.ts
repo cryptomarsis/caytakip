@@ -15,6 +15,7 @@ type StoredNotification = {
 type StoredNotifications = Record<string, StoredNotification>;
 
 const notificationKey = (userId: string) => STORAGE_PREFIX + userId;
+const isExpoGo = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
 
 const readStored = async (userId: string): Promise<StoredNotifications> => {
   try {
@@ -27,6 +28,7 @@ const readStored = async (userId: string): Promise<StoredNotifications> => {
 };
 
 export const setupNotifications = async () => {
+  if (isExpoGo && Platform.OS === 'android') return false;
   try {
     if (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient') return false;
     const Notifications = require('expo-notifications');
@@ -57,6 +59,7 @@ export const setupNotifications = async () => {
 };
 
 export const syncDueNotifications = async (userId: string, harvests: HarvestRecord[]) => {
+  if (isExpoGo && Platform.OS === 'android') return;
   if (!userId || (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient')) return;
 
   try {
@@ -150,6 +153,10 @@ export const syncDueNotifications = async (userId: string, harvests: HarvestReco
 
 export const clearDueNotifications = async (userId: string) => {
   if (!userId) return;
+  if (isExpoGo && Platform.OS === 'android') {
+    await AsyncStorage.removeItem(notificationKey(userId));
+    return;
+  }
   try {
     const Notifications = require('expo-notifications');
     const stored = await readStored(userId);
