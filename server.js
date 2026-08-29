@@ -106,14 +106,42 @@ const AI_VOICE_TRANSCRIPTION_CREDITS = 6;
 const APPLE_IAP_BUNDLE_ID = String(process.env.APPLE_IAP_BUNDLE_ID || 'com.cryptomarsis.cayureticisi').trim();
 const APPLE_IAP_ISSUER_ID = String(process.env.APPLE_IAP_ISSUER_ID || '').trim();
 const APPLE_IAP_KEY_ID = String(process.env.APPLE_IAP_KEY_ID || '').trim();
-const APPLE_IAP_PRIVATE_KEY = String(process.env.APPLE_IAP_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
+const normalizeApplePrivateKey = (value) => {
+  let key = String(value || '').trim();
+  // Render'a JSON tırnaklarıyla yapıştırılan değerleri güvenli şekilde aç.
+  if (key.startsWith('"') && key.endsWith('"')) {
+    try { key = JSON.parse(key); } catch { key = key.slice(1, -1); }
+  }
+  key = String(key).replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n').trim();
+  // Secret File içeriği Base64 olarak saklandıysa PEM metnine dönüştür.
+  if (key && !key.includes('-----BEGIN PRIVATE KEY-----') && /^[A-Za-z0-9+/=\s]+$/.test(key)) {
+    try {
+      const decoded = Buffer.from(key.replace(/\s/g, ''), 'base64').toString('utf8').trim();
+      if (decoded.includes('-----BEGIN PRIVATE KEY-----')) key = decoded;
+    } catch { /* Aşağıdaki doğrulama güvenli biçimde reddeder. */ }
+  }
+  return key;
+};
+const APPLE_IAP_PRIVATE_KEY = normalizeApplePrivateKey(process.env.APPLE_IAP_PRIVATE_KEY);
 const APPLE_IAP_PRODUCTS = Object.freeze({
   caylik_credits_250: { credits: 250, kind: 'consumable', label: '250 kredi paketi' },
   caylik_credits_750: { credits: 750, kind: 'consumable', label: '750 kredi paketi' },
   caylik_credits_2000: { credits: 2000, kind: 'consumable', label: '2.000 kredi paketi' },
   caylik_pro_monthly: { credits: 1500, kind: 'subscription', label: 'Çaylık Pro aylık kredi' }
 });
-const isAppleIapConfigured = () => Boolean(APPLE_IAP_ISSUER_ID && APPLE_IAP_KEY_ID && APPLE_IAP_PRIVATE_KEY && APPLE_IAP_BUNDLE_ID);
+const validateApplePrivateKey = () => {
+  if (!APPLE_IAP_PRIVATE_KEY) return { valid: false, reason: 'missing' };
+  try {
+    const key = crypto.createPrivateKey(APPLE_IAP_PRIVATE_KEY);
+    return key.asymmetricKeyType === 'ec' ? { valid: true, reason: '' } : { valid: false, reason: 'not-ec' };
+  } catch {
+    return { valid: false, reason: 'invalid-pem' };
+  }
+};
+const APPLE_IAP_KEY_STATUS = validateApplePrivateKey();
+const isAppleIapConfigured = () => Boolean(
+  APPLE_IAP_ISSUER_ID && APPLE_IAP_KEY_ID && APPLE_IAP_BUNDLE_ID && APPLE_IAP_KEY_STATUS.valid
+);
 
 const makeAppleAppAccountToken = (userId) => {
   const bytes = crypto.createHmac('sha256', JWT_SECRET).update(`apple-iap:${userId}`).digest().subarray(0, 16);
@@ -619,8 +647,8 @@ app.get('/api/health', (req, res) => {
   return res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
-    version: '2026-08-29-apple-iap-sandbox-v2',
-    appleIap: isAppleIapConfigured() ? 'configured' : 'not-configured',
+    version: '2026-08-29-apple-iap-key-v3',
+    appleIap: isAppleIapConfigured() ? 'configured' : `not-configured:${APPLE_IAP_KEY_STATUS.reason || 'credentials'}`,
     service: 'cay-ureticisi-takip'
   });
 });
