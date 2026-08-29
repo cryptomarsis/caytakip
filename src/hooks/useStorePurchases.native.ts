@@ -13,6 +13,7 @@ import {
   type StoreProductId,
   verifyApplePurchase,
 } from '../services/inAppPurchases';
+import { forgetPendingApplePurchase, readPendingApplePurchases, rememberPendingApplePurchase } from '../services/pendingIap';
 
 const isConsumable = (productId: string) => (IAP_PRODUCT_IDS as readonly string[]).includes(productId);
 const transactionIdOf = (purchase: Purchase) => String(('transactionId' in purchase && purchase.transactionId) || purchase.id || '');
@@ -27,6 +28,7 @@ export const useStorePurchases = (
   const authFetchRef = useRef(authFetch);
   const refreshWalletRef = useRef(refreshWallet);
   const processingRef = useRef(new Set<string>());
+  const userIdRef = useRef(userId);
   const iapRef = useRef<IapModule | null>(null);
   const [serverConfig, setServerConfig] = useState({ userId: '', configured: false, appAccountToken: '' });
   const [connected, setConnected] = useState(false);
@@ -40,6 +42,7 @@ export const useStorePurchases = (
 
   useEffect(() => { authFetchRef.current = authFetch; }, [authFetch]);
   useEffect(() => { refreshWalletRef.current = refreshWallet; }, [refreshWallet]);
+  useEffect(() => { userIdRef.current = userId; }, [userId]);
 
   const fetchStoreProducts = useCallback(async () => {
     const iap = iapRef.current;
@@ -58,13 +61,26 @@ export const useStorePurchases = (
     const productId = String(purchase.productId || '');
     const transactionId = transactionIdOf(purchase);
     if (!isStoreProductId(productId) || !transactionId) throw new Error('App Store işlem bilgisi eksik geldi.');
+    const activeUserId = userIdRef.current;
+    if (!activeUserId) throw new Error('Satın almayı işlemek için Çaylık hesabınıza yeniden giriş yapın.');
     if (processingRef.current.has(transactionId)) return { creditsGranted: 0, replayed: true };
     processingRef.current.add(transactionId);
     try {
-      const verified = await verifyApplePurchase(authFetchRef.current, API_URL, transactionId, productId);
+      const environment = 'environmentIOS' in purchase ? purchase.environmentIOS : undefined;
+      await rememberPendingApplePurchase(activeUserId, { transactionId, productId, environment: environment || undefined });
+      const signedTransactionInfo = 'purchaseToken' in purchase ? purchase.purchaseToken : undefined;
+      const verified = await verifyApplePurchase(
+        authFetchRef.current,
+        API_URL,
+        transactionId,
+        productId,
+        environment,
+        signedTransactionInfo,
+      );
       if (!verified.verified) throw new Error('Satın alma doğrulanamadı.');
       if (!iapRef.current) throw new Error('App Store bağlantısı kapandı.');
       await iapRef.current.finishTransaction({ purchase, isConsumable: isConsumable(productId) });
+      await forgetPendingApplePurchase(activeUserId, transactionId);
       await refreshWalletRef.current();
       return verified;
     } finally {
@@ -89,8 +105,11 @@ export const useStorePurchases = (
             Alert.alert('Satın alma başarılı', result.replayed ? 'Bu işlem daha önce hesabınıza eklenmişti.' : `${result.creditsGranted.toLocaleString('tr-TR')} kredi hesabınıza eklendi.`);
           })
           .catch((error) => {
-            setStatus(error instanceof Error ? error.message : 'Satın alma doğrulanamadı.');
-            Alert.alert('Doğrulama bekliyor', error instanceof Error ? error.message : 'İşlem daha sonra yeniden denenecek.');
+            const message = error instanceof Error
+              ? error.message
+              : 'Satın almanız korunuyor ve bağlantı sağlandığında yeniden denenecek.';
+            setStatus(message);
+            Alert.alert('Satın alma işleniyor', message);
           })
           .finally(() => setPurchasingProductId(null));
       });
@@ -138,6 +157,26 @@ export const useStorePurchases = (
     if (!connected || !userId || Platform.OS !== 'ios') return;
     void fetchStoreProducts().catch((error) => setStatus(error instanceof Error ? error.message : 'App Store ürünleri alınamadı.'));
   }, [connected, fetchStoreProducts, userId]);
+
+  useEffect(() => {
+    if (!connected || !configured || !userId || Platform.OS !== 'ios') return;
+    let cancelled = false;
+    // Başarıyla bitirilemeyen StoreKit işlemleri Apple tarafından yeniden sunulur.
+    // Yerel kuyruk hangi işlemlerin sessizce tekrar deneneceğini takip eder;
+    // JWS/purchase token gibi hassas değerler diske yazılmaz.
+    void Promise.all([readPendingApplePurchases(userId), iapRef.current?.getAvailablePurchases() || Promise.resolve([])])
+      .then(async ([pending, available]) => {
+        if (cancelled || !pending.length) return;
+        const pendingIds = new Set(pending.map((item) => item.transactionId));
+        for (const item of available) {
+          if (cancelled) break;
+          if (pendingIds.has(transactionIdOf(item)) && isStoreProductId(item.productId)) {
+            try { await processPurchase(item); } catch { /* Kuyrukta kalır; sonraki açılışta tekrar denenir. */ }
+          }
+        }
+      });
+    return () => { cancelled = true; };
+  }, [connected, configured, userId]);
 
   const prices = [...products, ...subscriptions].reduce<Partial<Record<StoreProductId, string>>>((result, product) => {
     if (isStoreProductId(product.id)) result[product.id] = product.displayPrice;

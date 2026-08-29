@@ -24,7 +24,22 @@ export type IapVerification = {
   replayed: boolean;
   creditsGranted: number;
   credits: number;
+  environment?: string;
 };
+
+export class IapVerificationError extends Error {
+  code: string;
+  retryable: boolean;
+  requestId: string;
+
+  constructor(message: string, code = 'IAP_VERIFICATION_FAILED', retryable = true, requestId = '') {
+    super(message);
+    this.name = 'IapVerificationError';
+    this.code = code;
+    this.retryable = retryable;
+    this.requestId = requestId;
+  }
+}
 
 const readJson = async (response: Response) => response.json().catch(() => ({}));
 
@@ -44,17 +59,32 @@ export const verifyApplePurchase = async (
   apiUrl: string,
   transactionId: string,
   productId: StoreProductId,
+  environment?: string | null,
+  signedTransactionInfo?: string | null,
 ): Promise<IapVerification> => {
   const response = await authFetch(`${apiUrl}/iap/apple/verify`, {
     method: 'POST',
-    body: JSON.stringify({ transactionId, productId }),
+    body: JSON.stringify({
+      transactionId,
+      productId,
+      environment: environment || undefined,
+      signedTransactionInfo: signedTransactionInfo || undefined,
+    }),
   }, 45000);
   const data = await readJson(response);
-  if (!response.ok) throw new Error(data?.error || 'Satın alma doğrulanamadı.');
+  if (!response.ok) {
+    throw new IapVerificationError(
+      data?.error || 'Satın alma şu anda doğrulanamadı.',
+      String(data?.code || `HTTP_${response.status}`),
+      data?.retryable !== false,
+      String(data?.requestId || ''),
+    );
+  }
   return {
     verified: Boolean(data?.verified),
     replayed: Boolean(data?.replayed),
     creditsGranted: Number(data?.creditsGranted || 0),
     credits: Number(data?.credits || 0),
+    environment: data?.environment ? String(data.environment) : undefined,
   };
 };

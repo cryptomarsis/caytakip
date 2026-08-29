@@ -141,18 +141,53 @@ const getAppleIapClients = () => {
   return appleIapClients;
 };
 
-const fetchVerifiedAppleTransaction = async (transactionId) => {
+const normalizeAppleEnvironment = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'sandbox') return Environment.SANDBOX;
+  if (normalized === 'production') return Environment.PRODUCTION;
+  return null;
+};
+
+const appleApiErrorDetails = (error) => ({
+  httpStatus: Number(error?.httpStatusCode || 0) || null,
+  appleCode: Number(error?.apiError || 0) || null,
+  appleMessage: String(error?.errorMessage || error?.message || '').slice(0, 500) || null
+});
+
+const isAppleTransactionNotFound = (error) => {
+  const { httpStatus, appleCode } = appleApiErrorDetails(error);
+  return httpStatus === 404 || [4000006, 4040005, 4040006, 4040010].includes(Number(appleCode));
+};
+
+const fetchVerifiedAppleTransaction = async (transactionId, environmentHint) => {
   let lastError = null;
-  for (const entry of getAppleIapClients()) {
+  const preferredEnvironment = normalizeAppleEnvironment(environmentHint);
+  const clients = [...getAppleIapClients()].sort((left, right) => {
+    if (!preferredEnvironment) return 0;
+    return left.environment === preferredEnvironment ? -1 : right.environment === preferredEnvironment ? 1 : 0;
+  });
+  const attempts = [];
+  for (const entry of clients) {
     try {
       const response = await entry.client.getTransactionInfo(transactionId);
       const transaction = decodeJwsPayload(response.signedTransactionInfo);
-      return { transaction, environment: entry.environment };
+      const signedEnvironment = normalizeAppleEnvironment(transaction?.environment);
+      if (signedEnvironment && signedEnvironment !== entry.environment) {
+        throw Object.assign(new Error('Apple işlem ortamı doğrulama ortamıyla eşleşmiyor.'), { code: 'APPLE_ENVIRONMENT_MISMATCH' });
+      }
+      return { transaction, environment: entry.environment, attempts };
     } catch (error) {
       lastError = error;
-      if (Number(error?.httpStatusCode) !== 404) throw error;
+      attempts.push({ environment: entry.environment, ...appleApiErrorDetails(error) });
+      // TestFlight StoreKit işlemleri Sandbox ortamındadır. İşlem seçilen ortamda
+      // bulunamazsa diğer Apple ortamına geç; yetki/oran/sunucu hatalarını gizleme.
+      if (!isAppleTransactionNotFound(error)) {
+        error.appleVerificationAttempts = attempts;
+        throw error;
+      }
     }
   }
+  if (lastError) lastError.appleVerificationAttempts = attempts;
   throw lastError || new Error('Apple işlemi bulunamadı.');
 };
 
@@ -1123,6 +1158,15 @@ app.get('/api/iap/config', requireAuth, (req, res) => {
 app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30, 60 * 60 * 1000), async (req, res) => {
   const requestedTransactionId = String(req.body?.transactionId || '').trim();
   const requestedProductId = String(req.body?.productId || '').trim();
+  const requestedSignedTransaction = String(req.body?.signedTransactionInfo || '').trim();
+  let clientTransaction = null;
+  try {
+    if (requestedSignedTransaction) clientTransaction = decodeJwsPayload(requestedSignedTransaction);
+  } catch {
+    return res.status(400).json({ error: 'App Store işlem bilgisi okunamadı.', code: 'INVALID_SIGNED_TRANSACTION' });
+  }
+  const requestedEnvironment = normalizeAppleEnvironment(req.body?.environment || clientTransaction?.environment);
+  const requestLogId = crypto.randomUUID();
   try {
     if (!isAppleIapConfigured()) {
       return res.status(503).json({ error: 'App Store satın alma doğrulaması henüz yapılandırılmadı.', code: 'IAP_NOT_CONFIGURED' });
@@ -1132,6 +1176,14 @@ app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30
     }
     const catalogProduct = APPLE_IAP_PRODUCTS[requestedProductId];
     if (!catalogProduct) return res.status(400).json({ error: 'Bu kredi paketi tanınmıyor.' });
+    if (clientTransaction) {
+      if (String(clientTransaction.transactionId || '') !== requestedTransactionId || String(clientTransaction.productId || '') !== requestedProductId) {
+        return res.status(400).json({ error: 'App Store işlem bilgileri birbiriyle eşleşmiyor.', code: 'CLIENT_TRANSACTION_MISMATCH' });
+      }
+      if (String(clientTransaction.bundleId || '') !== APPLE_IAP_BUNDLE_ID) {
+        return res.status(400).json({ error: 'Satın alma bu uygulamaya ait değil.', code: 'CLIENT_BUNDLE_MISMATCH' });
+      }
+    }
 
     const existing = await InAppPurchase.findOne({ platform: 'apple', transactionId: requestedTransactionId }).lean();
     if (existing) {
@@ -1140,11 +1192,31 @@ app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30
       return res.json({ verified: true, replayed: true, creditsGranted: 0, credits: Number(profile?.aiCredits || 0) });
     }
 
-    const { transaction, environment } = await fetchVerifiedAppleTransaction(requestedTransactionId);
+    const { transaction, environment, attempts } = await fetchVerifiedAppleTransaction(requestedTransactionId, requestedEnvironment);
     const verifiedTransactionId = String(transaction?.transactionId || '');
     const verifiedProductId = String(transaction?.productId || '');
     const expectedAccountToken = makeAppleAppAccountToken(req.auth.userId).toLowerCase();
     const verifiedAccountToken = String(transaction?.appAccountToken || '').toLowerCase();
+
+    // İstemciden gelen JWS yalnızca ortam seçimi ve tutarlılık kontrolü için
+    // kullanılır. Kredi, Apple App Store Server API'den yeniden alınan işlem
+    // bilgileri doğrulandıktan sonra verilir.
+    if (clientTransaction && (
+      String(clientTransaction.transactionId || '') !== verifiedTransactionId ||
+      String(clientTransaction.productId || '') !== verifiedProductId ||
+      String(clientTransaction.bundleId || '') !== String(transaction?.bundleId || '')
+    )) {
+      return res.status(400).json({ error: 'Apple işlem doğrulaması tutarsız sonuç verdi.', code: 'VERIFIED_TRANSACTION_MISMATCH' });
+    }
+
+    console.info('APPLE IAP VERIFIED:', {
+      requestLogId,
+      transactionId: requestedTransactionId,
+      productId: requestedProductId,
+      requestedEnvironment: requestedEnvironment || null,
+      verifiedEnvironment: environment,
+      attempts
+    });
 
     if (verifiedTransactionId !== requestedTransactionId || verifiedProductId !== requestedProductId) {
       return res.status(400).json({ error: 'App Store işlemi seçilen paketle eşleşmiyor.' });
@@ -1202,7 +1274,7 @@ app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30
     } finally {
       await session.endSession();
     }
-    res.json({ verified: true, replayed: false, creditsGranted: creditsToGrant, credits: balanceAfter });
+    res.json({ verified: true, replayed: false, creditsGranted: creditsToGrant, credits: balanceAfter, environment });
   } catch (error) {
     if (error?.code === 'PURCHASE_OWNED_BY_ANOTHER_USER') return res.status(409).json({ error: 'Bu satın alma başka bir Çaylık hesabına bağlı.' });
     if (error?.code === 11000) {
@@ -1212,8 +1284,24 @@ app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30
         return res.json({ verified: true, replayed: true, creditsGranted: 0, credits: Number(profile?.aiCredits || 0) });
       }
     }
-    console.error('APPLE IAP VERIFY ERROR:', error?.httpStatusCode || '', error?.apiError || '', error?.message || error);
-    res.status(502).json({ error: 'Satın alma Apple üzerinden doğrulanamadı. Ücret alındıysa işlem daha sonra otomatik olarak yeniden denenecek.' });
+    const details = appleApiErrorDetails(error);
+    const errorCode = String(error?.code || details.appleCode || 'APPLE_VERIFICATION_FAILED');
+    console.error('APPLE IAP VERIFY ERROR:', {
+      requestLogId,
+      userId: req.auth.userId,
+      transactionId: requestedTransactionId || null,
+      productId: requestedProductId || null,
+      requestedEnvironment: requestedEnvironment || null,
+      errorCode,
+      ...details,
+      attempts: error?.appleVerificationAttempts || []
+    });
+    res.status(502).json({
+      error: 'Satın almanız alındı ancak hesabınıza henüz işlenemedi. İşlem korunuyor ve kısa süre içinde yeniden denenecek.',
+      code: errorCode,
+      retryable: true,
+      requestId: requestLogId
+    });
   }
 });
 
