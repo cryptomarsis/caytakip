@@ -1484,7 +1484,6 @@ export default function App() {
               lastSyncAt={lastSyncAt}
               onExportData={handleExportData}
               onSendFeedback={handleSendFeedback}
-              onSaveWorkTypes={handleSaveWorkTypes}
             />
           )}
 

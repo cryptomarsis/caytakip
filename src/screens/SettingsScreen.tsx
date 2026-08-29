@@ -7,16 +7,15 @@ import { styles } from '../styles/styles';
 import { CaylikScreenHeader } from '../components/caylik-ui';
 
 type Props = {
-  currentUser: { token?: string; workTypes?: string[] } | null;
+  currentUser: { token?: string } | null;
   onChangePin: (currentPin: string, newPin: string) => Promise<void>;
   onDeleteAccount: () => Promise<void>;
   lastSyncAt?: string | null;
   onExportData?: () => Promise<void>;
   onSendFeedback?: (subject: string, message: string) => Promise<void>;
-  onSaveWorkTypes?: (workTypes: string[]) => Promise<void>;
 };
 
-export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccount, lastSyncAt, onExportData, onSendFeedback, onSaveWorkTypes }: Props) {
+export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccount, lastSyncAt, onExportData, onSendFeedback }: Props) {
   const theme = useTheme();
   const { preference, setPreference } = useAppTheme();
   const [privacy, setPrivacy] = useState<any>(null);
@@ -28,8 +27,6 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
   const [feedbackSubject, setFeedbackSubject] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [sendingFeedback, setSendingFeedback] = useState(false);
-  const [workTypes, setWorkTypes] = useState<string[]>(currentUser?.workTypes?.length ? currentUser.workTypes : ['producer']);
-  const [savingWorkTypes, setSavingWorkTypes] = useState(false);
 
   useEffect(() => {
     fetchWithTimeout(`${API_URL}/legal/privacy`)
@@ -74,17 +71,6 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
     }
   };
 
-  const toggleWorkType = async (type: string) => {
-    const next = workTypes.includes(type) ? workTypes.filter((item) => item !== type) : [...workTypes, type];
-    if (!next.length) return Alert.alert('Çalışma türü', 'En az bir çalışma türü seçmelisiniz.');
-    setWorkTypes(next);
-    if (!onSaveWorkTypes) return;
-    setSavingWorkTypes(true);
-    try { await onSaveWorkTypes(next); } catch (error: any) {
-      setWorkTypes(workTypes);
-      Alert.alert('Çalışma türü', error?.message || 'Seçiminiz kaydedilemedi.');
-    } finally { setSavingWorkTypes(false); }
-  };
 
   const themeStyles = {
     card: { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline },
@@ -108,20 +94,6 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
         ]}
         style={{ marginTop: 10 }}
       />
-    </View>
-    <View style={[styles.formCard, themeStyles.card]}>
-      <Text style={[styles.formTitle, themeStyles.title]}>Çalışma alanlarınız</Text>
-      <Text style={[styles.formHelp, themeStyles.body]}>Aynı hesapta birden fazla işi birlikte takip edebilirsiniz.</Text>
-      <View style={{ gap: 8, marginTop: 10 }}>
-        {[
-          ['producer', 'Müstahsil kayıtları'],
-          ['sharecropper', 'Yarıcılık kayıtları'],
-          ['worker', 'İşçilik kayıtları'],
-        ].map(([value, label]) => {
-          const active = workTypes.includes(value);
-          return <TouchableOpacity key={value} disabled={savingWorkTypes} onPress={() => void toggleWorkType(value)} style={{ minHeight: 48, borderRadius: 14, borderWidth: 1, justifyContent: 'center', paddingHorizontal: 15, backgroundColor: active ? theme.colors.primaryContainer : theme.colors.surfaceVariant, borderColor: active ? theme.colors.primary : theme.colors.outline }}><Text style={{ fontSize: 14, fontWeight: '800', color: active ? theme.colors.onPrimaryContainer : theme.colors.onSurface }}>{active ? '✓ ' : ''}{label}</Text></TouchableOpacity>;
-        })}
-      </View>
     </View>
     <View style={[styles.formCard, themeStyles.card]}>
       <Text style={[styles.formTitle, themeStyles.title]}>Verilerim güvende mi?</Text>
