@@ -42,7 +42,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Çaylık Asistan'a sesli soru sorabilmeniz için mikrofon erişimi gerekir."
+          "microphonePermission": "Çaylık Asistan'a sesli soru sorabilmeniz için mikrofon erişimi gerekir.",
+          "enableBackgroundPlayback": false
         }
       ],
       [
