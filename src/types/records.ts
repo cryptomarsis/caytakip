@@ -5,7 +5,6 @@ export interface HarvestRecord {
   employerName?: string;
   shareRate?: number | string | null;
   workMode?: 'daily' | 'per_kg' | 'share' | 'fixed_kg' | 'custom' | string;
-  workDays?: number | string | null;
   dailyWage?: number | string | null;
   earnedAmount?: number | string | null;
   tarih?: string;

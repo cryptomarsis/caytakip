@@ -82,13 +82,6 @@ export default function App() {
   // Form State'leri
   const todayTR = todayDisplayDate();
   const [hForm, setHForm] = useState({
-    workType: 'producer',
-    employerName: '',
-    shareRate: '',
-    workMode: 'daily',
-    workDays: '',
-    dailyWage: '',
-    earnedAmount: '',
     date: todayTR,
     surum: '1. Sürüm',
     producer: '',
@@ -619,39 +612,13 @@ export default function App() {
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
     const tarih = toServerDate(hForm.date);
     const vadeTarihi = hForm.isVadeli ? toServerDate(hForm.vadeTarihi) : '';
-    if (!hForm.kg.trim()) {
-      showOperationFeedback('Eksik Bilgi', 'Lütfen miktar alanını doldurun.', 'error');
-      return;
-    }
-    if (hForm.workType === 'producer' && (!hForm.firma.trim() || !hForm.fiyat.trim())) {
-      showOperationFeedback('Eksik Bilgi', 'Müstahsil kaydı için firma ve birim fiyat gereklidir.', 'error');
-      return;
-    }
-    if (hForm.workType !== 'producer' && (!hForm.employerName.trim() || !hForm.garden.trim())) {
-      showOperationFeedback('Eksik Bilgi', 'Çalışılan kişi/firma ve bahçe alanlarını doldurun.', 'error');
-      return;
-    }
-    if (hForm.workType === 'sharecropper' && (!hForm.shareRate.trim() || parseMoney(hForm.shareRate) <= 0 || parseMoney(hForm.shareRate) > 100)) {
-      showOperationFeedback('Eksik Bilgi', 'Yarıcılık payını yüzde olarak 1-100 arasında girin.', 'error');
-      return;
-    }
-    if (hForm.workType === 'worker' && hForm.workMode === 'daily' && (!hForm.workDays.trim() || !hForm.dailyWage.trim())) {
-      showOperationFeedback('Eksik Bilgi', 'İşçilik kaydı için gün sayısı ve yevmiye gereklidir.', 'error');
-      return;
-    }
-    if (hForm.workType === 'worker' && hForm.workMode === 'per_kg' && !hForm.fiyat.trim()) {
-      showOperationFeedback('Eksik Bilgi', 'Kg başı işçilik ücretini girin.', 'error');
+    if (!hForm.kg.trim() || !hForm.firma.trim() || !hForm.fiyat.trim()) {
+      showOperationFeedback('Eksik Bilgi', 'Lütfen miktar, firma ve birim fiyat alanlarını doldurun.', 'error');
       return;
     }
     if (!tarih) { showOperationFeedback('Tarih Hatası', 'Tarihi GG.AA.YYYY biçiminde girin.', 'error'); return; }
     if (hForm.isVadeli && !vadeTarihi) { showOperationFeedback('Tarih Hatası', 'Vade tarihini GG.AA.YYYY biçiminde girin.', 'error'); return; }
-    const agriculturalAmounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat || '0');
-    const workerEarned = hForm.workType === 'worker'
-      ? (hForm.workMode === 'daily' ? parseMoney(hForm.workDays) * parseMoney(hForm.dailyWage) : parseMoney(hForm.kg) * parseMoney(hForm.fiyat))
-      : 0;
-    const amounts = hForm.workType === 'worker'
-      ? { ...agriculturalAmounts, brutTutar: workerEarned, netTutar: workerEarned, gelirVergisiKesintisi: 0, kesintiTutar: 0 }
-      : agriculturalAmounts;
+    const amounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat);
     const tahsilat = parseMoney(hForm.tahsilat);
     if (tahsilat > amounts.netTutar + 0.01) {
       showOperationFeedback('Tahsilat Hatası', `Tahsilat net alacaktan fazla olamaz. Net alacak: ${formatTL(amounts.netTutar)}`, 'error');
@@ -660,13 +627,6 @@ export default function App() {
     setLoading(true);
     try {
       const payload = {
-        workType: hForm.workType,
-        employerName: hForm.employerName,
-        shareRate: hForm.shareRate ? parseMoney(hForm.shareRate) : undefined,
-        workMode: hForm.workType === 'worker' ? hForm.workMode : hForm.workType === 'sharecropper' ? 'share' : '',
-        workDays: hForm.workDays ? parseMoney(hForm.workDays) : undefined,
-        dailyWage: hForm.dailyWage ? parseMoney(hForm.dailyWage) : undefined,
-        earnedAmount: hForm.earnedAmount ? parseMoney(hForm.earnedAmount) : undefined,
         tarih,
         surum: hForm.surum || '1. Sürüm',
         uretici: producerName,
@@ -691,7 +651,7 @@ export default function App() {
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setReceiptNotice('');
-        setHForm({ workType: hForm.workType, employerName: '', shareRate: '', workMode: 'daily', workDays: '', dailyWage: '', earnedAmount: '', date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
+        setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
         setActiveTab('dashboard');
         return;
       }
@@ -702,13 +662,6 @@ export default function App() {
         setReceiptNotice('');
         // Form Temizleme Mantığı Düzeltildi (Madde 5)
         setHForm({
-          workType: hForm.workType,
-          employerName: '',
-          shareRate: '',
-          workMode: 'daily',
-          workDays: '',
-          dailyWage: '',
-          earnedAmount: '',
           date: todayDisplayDate(),
           surum: '1. Sürüm',
           producer: '',
