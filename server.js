@@ -1197,6 +1197,7 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
   const userId = String(event.app_user_id || '').trim();
   const transactionId = String(event.transaction_id || event.original_transaction_id || '').trim();
   const productId = String(event.product_id || '').trim();
+  if (eventType === 'TEST') return res.json({ received: true, test: true });
   const catalogProduct = APPLE_IAP_PRODUCTS[productId];
   if (!eventId || !userId || userId.startsWith('$RCAnonymousID:') || !transactionId || !catalogProduct) {
     return res.status(400).json({ error: 'Invalid RevenueCat event' });
