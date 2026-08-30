@@ -486,6 +486,8 @@ const InAppPurchaseSchema = new mongoose.Schema({
 }, { timestamps: true });
 InAppPurchaseSchema.index({ platform: 1, transactionId: 1 }, { unique: true });
 InAppPurchaseSchema.index({ originalTransactionId: 1, createdAt: -1 });
+InAppPurchaseSchema.add({ provider: { type: String, default: 'apple-direct' }, revenueCatEventId: { type: String, default: '' } });
+InAppPurchaseSchema.index({ revenueCatEventId: 1 }, { unique: true, sparse: true });
 const InAppPurchase = mongoose.model('InAppPurchase', InAppPurchaseSchema);
 const SessionSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true },
@@ -1181,6 +1183,48 @@ app.get('/api/iap/config', requireAuth, (req, res) => {
     appAccountToken: makeAppleAppAccountToken(req.auth.userId),
     productIds: Object.keys(APPLE_IAP_PRODUCTS)
   });
+});
+
+// RevenueCat webhook: store verification is handled by RevenueCat; this endpoint
+// only applies a verified event to the user's credit ledger, idempotently.
+app.post('/api/webhooks/revenuecat', async (req, res) => {
+  const expected = String(process.env.REVENUECAT_WEBHOOK_AUTH || '').trim();
+  const supplied = String(req.headers.authorization || '').trim();
+  if (!expected || supplied !== `Bearer ${expected}`) return res.status(401).json({ error: 'Unauthorized' });
+  const event = req.body?.event || {};
+  const eventType = String(event.type || '').toUpperCase();
+  const eventId = String(event.id || '').trim();
+  const userId = String(event.app_user_id || '').trim();
+  const transactionId = String(event.transaction_id || event.original_transaction_id || '').trim();
+  const productId = String(event.product_id || '').trim();
+  const catalogProduct = APPLE_IAP_PRODUCTS[productId];
+  if (!eventId || !userId || userId.startsWith('$RCAnonymousID:') || !transactionId || !catalogProduct) {
+    return res.status(400).json({ error: 'Invalid RevenueCat event' });
+  }
+  const grantEvent = eventType === 'NON_RENEWING_PURCHASE' || eventType === 'INITIAL_PURCHASE' || eventType === 'RENEWAL';
+  if (!grantEvent) return res.json({ received: true, ignored: eventType });
+  try {
+    const duplicate = await InAppPurchase.findOne({ $or: [{ revenueCatEventId: eventId }, { platform: 'apple', transactionId }] }).lean();
+    if (duplicate) return res.json({ received: true, replayed: true });
+    const profile = await UserProfile.findOne({ userId }).select('userId').lean();
+    if (!profile) return res.status(404).json({ error: 'User not found' });
+    await UserProfile.updateOne({ userId }, { $inc: { aiCredits: catalogProduct.credits } });
+    await InAppPurchase.create({
+      platform: 'apple', provider: 'revenuecat', revenueCatEventId: eventId,
+      transactionId, originalTransactionId: String(event.original_transaction_id || transactionId),
+      userId, productId, kind: catalogProduct.kind, environment: String(event.environment || ''),
+      creditsGranted: catalogProduct.credits,
+      purchaseDate: event.purchased_at_ms ? new Date(Number(event.purchased_at_ms)) : null,
+      expiresDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+    });
+    const wallet = await UserProfile.findOne({ userId }).select('aiCredits').lean();
+    await AiCreditTransaction.create({ userId, type: 'purchase', requestId: `purchase:revenuecat:${transactionId}`, amount: catalogProduct.credits, balanceAfter: Number(wallet?.aiCredits || 0), description: catalogProduct.label, model: 'revenuecat', responseText: productId });
+    return res.json({ received: true, creditsGranted: catalogProduct.credits });
+  } catch (error) {
+    if (error?.code === 11000) return res.json({ received: true, replayed: true });
+    console.error('REVENUECAT WEBHOOK ERROR', { eventId, userId, transactionId, productId, error: error?.message || error });
+    return res.status(500).json({ error: 'Webhook processing failed' });
+  }
 });
 
 app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30, 60 * 60 * 1000), async (req, res) => {
