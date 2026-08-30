@@ -346,8 +346,6 @@ const HarvestSchema = new mongoose.Schema({
   workType: { type: String, enum: ['producer', 'sharecropper', 'worker'], default: 'producer', index: true },
   employerName: { type: String, default: '' },
   shareRate: { type: Number, default: null },
-  shareNumerator: { type: Number, default: 1 },
-  shareDenominator: { type: Number, default: null },
   workMode: { type: String, enum: ['daily', 'per_kg', 'share', 'fixed_kg', 'custom', ''], default: '' },
   workDays: { type: Number, default: null },
   dailyWage: { type: Number, default: null },
@@ -1602,7 +1600,6 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       ? String(req.body.workMode || '')
       : '';
     const shareRate = req.body.shareRate === undefined || req.body.shareRate === '' ? null : Number(req.body.shareRate);
-    const shareDenominator = req.body.shareDenominator === undefined || req.body.shareDenominator === '' ? null : Number(req.body.shareDenominator);
     const dailyWage = req.body.dailyWage === undefined || req.body.dailyWage === '' ? null : Number(req.body.dailyWage);
     const earnedAmount = req.body.earnedAmount === undefined || req.body.earnedAmount === '' ? null : Number(req.body.earnedAmount);
     const workDays = req.body.workDays === undefined || req.body.workDays === '' ? null : Number(req.body.workDays);
@@ -1614,12 +1611,12 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
     if (shareRate !== null && (!Number.isFinite(shareRate) || shareRate < 0 || shareRate > 100)) return res.status(400).json({ error: 'Paylaşım oranı 0 ile 100 arasında olmalıdır.' });
-    if (workType === 'sharecropper' && (shareDenominator === null || ![2, 3].includes(shareDenominator))) return res.status(400).json({ error: 'Yarıcılık payı 1/2 veya 1/3 olmalıdır.' });
     if (dailyWage !== null && (!Number.isFinite(dailyWage) || dailyWage < 0)) return res.status(400).json({ error: 'Geçerli bir yevmiye girin.' });
     if (earnedAmount !== null && (!Number.isFinite(earnedAmount) || earnedAmount < 0)) return res.status(400).json({ error: 'Geçerli bir hakediş girin.' });
     if (workDays !== null && (!Number.isFinite(workDays) || workDays <= 0)) return res.status(400).json({ error: 'Çalışma günü 0’dan büyük olmalıdır.' });
     if (!isProducerRecord && !String(req.body.bahce || req.body.garden || '').trim()) return res.status(400).json({ error: 'Çalışılan bahçe veya yer bilgisini girin.' });
     if (!isProducerRecord && !String(req.body.employerName || '').trim()) return res.status(400).json({ error: 'Müstahsil veya işveren adını girin.' });
+    if (workType === 'sharecropper' && shareRate === null) return res.status(400).json({ error: 'Yarıcılık paylaşım oranını girin.' });
     if (workType === 'worker' && workMode === 'daily' && (dailyWage === null || workDays === null)) return res.status(400).json({ error: 'Yevmiye ve çalışma günü bilgilerini girin.' });
     if (workType === 'worker' && workMode === 'per_kg' && (!Number.isFinite(fiyatVal) || fiyatVal <= 0)) return res.status(400).json({ error: 'Kg başı işçilik ücretini girin.' });
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
@@ -1630,7 +1627,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     }
     const standardAmounts = calculateHarvestAmounts(kgVal, fiyatVal);
     const workEarned = workType === 'sharecropper'
-      ? standardAmounts.brutTutar / Number(shareDenominator)
+      ? standardAmounts.brutTutar * Number(shareRate || 0) / 100
       : workType === 'worker' && workMode === 'daily'
         ? Number(dailyWage || 0) * Number(workDays || 0)
         : workType === 'worker' && workMode === 'per_kg'
@@ -1653,8 +1650,6 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       workType,
       employerName: String(req.body.employerName || '').trim(),
       shareRate,
-      shareNumerator: 1,
-      shareDenominator,
       workMode,
       workDays,
       dailyWage,

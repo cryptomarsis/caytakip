@@ -85,7 +85,6 @@ export default function App() {
     workType: 'producer',
     employerName: '',
     shareRate: '',
-    shareDenominator: '2',
     workMode: 'daily',
     workDays: '',
     dailyWage: '',
@@ -632,6 +631,10 @@ export default function App() {
       showOperationFeedback('Eksik Bilgi', 'Çalışılan kişi/firma ve bahçe alanlarını doldurun.', 'error');
       return;
     }
+    if (hForm.workType === 'sharecropper' && (!hForm.shareRate.trim() || parseMoney(hForm.shareRate) <= 0 || parseMoney(hForm.shareRate) > 100)) {
+      showOperationFeedback('Eksik Bilgi', 'Yarıcılık payını yüzde olarak 1-100 arasında girin.', 'error');
+      return;
+    }
     if (hForm.workType === 'worker' && hForm.workMode === 'daily' && (!hForm.workDays.trim() || !hForm.dailyWage.trim())) {
       showOperationFeedback('Eksik Bilgi', 'İşçilik kaydı için gün sayısı ve yevmiye gereklidir.', 'error');
       return;
@@ -660,7 +663,6 @@ export default function App() {
         workType: hForm.workType,
         employerName: hForm.employerName,
         shareRate: hForm.shareRate ? parseMoney(hForm.shareRate) : undefined,
-        shareDenominator: hForm.workType === 'sharecropper' ? Number(hForm.shareDenominator || 2) : undefined,
         workMode: hForm.workType === 'worker' ? hForm.workMode : hForm.workType === 'sharecropper' ? 'share' : '',
         workDays: hForm.workDays ? parseMoney(hForm.workDays) : undefined,
         dailyWage: hForm.dailyWage ? parseMoney(hForm.dailyWage) : undefined,
@@ -689,7 +691,7 @@ export default function App() {
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setReceiptNotice('');
-        setHForm({ workType: hForm.workType, employerName: '', shareRate: '', shareDenominator: '2', workMode: 'daily', workDays: '', dailyWage: '', earnedAmount: '', date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
+        setHForm({ workType: hForm.workType, employerName: '', shareRate: '', workMode: 'daily', workDays: '', dailyWage: '', earnedAmount: '', date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
         setActiveTab('dashboard');
         return;
       }
@@ -703,7 +705,6 @@ export default function App() {
           workType: hForm.workType,
           employerName: '',
           shareRate: '',
-          shareDenominator: '2',
           workMode: 'daily',
           workDays: '',
           dailyWage: '',

@@ -70,12 +70,7 @@ export default function HarvestScreen(props: any) {
           {hForm.workType !== 'producer' && (
             <>
               <FormField icon="account-outline" label={hForm.workType === 'worker' ? 'Müstahsil / İşveren *' : 'Müstahsil *'} value={hForm.employerName} onChangeText={(employerName) => setHForm({ ...hForm, employerName })} placeholder="Ad Soyad" />
-              {hForm.workType === 'sharecropper' && <View>
-                <Text style={{ color: theme.colors.onSurface, fontWeight: '800', marginBottom: 8 }}>Yarıcılık payı</Text>
-                <View style={local.typeChoices}>
-                  {[['2', '1/2 pay'], ['3', '1/3 pay']].map(([value, label]) => <TouchableOpacity key={value} onPress={() => setHForm({ ...hForm, shareDenominator: value })} style={[local.typeChoice, { backgroundColor: hForm.shareDenominator === value ? theme.colors.primary : theme.colors.surfaceVariant, borderColor: hForm.shareDenominator === value ? theme.colors.primary : theme.colors.outline }]}><Text style={{ color: hForm.shareDenominator === value ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 12 }}>{label}</Text></TouchableOpacity>)}
-                </View>
-              </View>}
+              {hForm.workType === 'sharecropper' && <FormField icon="percent-outline" label="Paylaşım oranı (%) *" value={hForm.shareRate} onChangeText={(shareRate) => setHForm({ ...hForm, shareRate })} placeholder="Örn: 50" keyboardType="decimal-pad" />}
               {hForm.workType === 'worker' && <View style={local.typeChoices}>
                 {[['daily', 'Yevmiye'], ['per_kg', 'Kg başı']].map(([value, label]) => <TouchableOpacity key={value} onPress={() => setHForm({ ...hForm, workMode: value })} style={[local.typeChoice, { backgroundColor: hForm.workMode === value ? theme.colors.primary : theme.colors.surfaceVariant, borderColor: hForm.workMode === value ? theme.colors.primary : theme.colors.outline }]}><Text style={{ color: hForm.workMode === value ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 12 }}>{label}</Text></TouchableOpacity>)}
               </View>}
