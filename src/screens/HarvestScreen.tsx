@@ -61,7 +61,7 @@ export default function HarvestScreen(props: any) {
               ['producer', 'Müstahsil'],
               ['sharecropper', 'Yarıcılık'],
               ['worker', 'İşçilik'],
-            ].map(([value, label]) => (
+            ].filter(([value]) => !currentUser?.workTypes?.length || currentUser.workTypes.includes(value)).map(([value, label]) => (
               <TouchableOpacity key={value} onPress={() => setHForm({ ...hForm, workType: value })} style={[local.typeChoice, { backgroundColor: hForm.workType === value ? theme.colors.primary : theme.colors.surfaceVariant, borderColor: hForm.workType === value ? theme.colors.primary : theme.colors.outline }]}>
                 <Text style={{ color: hForm.workType === value ? theme.colors.onPrimary : theme.colors.onSurface, fontWeight: '800', fontSize: 13 }}>{label}</Text>
               </TouchableOpacity>
