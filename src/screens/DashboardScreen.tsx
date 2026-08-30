@@ -151,7 +151,6 @@ export default function DashboardScreen({
           <Text style={[local.welcomeTitle, { color: theme.colors.onBackground }]}>Merhaba, {firstName}</Text>
           <Text style={[local.welcomeDetail, { color: theme.colors.onSurfaceVariant }]}>{pendingCollection > 0 ? `${pendingCount} kayıtta tahsilat bekliyor.` : 'Kayıtlarınız güncel görünüyor.'}</Text>
         </View>
-        <View style={[local.welcomeIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="tea-outline" size={28} color={theme.colors.primary} /></View>
       </View>
 
       {ads.filter((ad) => ad.slot === 'dashboard_top').slice(0, 1).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
@@ -246,7 +245,6 @@ const local = StyleSheet.create({
   welcomeEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1.25 },
   welcomeTitle: { marginTop: caylikDesign.spacing.xs, fontSize: caylikDesign.type.headline, fontWeight: '900', letterSpacing: -0.6 },
   welcomeDetail: { marginTop: 4, fontSize: caylikDesign.type.body, lineHeight: 20, fontWeight: '600' },
-  welcomeIcon: { width: 54, height: 54, borderRadius: caylikDesign.radius.lg, alignItems: 'center', justifyContent: 'center' },
   banner: { minHeight: 88, borderRadius: caylikDesign.radius.lg, borderWidth: 1, padding: caylikDesign.spacing.sm, marginBottom: caylikDesign.spacing.md, flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm },
   bannerImage: { width: 64, height: 64, borderRadius: caylikDesign.radius.md },
   bannerMark: { width: 52, height: 52, borderRadius: caylikDesign.radius.md, alignItems: 'center', justifyContent: 'center' },

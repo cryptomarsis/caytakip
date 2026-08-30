@@ -191,15 +191,15 @@ export const styles = StyleSheet.create({
   headerBrandMark: {
     width: 43,
     height: 43,
-    borderRadius: 14,
+    borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#E3F4E8',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)'
+    backgroundColor: 'transparent'
   },
   headerBrandImage: {
     width: '100%',
-    height: '100%'
+    height: '100%',
+    borderRadius: 12,
+    resizeMode: 'cover'
   },
   headerEyebrow: {
     color: '#A9D6B8',
