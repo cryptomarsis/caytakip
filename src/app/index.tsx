@@ -160,7 +160,7 @@ export default function App() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.token || !data?.refreshToken) { await clearSession(); setCurrentUser(null); return null; }
-      const nextUser: UserSession = { ...currentUser, userId: data.userId || currentUser.userId, name: data.name || currentUser.name, phone: normalizePhone(data.phone || currentUser.phone), role: data.role === 'admin' ? 'admin' : 'user', workTypes: data.workTypes || currentUser.workTypes || ['producer'], token: data.token, refreshToken: data.refreshToken };
+      const nextUser: UserSession = { ...currentUser, userId: data.userId || currentUser.userId, name: data.name || currentUser.name, phone: normalizePhone(data.phone || currentUser.phone), role: data.role === 'admin' ? 'admin' : 'user', token: data.token, refreshToken: data.refreshToken };
       setCurrentUser(nextUser); await saveSession(nextUser); return nextUser;
     } catch { return null; }
   };
@@ -352,7 +352,6 @@ export default function App() {
         name: profile.name || authName.trim() || 'Üretici',
         phone: normalizePhone(profile.phone || cleanPhone),
         role: profile.role === 'admin' ? 'admin' : 'user',
-        workTypes: profile.workTypes || ['producer'],
         token: profile.token,
         refreshToken: profile.refreshToken
       };
@@ -407,25 +406,10 @@ export default function App() {
       refreshToken: data.refreshToken || currentUser.refreshToken,
       name: data.name || currentUser.name,
       phone: normalizePhone(data.phone || currentUser.phone),
-      role: data.role === 'admin' ? 'admin' : 'user',
-      workTypes: data.workTypes || currentUser.workTypes || ['producer']
+      role: data.role === 'admin' ? 'admin' : 'user'
     };
     setCurrentUser(refreshedUser);
     await saveSession(refreshedUser);
-  };
-
-  const handleSaveWorkTypes = async (workTypes: string[]) => {
-    if (!currentUser) throw new Error('Oturum bulunamadı.');
-    const response = await authFetch(`${API_URL}/users/me/work-types`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ workTypes })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || 'Çalışma türleri kaydedilemedi.');
-    const nextUser = { ...currentUser, workTypes: Array.isArray(data.workTypes) ? data.workTypes : workTypes };
-    setCurrentUser(nextUser);
-    await saveSession(nextUser);
   };
 
   const handleExportData = async () => {
@@ -1438,7 +1422,6 @@ export default function App() {
               lastSyncAt={lastSyncAt}
               onExportData={handleExportData}
               onSendFeedback={handleSendFeedback}
-              onSaveWorkTypes={handleSaveWorkTypes}
             />
           )}
 

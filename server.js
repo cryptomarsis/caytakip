@@ -341,14 +341,6 @@ mongoose.connect(MONGO_URI, {
 const HarvestSchema = new mongoose.Schema({
   userId: { type: String, required: false },
   userPhone: { type: String, required: false },
-  // A user may work in more than one capacity during the season. Existing
-  // records remain producer records for backwards compatibility.
-  workType: { type: String, enum: ['producer', 'sharecropper', 'worker'], default: 'producer', index: true },
-  employerName: { type: String, default: '' },
-  shareRate: { type: Number, default: null },
-  workMode: { type: String, enum: ['daily', 'per_kg', 'share', 'fixed_kg', 'custom', ''], default: '' },
-  dailyWage: { type: Number, default: null },
-  earnedAmount: { type: Number, default: null },
   tarih: String,
   surum: String,
   uretici: String,
@@ -376,7 +368,6 @@ const HarvestSchema = new mongoose.Schema({
 HarvestSchema.index({ userId: 1, createdAt: -1 });
 HarvestSchema.index({ userPhone: 1, createdAt: -1 });
 HarvestSchema.index({ userId: 1, isVadeli: 1, vadeTarihi: 1 });
-HarvestSchema.index({ userId: 1, workType: 1, createdAt: -1 });
 HarvestSchema.index(
   { userId: 1, receiptFingerprint: 1 },
   { unique: true, partialFilterExpression: { receiptFingerprint: { $type: 'string' } } }
@@ -447,7 +438,6 @@ const UserProfileSchema = new mongoose.Schema({
   loginFailures: { type: Number, default: 0 },
   loginLockedUntil: { type: Date, default: null },
   role: { type: String, enum: ['admin', 'user'], default: 'user' },
-  workTypes: { type: [{ type: String, enum: ['producer', 'sharecropper', 'worker'] }], default: ['producer'] },
   active: { type: Boolean, default: true },
   city: { type: String, trim: true, default: '' },
   lastActiveAt: { type: Date, default: null, index: true },
@@ -692,7 +682,7 @@ const issueTokens = async (profile) => {
   const refreshToken = makeRefreshToken();
   await Session.create({ tokenHash: hashRefreshToken(refreshToken), userId: profile.userId, expiresAt: new Date(Date.now() + REFRESH_TTL_MS) });
   UserProfile.updateOne({ _id: profile._id }, { $set: { lastActiveAt: new Date() } }).catch(() => {});
-  return { token: accessToken, refreshToken, userId: profile.userId, phone: profile.phone, name: profile.name, role: profile.role, workTypes: profile.workTypes?.length ? profile.workTypes : ['producer'] };
+  return { token: accessToken, refreshToken, userId: profile.userId, phone: profile.phone, name: profile.name, role: profile.role };
 };
 
 const findLegacyUser = async (phone) => {
@@ -872,24 +862,6 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
     res.json(profile);
   } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/api/users/me/work-types', requireAuth, async (req, res) => {
-  try {
-    const supplied = Array.isArray(req.body?.workTypes) ? req.body.workTypes : [];
-    const workTypes = [...new Set(supplied.filter((value) => ['producer', 'sharecropper', 'worker'].includes(String(value))).map(String))];
-    if (!workTypes.length) return res.status(400).json({ error: 'En az bir çalışma türü seçmelisiniz.' });
-    const profile = await UserProfile.findOneAndUpdate(
-      { userId: req.auth.userId },
-      { $set: { workTypes } },
-      { returnDocument: 'after' },
-    ).lean();
-    if (!profile) return res.status(404).json({ error: 'Kullanıcı profili bulunamadı.' });
-    res.json({ workTypes: profile.workTypes });
-  } catch (err) {
-    console.error('WORK TYPES UPDATE ERROR:', err.message);
-    res.status(500).json({ error: 'Çalışma türleri kaydedilemedi.' });
-  }
 });
 
 app.delete('/api/users/me', requireAuth, async (req, res) => {
@@ -1592,24 +1564,12 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     const tarih = normalizeCalendarDate(req.body.tarih) || (req.body.tarih ? '' : todayServerDate());
     const isVadeli = req.body.isVadeli === true || req.body.isVadeli === 'true';
     const vadeTarihi = isVadeli ? normalizeCalendarDate(req.body.vadeTarihi) : '';
-    const workType = ['producer', 'sharecropper', 'worker'].includes(String(req.body.workType || ''))
-      ? String(req.body.workType)
-      : 'producer';
-    const workMode = ['', 'daily', 'per_kg', 'share', 'fixed_kg', 'custom'].includes(String(req.body.workMode || ''))
-      ? String(req.body.workMode || '')
-      : '';
-    const shareRate = req.body.shareRate === undefined || req.body.shareRate === '' ? null : Number(req.body.shareRate);
-    const dailyWage = req.body.dailyWage === undefined || req.body.dailyWage === '' ? null : Number(req.body.dailyWage);
-    const earnedAmount = req.body.earnedAmount === undefined || req.body.earnedAmount === '' ? null : Number(req.body.earnedAmount);
     const receiptFingerprint = /^[a-f0-9]{64}$/i.test(String(req.body.receiptFingerprint || ''))
       ? String(req.body.receiptFingerprint).toLowerCase()
       : undefined;
     if (!Number.isFinite(kgVal) || kgVal <= 0) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
     if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
-    if (shareRate !== null && (!Number.isFinite(shareRate) || shareRate < 0 || shareRate > 100)) return res.status(400).json({ error: 'Paylaşım oranı 0 ile 100 arasında olmalıdır.' });
-    if (dailyWage !== null && (!Number.isFinite(dailyWage) || dailyWage < 0)) return res.status(400).json({ error: 'Geçerli bir yevmiye girin.' });
-    if (earnedAmount !== null && (!Number.isFinite(earnedAmount) || earnedAmount < 0)) return res.status(400).json({ error: 'Geçerli bir hakediş girin.' });
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (receiptFingerprint) {
@@ -1628,12 +1588,6 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     const payload = {
       userId: req.auth.userId,
       userPhone: req.auth.phone,
-      workType,
-      employerName: String(req.body.employerName || '').trim(),
-      shareRate,
-      workMode,
-      dailyWage,
-      earnedAmount,
       tarih,
       surum: String(req.body.surum || '1. Sürüm').trim(),
       uretici: String(req.body.uretici || req.body.producerName || '').trim(),
