@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Text, View, TextInput, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, TextInput, TouchableOpacity } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import { AppIcon } from '../components/app-icon';
 import { CaylikScreenHeader } from '../components/caylik-ui';
@@ -31,6 +31,22 @@ export default function FactoryPricesScreen(props: any) {
     const rows = latestByFactory.filter(p => PRICE_TYPES.includes(String(p.fiyatTuru||'Peşin') as typeof PRICE_TYPES[number]));
     return rows.sort((a:any,b:any)=>Number(b.fiyat||0)-Number(a.fiyat||0))[0] || null;
   }, [latestByFactory]);
+  const latestForSelectedFactory = useMemo(() => latestByFactory
+    .filter((p:any) => String(p.firma || '').trim() === String(priceForm.firma || '').trim())
+    .sort((a:any,b:any) => dateValue(b.tarih || b.createdAt) - dateValue(a.tarih || a.createdAt))[0] || null,
+  [latestByFactory, priceForm.firma]);
+  const copyLatestPrice = () => {
+    if (!latestForSelectedFactory) return;
+    setPriceForm({
+      ...priceForm,
+      firma: latestForSelectedFactory.firma || priceForm.firma,
+      fiyat: String(latestForSelectedFactory.fiyat ?? '').replace('.', ','),
+      fiyatTuru: latestForSelectedFactory.fiyatTuru || 'Peşin',
+      vadeGun: latestForSelectedFactory.vadeGun ? String(latestForSelectedFactory.vadeGun) : '',
+      politika: latestForSelectedFactory.politika || '',
+      kaynak: latestForSelectedFactory.kaynak || '',
+    });
+  };
 
   return <View>
     <CaylikScreenHeader icon="factory" eyebrow="FİYAT KARŞILAŞTIRMA" title="Fabrika Fiyatları" description={isAdmin
@@ -39,7 +55,20 @@ export default function FactoryPricesScreen(props: any) {
     {isAdmin && <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
       <Text style={[styles.formTitle, { color: theme.colors.onSurface }]}>Yeni Fiyat Ekle</Text>
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Fabrika</Text>
+      {factories.length > 0 && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={local.factoryChips}>
+        {factories.map((firma) => <TouchableOpacity
+          key={firma}
+          accessibilityRole="button"
+          accessibilityLabel={`${firma} fabrikasını seç`}
+          onPress={() => setPriceForm({ ...priceForm, firma })}
+          style={[local.factoryChip, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }, priceForm.firma === firma && { backgroundColor: theme.colors.primaryContainer, borderColor: theme.colors.primary }]}
+        ><AppIcon name="factory" size={16} color={priceForm.firma === firma ? theme.colors.primary : theme.colors.onSurfaceVariant} /><Text style={[local.factoryChipText, { color: priceForm.firma === firma ? theme.colors.primary : theme.colors.onSurface }]}>{firma}</Text></TouchableOpacity>)}
+      </ScrollView>}
       <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.firma} onChangeText={(t)=>setPriceForm({...priceForm,firma:t})} autoCapitalize="characters" placeholder="ÇAYKUR / EFOR / DOĞUŞ" />
+      {latestForSelectedFactory && <TouchableOpacity accessibilityRole="button" onPress={copyLatestPrice} style={[local.copyButton, { backgroundColor: theme.colors.secondaryContainer, borderColor: theme.colors.outline }]}>
+        <AppIcon name="content-copy" size={19} color={theme.colors.primary} />
+        <View style={{ flex: 1 }}><Text style={[local.copyTitle, { color: theme.colors.onSecondaryContainer }]}>Son fiyatı forma kopyala</Text><Text style={[local.copyText, { color: theme.colors.onSurfaceVariant }]}>{latestForSelectedFactory.fiyatTuru || 'Peşin'} · {formatTL(Number(latestForSelectedFactory.fiyat) || 0)} / KG · {formatDisplayDate(latestForSelectedFactory.tarih)}</Text></View>
+      </TouchableOpacity>}
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Fiyat (TL/KG)</Text>
       <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.fiyat} onChangeText={(t)=>setPriceForm({...priceForm,fiyat:t})} keyboardType="decimal-pad" placeholder="Örn: 35,00" />
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Fiyat Türü</Text>
@@ -80,3 +109,12 @@ export default function FactoryPricesScreen(props: any) {
     })}
   </View>;
 }
+
+const local = StyleSheet.create({
+  factoryChips: { gap: 8, paddingBottom: 10 },
+  factoryChip: { minHeight: 42, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  factoryChipText: { fontSize: 13, fontWeight: '800' },
+  copyButton: { minHeight: 58, borderWidth: 1, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 10, marginTop: -2, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  copyTitle: { fontSize: 14, fontWeight: '900' },
+  copyText: { fontSize: 11, lineHeight: 16, marginTop: 2 },
+});

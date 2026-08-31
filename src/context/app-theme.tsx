@@ -26,6 +26,7 @@ export const caylikLightTheme = {
     ...MD3LightTheme.colors,
     primary: '#155B42', onPrimary: '#FFFFFF', primaryContainer: '#DDEFE5', onPrimaryContainer: '#103D2D',
     secondary: '#B47A20', onSecondary: '#FFFFFF', secondaryContainer: '#F9EBCB', onSecondaryContainer: '#513500',
+    tertiary: '#247C69', onTertiary: '#FFFFFF', tertiaryContainer: '#DDF3EA', onTertiaryContainer: '#123E34',
     error: '#BA3B43', errorContainer: '#FFE8E8', onErrorContainer: '#64151B',
     surface: '#FFFEFA', surfaceVariant: '#EEF2EC', onSurface: '#18221D', onSurfaceVariant: '#58645D',
     outline: '#D8DED7', outlineVariant: '#E8ECE7', background: '#F6F5EF', onBackground: '#18221D',

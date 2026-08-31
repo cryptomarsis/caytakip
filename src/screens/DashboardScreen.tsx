@@ -6,7 +6,6 @@ import { AppIcon } from '../components/app-icon';
 import {
   DashboardEmptyState,
   DashboardListRow,
-  DashboardMetricCard,
   DashboardMonthlyChart,
   DashboardSectionHeader,
   MonthlyChartPoint,
@@ -91,10 +90,11 @@ function AssistantEntry({ credits, onPress }: { credits?: number | null; onPress
       <View pointerEvents="none" style={[local.assistantDecorSmall, { backgroundColor: theme.colors.primary }]} />
       <View style={[local.assistantIcon, { backgroundColor: theme.colors.surface }]}><AppIcon name="robot-happy-outline" size={29} color={theme.colors.tertiary} /></View>
       <View style={local.assistantCopy}>
-        <Text style={[local.assistantEyebrow, { color: theme.colors.tertiary }]}>ÇAYLIK ASİSTANI</Text>
-        <Text style={[local.assistantTitle, { color: theme.colors.onTertiaryContainer }]}>Çayla ilgili sorun, birlikte çözelim</Text>
-        <Text style={[local.assistantDetail, { color: theme.colors.onSurfaceVariant }]}>{credits === null || credits === undefined ? 'Asistana soru sorun' : `${credits.toLocaleString('tr-TR')} krediniz kullanılabilir`}</Text>
+        <Text style={[local.assistantEyebrow, { color: theme.colors.tertiary }]}>YAPAY ZEKÂ DESTEĞİ</Text>
+        <Text style={[local.assistantTitle, { color: theme.colors.onTertiaryContainer }]}>Çaylık Asistan</Text>
+        <Text style={[local.assistantDetail, { color: theme.colors.onSurfaceVariant }]}>Çayınız ve kayıtlarınız hakkında sorun</Text>
       </View>
+      {credits !== null && credits !== undefined && <View style={[local.creditBadge, { backgroundColor: theme.colors.primaryContainer }]}><Text style={[local.creditBadgeText, { color: theme.colors.onPrimaryContainer }]}>{credits.toLocaleString('tr-TR')} kredi</Text></View>}
       <View style={[local.assistantArrow, { backgroundColor: theme.colors.tertiary }]}><AppIcon name="arrow-right" size={20} color={theme.colors.onTertiary} /></View>
     </Pressable>
   );
@@ -103,13 +103,10 @@ function AssistantEntry({ credits, onPress }: { credits?: number | null; onPress
 export default function DashboardScreen({
   ads,
   harvests,
-  userName,
   assistantCredits,
   totalKg,
-  totalSales,
   totalPay,
   pendingCollection,
-  totalExp,
   netProfit,
   openPaymentForHarvest,
   openHarvestEditModal,
@@ -118,26 +115,28 @@ export default function DashboardScreen({
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const compact = width < 370;
-  const firstName = String(userName || '').trim().split(/\s+/)[0] || 'Üretici';
 
   const recentHarvests = useMemo(() => [...harvests]
     .sort((left, right) => dateTimestamp(right.tarih) - dateTimestamp(left.tarih))
-    .slice(0, 3), [harvests]);
+    .slice(0, 2), [harvests]);
 
   const upcomingReceivables = useMemo(() => harvests
     .filter((item) => remainingTotalOf(item) > 0.01 && dateTimestamp(item.vadeTarihi) > 0)
     .sort((left, right) => dateTimestamp(left.vadeTarihi) - dateTimestamp(right.vadeTarihi))
-    .slice(0, 3), [harvests]);
+    .slice(0, 2), [harvests]);
 
   const monthlyChart = useMemo((): { year: number; points: MonthlyChartPoint[] } => {
     const dated = harvests.map((item) => ({ item, timestamp: dateTimestamp(item.tarih) })).filter((row) => row.timestamp > 0);
-    const year = dated.length ? Math.max(...dated.map((row) => new Date(row.timestamp).getFullYear())) : new Date().getFullYear();
-    const totals = Array.from({ length: 12 }, () => 0);
+    const latestDate = dated.length ? new Date(Math.max(...dated.map((row) => row.timestamp))) : new Date();
+    const year = latestDate.getFullYear();
+    const months = Array.from({ length: 6 }, (_, index) => new Date(year, latestDate.getMonth() - 5 + index, 1));
+    const totals = Array.from({ length: 6 }, () => 0);
     dated.forEach(({ item, timestamp }) => {
       const date = new Date(timestamp);
-      if (date.getFullYear() === year) totals[date.getMonth()] += Number(item.kg ?? item.weight) || 0;
+      const index = months.findIndex((month) => month.getFullYear() === date.getFullYear() && month.getMonth() === date.getMonth());
+      if (index >= 0) totals[index] += Number(item.kg ?? item.weight) || 0;
     });
-    return { year, points: totals.map((value, index) => ({ label: MONTH_NAMES[index], value })) };
+    return { year, points: totals.map((value, index) => ({ label: MONTH_NAMES[months[index].getMonth()], value })) };
   }, [harvests]);
 
   const now = new Date();
@@ -145,48 +144,29 @@ export default function DashboardScreen({
   const pendingCount = harvests.filter((item) => remainingTotalOf(item) > 0.01).length;
   return (
     <View style={[local.screen, { maxWidth: caylikDesign.contentMaxWidth }]}>
-      <View style={local.welcomeRow}>
-        <View style={local.welcomeCopy}>
-          <Text style={[local.welcomeEyebrow, { color: theme.colors.primary }]}>ÇAYLIK · SEZON TAKİBİ</Text>
-          <Text style={[local.welcomeTitle, { color: theme.colors.onBackground }]}>Merhaba, {firstName}</Text>
-          <Text style={[local.welcomeDetail, { color: theme.colors.onSurfaceVariant }]}>{pendingCollection > 0 ? `${pendingCount} kayıtta tahsilat bekliyor.` : 'Kayıtlarınız güncel görünüyor.'}</Text>
-        </View>
-      </View>
-
       {ads.filter((ad) => ad.slot === 'dashboard_top').slice(0, 1).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
 
-      <View style={[local.hero, caylikDesign.shadow.soft, { backgroundColor: theme.colors.primary, shadowColor: theme.colors.shadow }]}>
-        <View pointerEvents="none" style={[local.heroDecor, { backgroundColor: theme.colors.primaryContainer }]} />
-        <View style={local.heroTop}>
-          <View style={[local.heroIcon, { backgroundColor: theme.colors.onPrimary }]}><AppIcon name="scale" size={24} color={theme.colors.primary} /></View>
-          <Text style={[local.heroSeason, { color: theme.colors.onPrimary }]}>Toplam teslim edilen çay</Text>
+      <View style={[local.summaryCard, caylikDesign.shadow.soft, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant, shadowColor: theme.colors.shadow }]}>
+        <View style={local.summaryHeader}><View style={[local.summaryIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="leaf" size={21} color={theme.colors.primary} /></View><Text style={[local.summaryTitle, { color: theme.colors.onSurface }]}>Bugünkü çay durumunuz</Text></View>
+        <View style={local.primaryMetrics}>
+          <View style={local.primaryMetric}><Text style={[local.primaryLabel, { color: theme.colors.onSurfaceVariant }]}>Toplam Hasat</Text><Text adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.65} style={[local.primaryValue, { color: theme.colors.primary }]}>{totalKg.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} KG</Text></View>
+          <View style={[local.primaryMetric, local.primaryMetricBorder, { borderLeftColor: theme.colors.outlineVariant }]}><Text style={[local.primaryLabel, { color: theme.colors.onSurfaceVariant }]}>Kalan Alacak</Text><Text adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.6} style={[local.primaryValue, { color: pendingCollection > 0 ? theme.colors.error : theme.colors.primary }]}>{formatTL(pendingCollection)}</Text></View>
         </View>
-        <Text adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.65} style={[local.heroValue, { color: theme.colors.onPrimary }]}>{totalKg.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} KG</Text>
-        <Text style={[local.heroHint, { color: theme.colors.onPrimary }]}>Tüm hasat kayıtlarınızdaki net kilogram toplamı</Text>
-      </View>
-
-      <View style={local.metricsGrid}>
-        <DashboardMetricCard label="Toplam kazanç" value={formatTL(totalSales)} icon="finance" detail="Net satış toplamı" />
-        <DashboardMetricCard label="Tahsil edilen" value={formatTL(totalPay)} icon="hand-coin-outline" tone="neutral" detail="Kaydedilen ödemeler" />
-        <DashboardMetricCard label="Kalan alacak" value={formatTL(pendingCollection)} icon="wallet-bifold-outline" tone={pendingCollection > 0 ? 'warning' : 'primary'} detail={`${pendingCount} açık kayıt`} />
-        <DashboardMetricCard label="Tahmini net kazanç" value={formatTL(netProfit)} icon="chart-areaspline" tone={netProfit < 0 ? 'danger' : 'primary'} detail={`Gider: ${formatTL(totalExp)}`} />
-      </View>
-
-      <Pressable accessibilityRole="button" accessibilityLabel="Hızlı yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.newRecordButton, caylikDesign.shadow.soft, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant, shadowColor: theme.colors.shadow }, pressed && local.pressed]}>
-        <View style={[local.newRecordIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="leaf-circle-outline" size={27} color={theme.colors.secondary} /></View>
-        <View style={local.newRecordCopy}>
-          <Text style={[local.newRecordTitle, { color: theme.colors.onSurface }]}>Yeni hasat kaydı</Text>
-          <Text style={[local.newRecordDetail, { color: theme.colors.onSurfaceVariant }]}>Kilo, firma ve fiyat bilgilerini ekleyin</Text>
+        <View style={[local.secondaryMetrics, { borderTopColor: theme.colors.outlineVariant }]}>
+          <View style={local.secondaryMetric}><AppIcon name="finance" size={21} color={theme.colors.primary} /><View><Text style={[local.secondaryLabel, { color: theme.colors.onSurfaceVariant }]}>Net Kazanç</Text><Text style={[local.secondaryValue, { color: netProfit < 0 ? theme.colors.error : theme.colors.onSurface }]}>{formatTL(netProfit)}</Text></View></View>
+          <View style={local.secondaryMetric}><AppIcon name="hand-coin-outline" size={21} color={theme.colors.secondary} /><View><Text style={[local.secondaryLabel, { color: theme.colors.onSurfaceVariant }]}>Tahsil Edilen</Text><Text style={[local.secondaryValue, { color: theme.colors.onSurface }]}>{formatTL(totalPay)}</Text></View></View>
         </View>
-        <View style={[local.newRecordArrow, { backgroundColor: theme.colors.primary }]}><AppIcon name="plus" size={21} color={theme.colors.onPrimary} /></View>
-      </Pressable>
+      </View>
 
       <AssistantEntry credits={assistantCredits} onPress={() => onNavigate('assistant')} />
 
-      <DashboardSectionHeader title="Aylık hasat" detail={`${monthlyChart.year} yılı kilogram dağılımı`} actionLabel="Raporlar" onAction={() => onNavigate('reports')} />
-      <DashboardMonthlyChart data={monthlyChart.points} />
+      <DashboardSectionHeader title="Son teslimatlar" detail="En son eklenen hasat kayıtları" actionLabel="Tümünü gör" onAction={() => onNavigate('history')} />
+      {recentHarvests.length === 0 ? <DashboardEmptyState icon="leaf-off" text="Henüz teslimat kaydı bulunmuyor." /> : recentHarvests.map((item, index) => {
+        const company = String(item.firma || item.uretici || item.producerName || 'Firma belirtilmedi'); const kg = Number(item.kg ?? item.weight) || 0;
+        return <DashboardListRow key={item._id || index} icon="leaf" title={company} detail={`${formatDisplayDate(item.tarih)} · ${formatTL(netTotalOf(item))}`} value={`${kg.toLocaleString('tr-TR')} KG`} status={remainingTotalOf(item) > 0.01 ? `Kalan: ${formatTL(remainingTotalOf(item))}` : 'Tahsilat tamamlandı'} tone={remainingTotalOf(item) > 0.01 ? 'warning' : 'primary'} onPress={() => openHarvestEditModal(item)} accessibilityLabel={`${company}, ${kg.toLocaleString('tr-TR')} kilogram`} />;
+      })}
 
-      <DashboardSectionHeader title="Yaklaşan tahsilatlar" detail="Vade tarihi yaklaşan ve geçen kayıtlar" actionLabel="Tümünü gör" onAction={() => onNavigate('receivables')} />
+      <DashboardSectionHeader title="Yaklaşan tahsilatlar" detail="Vadesi yaklaşan ve geciken kayıtlar" actionLabel="Tümünü gör" onAction={() => onNavigate('receivables')} />
       {upcomingReceivables.length === 0 ? (
         <DashboardEmptyState icon="calendar-check-outline" text="Vade tarihi bulunan açık bir alacak kaydı yok." />
       ) : upcomingReceivables.map((item, index) => {
@@ -210,27 +190,10 @@ export default function DashboardScreen({
         );
       })}
 
-      <DashboardSectionHeader title="Son teslimatlar" detail="En son eklenen hasat kayıtları" actionLabel="Tümünü gör" onAction={() => onNavigate('history')} />
-      {recentHarvests.length === 0 ? (
-        <DashboardEmptyState icon="leaf-off" text="Henüz teslimat kaydı bulunmuyor. İlk kaydınızı Yeni hasat kaydı düğmesinden oluşturabilirsiniz." />
-      ) : recentHarvests.map((item, index) => {
-        const remaining = remainingTotalOf(item);
-        const company = String(item.firma || item.uretici || item.producerName || 'Firma belirtilmedi');
-        const kg = Number(item.kg ?? item.weight) || 0;
-        return (
-          <DashboardListRow
-            key={item._id || index}
-            icon="leaf"
-            title={company}
-            detail={`${formatDisplayDate(item.tarih)} · ${item.surum || '1. Sürüm'} · ${formatTL(netTotalOf(item))}`}
-            value={`${kg.toLocaleString('tr-TR')} KG`}
-            status={remaining > 0.01 ? `Kalan: ${formatTL(remaining)}` : 'Tahsilat tamamlandı'}
-            tone={remaining > 0.01 ? 'warning' : 'primary'}
-            onPress={() => openHarvestEditModal(item)}
-            accessibilityLabel={`${company}, ${kg.toLocaleString('tr-TR')} kilogram, ${formatDisplayDate(item.tarih)}`}
-          />
-        );
-      })}
+      <DashboardSectionHeader title="Aylık hasat" detail="Son altı ayın kilogram dağılımı" actionLabel="Raporlar" onAction={() => onNavigate('reports')} />
+      <DashboardMonthlyChart data={monthlyChart.points} />
+
+      <Pressable accessibilityRole="button" accessibilityLabel="Yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.floatingAdd, caylikDesign.shadow.soft, { backgroundColor: theme.colors.primary, shadowColor: theme.colors.shadow }, pressed && local.pressed]}><AppIcon name="plus" size={24} color={theme.colors.onPrimary} /><Text style={[local.floatingAddText, { color: theme.colors.onPrimary }]}>Yeni Hasat</Text></Pressable>
 
       {ads.filter((ad) => ad.slot === 'dashboard_middle').slice(0, 1).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
       <View style={{ height: compact ? caylikDesign.spacing.md : caylikDesign.spacing.xl }} />
@@ -245,6 +208,19 @@ const local = StyleSheet.create({
   welcomeEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1.25 },
   welcomeTitle: { marginTop: caylikDesign.spacing.xs, fontSize: caylikDesign.type.headline, fontWeight: '900', letterSpacing: -0.6 },
   welcomeDetail: { marginTop: 4, fontSize: caylikDesign.type.body, lineHeight: 20, fontWeight: '600' },
+  summaryCard: { borderWidth: 1, borderRadius: caylikDesign.radius.xl, padding: caylikDesign.spacing.md, overflow: 'hidden' },
+  summaryHeader: { flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm, marginBottom: caylikDesign.spacing.md },
+  summaryIcon: { width: 40, height: 40, borderRadius: caylikDesign.radius.sm, alignItems: 'center', justifyContent: 'center' },
+  summaryTitle: { fontSize: caylikDesign.type.bodyLarge, fontWeight: '900' },
+  primaryMetrics: { flexDirection: 'row', gap: caylikDesign.spacing.sm },
+  primaryMetric: { flex: 1, minWidth: 0, paddingVertical: caylikDesign.spacing.sm },
+  primaryMetricBorder: { borderLeftWidth: 1, paddingLeft: caylikDesign.spacing.md },
+  primaryLabel: { fontSize: caylikDesign.type.caption, fontWeight: '800' },
+  primaryValue: { marginTop: caylikDesign.spacing.xs, fontSize: 25, fontWeight: '900', letterSpacing: -0.7 },
+  secondaryMetrics: { borderTopWidth: 1, marginTop: caylikDesign.spacing.sm, paddingTop: caylikDesign.spacing.md, flexDirection: 'row', gap: caylikDesign.spacing.sm },
+  secondaryMetric: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.xs },
+  secondaryLabel: { fontSize: 10, fontWeight: '800' },
+  secondaryValue: { marginTop: 2, fontSize: 14, fontWeight: '900' },
   banner: { minHeight: 88, borderRadius: caylikDesign.radius.lg, borderWidth: 1, padding: caylikDesign.spacing.sm, marginBottom: caylikDesign.spacing.md, flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm },
   bannerImage: { width: 64, height: 64, borderRadius: caylikDesign.radius.md },
   bannerMark: { width: 52, height: 52, borderRadius: caylikDesign.radius.md, alignItems: 'center', justifyContent: 'center' },
@@ -274,6 +250,10 @@ const local = StyleSheet.create({
   assistantEyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1.15 },
   assistantTitle: { marginTop: 5, fontSize: caylikDesign.type.bodyLarge, lineHeight: 21, fontWeight: '900' },
   assistantDetail: { marginTop: 4, fontSize: caylikDesign.type.caption, fontWeight: '700' },
+  creditBadge: { minHeight: 34, borderRadius: caylikDesign.radius.pill, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center' },
+  creditBadgeText: { fontSize: 11, fontWeight: '900' },
   assistantArrow: { width: 38, height: 38, borderRadius: caylikDesign.radius.pill, alignItems: 'center', justifyContent: 'center' },
+  floatingAdd: { alignSelf: 'flex-end', minHeight: 48, marginTop: caylikDesign.spacing.md, marginBottom: caylikDesign.spacing.sm, borderRadius: caylikDesign.radius.pill, paddingHorizontal: caylikDesign.spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: caylikDesign.spacing.xs },
+  floatingAddText: { fontSize: caylikDesign.type.body, fontWeight: '900' },
   pressed: { opacity: 0.78, transform: [{ scale: 0.99 }] },
 });
