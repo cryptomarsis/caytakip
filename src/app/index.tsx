@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions, Keyboard, KeyboardAvoidingView } from 'react-native';
-import Constants from 'expo-constants';
+import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions, Keyboard } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import NetInfo from '@react-native-community/netinfo';
@@ -15,8 +14,8 @@ import { API_TIMEOUTS, API_URL, fetchWithTimeout } from '../services/api';
 import { clearDueNotifications, setupNotifications } from '../services/dueNotifications';
 import { saveSession, getSession, clearSession } from '../services/session';
 import { clearOfflineData } from '../services/offlineQueue';
-import { UserSession, HarvestRecord, PaymentRecord, ExpenseRecord, GardenRecord, FactoryPriceRecord, AdRecord } from '../types';
-import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate, calculateAgriculturalDeductions, netTotalOf, remainingTotalOf } from '../utils/format';
+import { UserSession, HarvestRecord, PaymentRecord } from '../types';
+import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate, calculateAgriculturalDeductions, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
 import { useHarvestMetrics } from '../hooks/useHarvestMetrics';
 import { useAiAssistant } from '../hooks/useAiAssistant';
@@ -38,6 +37,7 @@ import MoreScreen from '../screens/MoreScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AssistantScreen from '../screens/AssistantScreen';
 import CreditStoreScreen from '../screens/CreditStoreScreen';
+import AuthScreen from '../screens/AuthScreen';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
 const ONBOARDING_STEPS = [
@@ -97,7 +97,7 @@ export default function App() {
   });
   const [receiptBusy, setReceiptBusy] = useState(false);
   const [receiptNotice, setReceiptNotice] = useState('');
-  const [receiptDraft, setReceiptDraft] = useState<{ date?: string; company?: string; netWeightKg?: number | null; paymentTerm?: string; receiptFingerprint?: string } | null>(null);
+  const [receiptDraft, setReceiptDraft] = useState<{ date?: string; company?: string; netWeightKg?: number | null; paymentTerm?: string; receiptFingerprint?: string; confidence?: number; warnings?: string[] } | null>(null);
 
   const [eForm, setEForm] = useState({
     date: todayTR,
@@ -183,11 +183,11 @@ export default function App() {
   };
 
   const {
-    harvests, setHarvests,
-    payments, setPayments,
-    expenses, setExpenses,
-    gardens, setGardens,
-    factoryPrices, setFactoryPrices,
+    harvests,
+    payments,
+    expenses,
+    gardens,
+    factoryPrices,
     ads, setAds,
     lastSyncAt,
     fetchData,
@@ -202,11 +202,16 @@ export default function App() {
   } = useOfflineSync({ currentUser, authFetch, getAuthHeaders });
 
   const aiAssistant = useAiAssistant(currentUser?.userId, authFetch);
+  const refreshAssistantWallet = aiAssistant.refreshWallet;
   const storePurchases = useStorePurchases(currentUser?.userId, authFetch, aiAssistant.refreshWallet);
+  const backgroundActionsRef = useRef({ fetchData, refreshPendingSyncCount, syncOfflineQueue });
+  useEffect(() => {
+    backgroundActionsRef.current = { fetchData, refreshPendingSyncCount, syncOfflineQueue };
+  }, [fetchData, refreshPendingSyncCount, syncOfflineQueue]);
 
   useEffect(() => {
-    if (activeTab === 'assistant' && currentUser?.userId) void aiAssistant.refreshWallet();
-  }, [activeTab, currentUser?.userId]);
+    if (activeTab === 'assistant' && currentUser?.userId) void refreshAssistantWallet();
+  }, [activeTab, currentUser?.userId, refreshAssistantWallet]);
 
   const postOrQueue = async (endpoint: string, body: Record<string, unknown>) => {
     const network = await NetInfo.fetch();
@@ -253,13 +258,13 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
+      const actions = backgroundActionsRef.current;
       setupNotifications();
-      refreshPendingSyncCount();
-      syncOfflineQueue().then((result) => {
-        if (result.synced > 0) fetchData();
+      actions.refreshPendingSyncCount();
+      actions.syncOfflineQueue().then((result) => {
+        if (result.synced > 0) actions.fetchData();
       });
-      fetchData();
-    } else {
+      actions.fetchData();
     }
   }, [currentUser]);
 
@@ -288,8 +293,9 @@ export default function App() {
     if (!currentUser) return;
     const unsubscribe = NetInfo.addEventListener((state) => {
       if (state.isConnected && state.isInternetReachable !== false) {
-        syncOfflineQueue().then((result) => {
-          if (result.synced > 0) fetchData();
+        const actions = backgroundActionsRef.current;
+        actions.syncOfflineQueue().then((result) => {
+          if (result.synced > 0) actions.fetchData();
         });
       }
     });
@@ -557,6 +563,8 @@ export default function App() {
         company: data?.company ? String(data.company) : undefined,
         netWeightKg: hasKg ? Number(data.netWeightKg) : null,
         paymentTerm: data?.paymentTerm ? String(data.paymentTerm) : undefined,
+        confidence: Number.isFinite(Number(data?.confidence)) ? Number(data.confidence) : undefined,
+        warnings: Array.isArray(data?.warnings) ? data.warnings.map(String) : [],
         receiptFingerprint: data?.receiptFingerprint ? String(data.receiptFingerprint) : undefined
       });
       setReceiptNotice(fields.length
@@ -696,7 +704,6 @@ export default function App() {
       return;
     }
 
-    const saleTotal = netTotalOf(selected);
     const remaining = remainingTotalOf(selected);
 
     if (amount > remaining + 0.01) {
@@ -1033,112 +1040,9 @@ export default function App() {
 
   // GİRİŞ / KAYIT EKRANI
   if (!currentUser) {
-    return (
-      <SafeAreaProvider>
-        <SafeAreaView style={[styles.container, styles.authScreen]}>
-          <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
-          <KeyboardAvoidingView
-            style={styles.authKeyboardAvoider}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-          >
-          <ScrollView
-            contentContainerStyle={styles.authScrollContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-          >
-          <View style={styles.authCard}>
-            <View style={styles.authBrand}>
-              <View style={styles.authBrandMark}>
-                <Image source={require('../../assets/caylik-icon-v1.png')} style={styles.authBrandImage} accessibilityLabel="Çaylık logosu" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.authTitle}>Çaylık</Text>
-                <Text style={styles.authEyebrow}>ÜRETİCİ TAKİP SİSTEMİ</Text>
-              </View>
-            </View>
-            <Text style={styles.authSubTitle}>
-              {authMode === 'login' ? 'Telefon numaranız ve 6 haneli şifrenizle güvenle giriş yapın.' : 'Bilgilerinizi girin, hesabınız hemen hazır olsun.'}
-            </Text>
-            {authFeedback && (
-              <View style={{ width: '100%', marginBottom: 14, padding: 12, borderRadius: 10, backgroundColor: authFeedback.type === 'error' ? '#FDECEC' : '#E9F5EE', borderWidth: 1, borderColor: authFeedback.type === 'error' ? '#F2B8B5' : '#B7DCC7' }}>
-                <Text style={{ color: authFeedback.type === 'error' ? '#A0221D' : '#1B5E3C', fontWeight: '800', marginBottom: 3 }}>{authFeedback.title}</Text>
-                <Text style={{ color: '#39443E', lineHeight: 20 }}>{authFeedback.message}</Text>
-              </View>
-            )}
-
-            {authMode === 'register' && (
-              <View style={{ width: '100%' }}>
-                <Text style={styles.label}>Ad Soyad</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Ahmet Yılmaz"
-                  value={authName}
-                  onChangeText={setAuthName}
-                  autoCorrect={false}
-                  autoCapitalize="words"
-                  keyboardType="default"
-                />
-              </View>
-            )}
-
-            <Text style={styles.label}>Telefon Numarası</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="05XXXXXXXXX"
-              keyboardType="phone-pad"
-              value={authPhone}
-              onChangeText={setAuthPhone}
-            />
-
-            <Text style={styles.label}>6 Haneli Giriş Şifresi</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Örn: 123456"
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={6}
-              value={authPin}
-              onChangeText={setAuthPin}
-            />
-            {authMode === 'register' && <>
-              <Text style={styles.label}>Giriş Şifresi Tekrar</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="6 haneyi tekrar yazın"
-                keyboardType="number-pad"
-                secureTextEntry
-                maxLength={6}
-                value={authPinConfirm}
-                onChangeText={setAuthPinConfirm}
-              />
-              <Text style={styles.formHelp}>Bu şifreyi not edin; telefon numaranızla birlikte girişte kullanacaksınız.</Text>
-            </>}
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={authMode === 'login' ? 'Giriş yap' : 'Kaydı tamamla'} disabled={loading} style={[styles.submitBtn, loading && { opacity: 0.7 }]} onPress={handleAuth}>
-              <Text style={styles.submitBtnText}>{loading ? 'Lütfen bekleyin…' : authMode === 'login' ? 'Giriş yap' : 'Kaydı tamamla'}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={{ marginTop: 15 }}
-              onPress={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthPin(''); setAuthPinConfirm(''); setAuthFeedback(null); }}
-            >
-              <Text style={styles.authModeLink}>
-                {authMode === 'login'
-                  ? 'Hesabınız yok mu? Telefonla kayıt olun'
-                  : 'Zaten hesabınız var mı? Giriş yapın'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-          </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </SafeAreaProvider>
-    );
+    return <AuthScreen mode={authMode} phone={authPhone} name={authName} pin={authPin} pinConfirm={authPinConfirm} feedback={authFeedback} loading={loading} onModeChange={setAuthMode} onPhoneChange={setAuthPhone} onNameChange={setAuthName} onPinChange={setAuthPin} onPinConfirmChange={setAuthPinConfirm} onClearFeedback={() => setAuthFeedback(null)} onSubmit={handleAuth} />;
   }
 
-
-  // ANA UYGULAMA EKRANI
   return (
     <SafeAreaProvider>
       <SafeAreaView style={[styles.container, { backgroundColor: paperTheme.colors.background }]}>

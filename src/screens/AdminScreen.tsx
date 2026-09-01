@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Text, TextInput, TouchableOpacity, View, Switch } from 'react-native';
 import { API_URL, fetchWithTimeout } from '../services/api';
 import { styles } from '../styles/styles';
@@ -58,7 +58,7 @@ export default function AdminScreen(props: any) {
   const [summary, setSummary] = useState({ producerCount: 0, totalKg: 0, totalSales: 0, totalPaid: 0, remaining: 0 });
   const [loadError, setLoadError] = useState('');
 
-  const loadAdminData = async (requestedPage = page) => {
+  const loadAdminData = useCallback(async (requestedPage = page) => {
     if (!currentUser?.token) return;
     setLoadingUsers(true);
     setLoadError('');
@@ -90,13 +90,13 @@ export default function AdminScreen(props: any) {
     } finally {
       setLoadingUsers(false);
     }
-  };
+  }, [activityFilter, cityFilter, currentUser, page, query]);
 
   useEffect(() => {
     const hasFilters = Boolean(query || cityFilter || activityFilter !== 'all');
     const timer = setTimeout(() => { loadAdminData(page); }, hasFilters ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [currentUser?.token, page, query, cityFilter, activityFilter]);
+  }, [currentUser?.token, page, query, cityFilter, activityFilter, loadAdminData]);
 
   const toggleUser = async (user: any, active: boolean) => {
     setBusy(true);

@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Platform, Share, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, parseMoney, remainingTotalOf } from '../utils/format';
 import { HarvestRecord, ExpenseRecord } from '../types';
 import { styles } from '../styles/styles';
@@ -60,11 +63,15 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
   const [year, setYear] = useState(new Date().getFullYear());
   const selected = useMemo(() => harvests.filter(h => yearOf(h.tarih) === year), [harvests, year]);
   const selectedExpenses = useMemo(() => expenses.filter(e => yearOf(e.tarih) === year), [expenses, year]);
+  const previousSeason = useMemo(() => harvests.filter(h => yearOf(h.tarih) === year - 1), [harvests, year]);
   const totalKg = selected.reduce((s,h) => s + kgOf(h), 0);
   const totalSales = selected.reduce((s,h) => s + saleOf(h), 0);
   const totalPaid = selected.reduce((s,h) => s + paidOf(h), 0);
   const totalExpenses = selectedExpenses.reduce((s,e) => s + parseMoney(e.tutar ?? 0), 0);
   const receivable = selected.reduce((s, h) => s + remainingTotalOf(h), 0);
+  const previousKg = previousSeason.reduce((s, h) => s + kgOf(h), 0);
+  const previousSales = previousSeason.reduce((s, h) => s + saleOf(h), 0);
+  const changePct = (current: number, previous: number) => previous ? Math.round(((current - previous) / previous) * 100) : null;
   const monthly = Array.from({length:12}, (_, i) => {
     const hs = selected.filter(h => monthOf(h.tarih) === i);
     return { month:i, kg:hs.reduce((s,h)=>s+kgOf(h),0), sales:hs.reduce((s,h)=>s+saleOf(h),0) };
@@ -90,11 +97,12 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
   const maxVersionKg = Math.max(...versions.map(x => x.kg), 1);
 
   const factorySales = useMemo(() => {
-    const map = new Map<string,{name:string;kg:number;sales:number;paid:number;remaining:number}>();
+    const map = new Map<string,{name:string;kg:number;sales:number;paid:number;remaining:number;records:number}>();
     selected.forEach(h => {
       const name = String(h.firma || 'Belirtilmeyen Fabrika').trim();
-      const row = map.get(name) || {name,kg:0,sales:0,paid:0,remaining:0};
+      const row = map.get(name) || {name,kg:0,sales:0,paid:0,remaining:0,records:0};
       row.kg += kgOf(h); row.sales += saleOf(h); row.paid += paidOf(h);
+      row.records += 1;
       row.remaining += remainingTotalOf(h); map.set(name,row);
     });
     return [...map.values()].sort((a,b)=>b.kg-a.kg);
@@ -142,8 +150,6 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
 
   const exportXLSX = async () => {
     try {
-      const XLSX = require('xlsx');
-      const Sharing = require('expo-sharing') as typeof import('expo-sharing');
       const rows = selected.map(h => ({
         Tarih: formatDisplayDate(h.tarih), Sürüm: h.surum || '', Üretici: h.producerName || h.uretici || '', KG: kgOf(h),
         Fabrika: h.firma || '', 'Brüt Birim Fiyat': priceOf(h), 'Brüt Satış': grossOf(h), '%2 Kesinti': deductionOf(h), 'Net Satış': saleOf(h), Tahsilat: paidOf(h),
@@ -173,15 +179,13 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri, { mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle:`Çaylık ${year} Excel` });
       else Alert.alert('Excel Hazır', fileUri);
-    } catch (e) {
+    } catch {
       Alert.alert('Excel', 'Gerçek Excel dışa aktarma için xlsx, expo-file-system ve expo-sharing paketlerini kurun.');
     }
   };
 
   const exportPDF = async () => {
     try {
-      const Print = require('expo-print') as typeof import('expo-print');
-      const Sharing = require('expo-sharing') as typeof import('expo-sharing');
       const versionRows = versions.map(v => `<tr><td>${v.name}</td><td>${v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td></tr>`).join('');
       const monthRows = monthly.map(x => `<tr><td>${months[x.month]}</td><td>${x.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(x.sales)}</td></tr>`).join('');
       const factoryRows = factorySales.map(f => `<tr><td>${f.name}</td><td>${f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(f.sales)}</td></tr>`).join('');
@@ -224,6 +228,12 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,reportValue]}>{formatTL(totalPaid)}</Text><Text style={[styles.statLabel,reportLabel]}>Toplam Tahsilat</Text></View>
       <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,{color:darkCards?'#FFB4AB':theme.colors.error}]}>{formatTL(receivable)}</Text><Text style={[styles.statLabel,reportLabel]}>Vadeli Alacak</Text></View>
       <View style={[styles.statCard,reportCard]}><Text style={[styles.statValue,reportValue]}>{formatTL(totalExpenses)}</Text><Text style={[styles.statLabel,reportLabel]}>Toplam Gider</Text></View>
+    </View>
+    <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}>
+      <IconHeading icon="compare-horizontal" title="Sezon Karşılaştırması" compact />
+      <Text style={[styles.listSubText,{color:theme.colors.onSurfaceVariant}]}>Önceki sezonla değişim</Text>
+      <Text style={[styles.listTitle,{color:theme.colors.onSurface,marginTop:6}]}>Hasat: {changePct(totalKg, previousKg) === null ? 'Yeni sezon' : `${changePct(totalKg, previousKg)! >= 0 ? '+' : ''}${changePct(totalKg, previousKg)}%`} ({previousKg.toLocaleString('tr-TR')} KG)</Text>
+      <Text style={[styles.listTitle,{color:theme.colors.onSurface,marginTop:4}]}>Net satış: {changePct(totalSales, previousSales) === null ? 'Yeni sezon' : `${changePct(totalSales, previousSales)! >= 0 ? '+' : ''}${changePct(totalSales, previousSales)}%`} ({formatTL(previousSales)})</Text>
     </View>
 
     <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}>

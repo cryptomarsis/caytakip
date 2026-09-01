@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { AppStoreServerAPIClient, Environment } = require('@apple/app-store-server-library');
+const { assessReceiptConfidence } = require('./server/receiptConfidence');
+const { createAdminMetricPipeline, getAdminProducerFilter, metricKey, numericValue, toAdminProducer } = require('./server/adminMetrics');
 
 const app = express();
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
@@ -1056,10 +1058,17 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
     const date = normalizeCalendarDate(parsed.date);
     const company = String(parsed.company || '').trim().slice(0, 120) || null;
     const netWeightKg = Number(parsed.netWeightKg);
+    const confidenceResult = assessReceiptConfidence({ date, company, netWeightKg: Number.isFinite(netWeightKg) && netWeightKg > 0 ? netWeightKg : null });
+    const warnings = [];
+    if (!date) warnings.push('Tarih okunamadı');
+    if (!company) warnings.push('Firma okunamadı');
+    if (!(Number.isFinite(netWeightKg) && netWeightKg > 0)) warnings.push('Net ağırlık okunamadı');
     res.json({
       date: date || null,
       company,
       netWeightKg: Number.isFinite(netWeightKg) && netWeightKg > 0 ? netWeightKg : null,
+      confidence: confidenceResult.confidence,
+      warnings: confidenceResult.warnings,
       receiptFingerprint
     });
   } catch (err) {
@@ -1204,27 +1213,47 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
   }
   const grantEvent = eventType === 'NON_RENEWING_PURCHASE' || eventType === 'INITIAL_PURCHASE' || eventType === 'RENEWAL';
   if (!grantEvent) return res.json({ received: true, ignored: eventType });
+  const session = await mongoose.startSession();
   try {
-    const duplicate = await InAppPurchase.findOne({ $or: [{ revenueCatEventId: eventId }, { platform: 'apple', transactionId }] }).lean();
-    if (duplicate) return res.json({ received: true, replayed: true });
-    const profile = await UserProfile.findOne({ userId }).select('userId').lean();
-    if (!profile) return res.status(404).json({ error: 'User not found' });
-    await UserProfile.updateOne({ userId }, { $inc: { aiCredits: catalogProduct.credits } });
-    await InAppPurchase.create({
-      platform: 'apple', provider: 'revenuecat', revenueCatEventId: eventId,
-      transactionId, originalTransactionId: String(event.original_transaction_id || transactionId),
-      userId, productId, kind: catalogProduct.kind, environment: String(event.environment || ''),
-      creditsGranted: catalogProduct.credits,
-      purchaseDate: event.purchased_at_ms ? new Date(Number(event.purchased_at_ms)) : null,
-      expiresDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+    let replayed = false;
+    let balanceAfter = 0;
+    await session.withTransaction(async () => {
+      const duplicate = await InAppPurchase.findOne({ $or: [{ revenueCatEventId: eventId }, { platform: 'apple', transactionId }] }).session(session).lean();
+      if (duplicate) {
+        replayed = true;
+        return;
+      }
+      const wallet = await UserProfile.findOneAndUpdate(
+        { userId },
+        { $inc: { aiCredits: catalogProduct.credits } },
+        { returnDocument: 'after', session }
+      ).select('aiCredits').lean();
+      if (!wallet) throw Object.assign(new Error('User not found'), { code: 'REVENUECAT_USER_NOT_FOUND' });
+      balanceAfter = Number(wallet.aiCredits || 0);
+      await InAppPurchase.create([{
+        platform: 'apple', provider: 'revenuecat', revenueCatEventId: eventId,
+        transactionId, originalTransactionId: String(event.original_transaction_id || transactionId),
+        userId, productId, kind: catalogProduct.kind, environment: String(event.environment || ''),
+        creditsGranted: catalogProduct.credits,
+        purchaseDate: event.purchased_at_ms ? new Date(Number(event.purchased_at_ms)) : null,
+        expiresDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+      }], { session });
+      await AiCreditTransaction.create([{
+        userId, type: 'purchase', requestId: `purchase:revenuecat:${transactionId}`,
+        amount: catalogProduct.credits, balanceAfter, description: catalogProduct.label,
+        model: 'revenuecat', responseText: productId
+      }], { session });
     });
-    const wallet = await UserProfile.findOne({ userId }).select('aiCredits').lean();
-    await AiCreditTransaction.create({ userId, type: 'purchase', requestId: `purchase:revenuecat:${transactionId}`, amount: catalogProduct.credits, balanceAfter: Number(wallet?.aiCredits || 0), description: catalogProduct.label, model: 'revenuecat', responseText: productId });
-    return res.json({ received: true, creditsGranted: catalogProduct.credits });
+    return res.json(replayed
+      ? { received: true, replayed: true }
+      : { received: true, creditsGranted: catalogProduct.credits, credits: balanceAfter });
   } catch (error) {
     if (error?.code === 11000) return res.json({ received: true, replayed: true });
+    if (error?.code === 'REVENUECAT_USER_NOT_FOUND') return res.status(404).json({ error: 'User not found' });
     console.error('REVENUECAT WEBHOOK ERROR', { eventId, userId, transactionId, productId, error: error?.message || error });
     return res.status(500).json({ error: 'Webhook processing failed' });
+  } finally {
+    await session.endSession();
   }
 });
 
@@ -2291,120 +2320,7 @@ app.post('/api/feedback', requireAuth, async (req, res) => {
 
 // ADMIN ROUTES
 // ADMIN / PRODUCER MANAGEMENT
-const mongoNumeric = (input, fallback = 0) => ({
-  $convert: {
-    input: { $ifNull: [input, fallback] },
-    to: 'double',
-    onError: fallback,
-    onNull: fallback
-  }
-});
-
-const adminMetricPipeline = (match = {}) => [
-  { $match: match },
-  { $project: {
-    userId: { $ifNull: ['$userId', ''] },
-    userPhone: { $ifNull: ['$userPhone', ''] },
-    kgValue: mongoNumeric({ $ifNull: ['$kg', '$weight'] }),
-    priceValue: mongoNumeric('$fiyat'),
-    storedNetValue: mongoNumeric({ $ifNull: ['$toplamTutar', null] }, null),
-    storedDeductionValue: mongoNumeric({
-      $ifNull: ['$kesintiTutar', { $ifNull: ['$gelirVergisiKesintisi', null] }]
-    }, null),
-    withholdingRate: mongoNumeric('$gelirVergisiOrani', HARVEST_WITHHOLDING_RATE),
-    paidValue: mongoNumeric('$tahsilat')
-  } },
-  { $set: {
-    grossValue: { $multiply: ['$kgValue', '$priceValue'] }
-  } },
-  { $set: {
-    netValue: {
-      $max: [
-        0,
-        {
-          $ifNull: [
-            '$storedNetValue',
-            {
-              $subtract: [
-                '$grossValue',
-                {
-                  $ifNull: [
-                    '$storedDeductionValue',
-                    { $multiply: ['$grossValue', { $divide: ['$withholdingRate', 100] }] }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  } },
-  { $group: {
-    _id: { userId: '$userId', userPhone: '$userPhone' },
-    totalKg: { $sum: '$kgValue' },
-    totalSales: { $sum: '$netValue' },
-    totalPaid: { $sum: '$paidValue' },
-    harvestCount: { $sum: 1 }
-  } }
-];
-
-const getAdminProducerFilter = (search = '', city = '', activity = 'all') => {
-  const filters = [{ role: { $ne: 'admin' } }];
-  const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const phrase = String(search || '').trim();
-  const normalizedCity = String(city || '').trim();
-
-  if (phrase) {
-    const escaped = escapeRegex(phrase);
-    filters.push({
-      $or: [
-        { name: { $regex: escaped, $options: 'i' } },
-        { phone: { $regex: escaped, $options: 'i' } },
-        { city: { $regex: escaped, $options: 'i' } }
-      ]
-    });
-  }
-  if (normalizedCity) filters.push({ city: { $regex: escapeRegex(normalizedCity), $options: 'i' } });
-
-  const thirtyDaysAgo = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000));
-  if (activity === 'active') filters.push({ active: { $ne: false } });
-  if (activity === 'inactive') filters.push({ active: false });
-  if (activity === 'recent') filters.push({ lastActiveAt: { $gte: thirtyDaysAgo } });
-  if (activity === 'stale') filters.push({ $or: [{ lastActiveAt: null }, { lastActiveAt: { $lt: thirtyDaysAgo } }] });
-
-  return filters.length === 1 ? filters[0] : { $and: filters };
-};
-
-// Some older harvest records were created before a UserProfile existed.  Build the
-// administration list from both collections so totals never only reflect the
-// administrator's own records.
-const metricKey = (metric = {}) => `${String(metric?._id?.userId || '').trim()}::${String(metric?._id?.userPhone || '').trim()}`;
-const numericValue = (value) => Number(value || 0);
-
-const toAdminProducer = (profile = {}, metric = {}) => {
-  const totalSales = numericValue(metric.totalSales);
-  const totalPaid = numericValue(metric.totalPaid);
-  const userId = String(profile.userId || metric?._id?.userId || '').trim();
-  const phone = String(profile.phone || metric?._id?.userPhone || '').trim();
-  return {
-    _id: profile?._id ? String(profile._id) : `legacy:${userId || phone || metricKey(metric)}`,
-    userId,
-    phone,
-    name: profile.name || phone || userId || 'Kayıtlı üretici',
-    city: profile.city || '',
-    role: profile.role || 'user',
-    active: profile.active !== false,
-    lastActiveAt: profile.lastActiveAt || null,
-    createdAt: profile.createdAt || null,
-    totalKg: numericValue(metric.totalKg),
-    totalSales,
-    totalPaid,
-    harvestCount: numericValue(metric.harvestCount),
-    remaining: Math.max(0, totalSales - totalPaid)
-  };
-};
-
+const adminMetricPipeline = (match = {}) => createAdminMetricPipeline(match, HARVEST_WITHHOLDING_RATE);
 const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '', activity = 'all' } = {}) => {
   const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
   // Eski uygulama sürümleri limit=25 gönderse de yönetici listesi her cihazda

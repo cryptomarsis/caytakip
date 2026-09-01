@@ -78,6 +78,8 @@ export default function HarvestScreen(props: any) {
                   <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Net ağırlık: {receiptDraft.netWeightKg ?? 'Bulunamadı'} KG</Text>
                   <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Tarih: {receiptDraft.date || 'Bulunamadı'}</Text>
                   {!!receiptDraft.paymentTerm && <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Ödeme: {receiptDraft.paymentTerm}</Text>}
+                  {receiptDraft.confidence !== undefined && <Text style={[local.receiptResultText, { color: receiptDraft.confidence >= 100 ? theme.colors.primary : theme.colors.secondary }]}>Okuma güveni: %{receiptDraft.confidence}</Text>}
+                  {!!receiptDraft.warnings?.length && <Text style={[local.receiptResultText, { color: theme.colors.error }]}>Kontrol edin: {receiptDraft.warnings.join(', ')}</Text>}
                   <View style={local.receiptActions}>
                     <CaylikButton icon="close" mode="outlined" onPress={onDismissReceipt} style={local.receiptButton}>Vazgeç</CaylikButton>
                     <CaylikButton icon="check" onPress={onConfirmReceipt} style={[local.receiptButton, { flex: 1.4 }]}>Onayla ve Aktar</CaylikButton>

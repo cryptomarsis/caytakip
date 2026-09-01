@@ -31,10 +31,12 @@ export const setupNotifications = async () => {
   if (isExpoGo && Platform.OS === 'android') return false;
   try {
     if (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient') return false;
-    const Notifications = require('expo-notifications');
+    const Notifications = await import('expo-notifications');
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge: false,
       }),
@@ -63,7 +65,7 @@ export const syncDueNotifications = async (userId: string, harvests: HarvestReco
   if (!userId || (Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient')) return;
 
   try {
-    const Notifications = require('expo-notifications');
+    const Notifications = await import('expo-notifications');
     const permission = await Notifications.getPermissionsAsync();
     if (permission.status !== 'granted') return;
 
@@ -158,7 +160,7 @@ export const clearDueNotifications = async (userId: string) => {
     return;
   }
   try {
-    const Notifications = require('expo-notifications');
+    const Notifications = await import('expo-notifications');
     const stored = await readStored(userId);
     await Promise.all(Object.values(stored).map((item) =>
       Notifications.cancelScheduledNotificationAsync(item.notificationId).catch(() => undefined)

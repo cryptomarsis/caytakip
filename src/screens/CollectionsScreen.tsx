@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, NativeScrollEvent, NativeSyntheticEvent, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import { styles } from '../styles/styles';
@@ -66,10 +66,10 @@ export default function CollectionsScreen(props: any) {
   const selectedRemaining = selected ? remainingTotalOf(selected) : 0;
   const paymentDate = (payment: PaymentRecord) => formatDisplayDate(String(payment.tarih || payment.createdAt || '').slice(0, 10));
   const paymentHarvest = (payment: PaymentRecord) => payment.harvestId && typeof payment.harvestId === 'object' ? payment.harvestId : null;
-  const paymentHarvestId = (payment: PaymentRecord) => {
+  const paymentHarvestId = useCallback((payment: PaymentRecord) => {
     const harvest = paymentHarvest(payment);
     return harvest?._id || (typeof payment.harvestId === 'string' ? payment.harvestId : '');
-  };
+  }, []);
   const legacyPaymentAdjustments = useMemo(() => {
     const paidByHarvest = new Map<string, number>();
     ((payments || []) as PaymentRecord[]).forEach((payment) => {
@@ -83,7 +83,7 @@ export default function CollectionsScreen(props: any) {
       const missingDetail = totalPaid - detailTotal;
       return missingDetail > 0.01 ? { harvest, amount: missingDetail } : null;
     }).filter(Boolean) as { harvest: any; amount: number }[];
-  }, [harvests, payments]);
+  }, [harvests, payments, paymentHarvestId]);
 
   return (
     <View>

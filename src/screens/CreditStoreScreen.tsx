@@ -21,7 +21,7 @@ const products: {
   { id: 'caylik_credits_250', title: 'Başlangıç', credits: '250 kredi', price: '39,99 TL', detail: 'Kredilerinizin kullanım süresi yoktur.' },
   { id: 'caylik_credits_750', title: 'Avantajlı', credits: '750 kredi', price: '89,99 TL', detail: 'En çok tercih edilen kredi paketi.', popular: true },
   { id: 'caylik_credits_2000', title: 'Büyük Paket', credits: '2.000 kredi', price: '199,99 TL', detail: 'Kredi başına en avantajlı tek seferlik paket.' },
-  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', price: '119,99 TL / ay', detail: 'Abonelik her ay yenilenir; istediğiniz zaman mağazadan iptal edebilirsiniz.', subscription: true },
+  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', price: '119,99 TL / ay', detail: 'Asistanı düzenli kullananlar için her ay otomatik kredi yenileme kolaylığı.', subscription: true },
 ];
 
 type Props = {
@@ -62,6 +62,17 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
             <Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Yeni hesaplara ücretsiz tanımlanır. Kredi yalnızca başarılı yanıt üretildiğinde düşer.</Text>
           </View>
         </View>
+      </CaylikSurface>
+
+      <CaylikSurface style={local.proInfoCard}>
+        <View style={local.proInfoHeader}>
+          <View style={[local.proIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="crown-outline" size={25} color="#9A6416" /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={[local.proInfoTitle, { color: theme.colors.onSurface }]}>Çaylık Pro ne sağlar?</Text>
+            <Text style={[local.proInfoLead, { color: theme.colors.onSurfaceVariant }]}>Her ay 1.500 asistan kredisi hesabınıza otomatik eklenir. Düzenli kullananlar için avantajlıdır; istediğiniz zaman iptal edebilirsiniz.</Text>
+          </View>
+        </View>
+        <Text style={[local.proNote, { color: theme.colors.onSurfaceVariant, borderTopColor: theme.colors.outlineVariant }]}>Pro sınırsız kullanım değildir; kullanıma göre kredi düşer.</Text>
       </CaylikSurface>
 
       <View style={local.grid}>
@@ -115,6 +126,12 @@ const local = StyleSheet.create({
   giftIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   freeTitle: { fontSize: 16, fontWeight: '900', marginBottom: 3 },
   freeText: { fontSize: 12, lineHeight: 17 },
+  proInfoCard: { marginBottom: 16, overflow: 'hidden' },
+  proInfoHeader: { paddingHorizontal: 16, paddingTop: 16, flexDirection: 'row', gap: 12, alignItems: 'center' },
+  proIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  proInfoTitle: { fontSize: 18, fontWeight: '900', marginBottom: 3 },
+  proInfoLead: { fontSize: 12, lineHeight: 17 },
+  proNote: { marginTop: 15, borderTopWidth: 1, padding: 15, fontSize: 11, lineHeight: 16 },
   grid: { gap: 12 },
   productCard: { overflow: 'hidden' },
   productInner: { padding: 17 },

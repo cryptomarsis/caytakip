@@ -129,8 +129,8 @@ export default function DashboardScreen({
     const dated = harvests.map((item) => ({ item, timestamp: dateTimestamp(item.tarih) })).filter((row) => row.timestamp > 0);
     const latestDate = dated.length ? new Date(Math.max(...dated.map((row) => row.timestamp))) : new Date();
     const year = latestDate.getFullYear();
-    const months = Array.from({ length: 6 }, (_, index) => new Date(year, latestDate.getMonth() - 5 + index, 1));
-    const totals = Array.from({ length: 6 }, () => 0);
+    const months = Array.from({ length: 12 }, (_, index) => new Date(year, index, 1));
+    const totals = Array.from({ length: 12 }, () => 0);
     dated.forEach(({ item, timestamp }) => {
       const date = new Date(timestamp);
       const index = months.findIndex((month) => month.getFullYear() === date.getFullYear() && month.getMonth() === date.getMonth());
@@ -141,13 +141,12 @@ export default function DashboardScreen({
 
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const pendingCount = harvests.filter((item) => remainingTotalOf(item) > 0.01).length;
   return (
     <View style={[local.screen, { maxWidth: caylikDesign.contentMaxWidth }]}>
       {ads.filter((ad) => ad.slot === 'dashboard_top').slice(0, 1).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
 
       <View style={[local.summaryCard, caylikDesign.shadow.soft, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant, shadowColor: theme.colors.shadow }]}>
-        <View style={local.summaryHeader}><View style={[local.summaryIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="leaf" size={21} color={theme.colors.primary} /></View><Text style={[local.summaryTitle, { color: theme.colors.onSurface }]}>Bugünkü çay durumunuz</Text></View>
+        <View style={local.summaryHeader}><View style={[local.summaryIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="leaf" size={21} color={theme.colors.primary} /></View><Text style={[local.summaryTitle, { color: theme.colors.onSurface }]}>Sezon durumunuz</Text></View>
         <View style={local.primaryMetrics}>
           <View style={local.primaryMetric}><Text style={[local.primaryLabel, { color: theme.colors.onSurfaceVariant }]}>Toplam Hasat</Text><Text adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.65} style={[local.primaryValue, { color: theme.colors.primary }]}>{totalKg.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} KG</Text></View>
           <View style={[local.primaryMetric, local.primaryMetricBorder, { borderLeftColor: theme.colors.outlineVariant }]}><Text style={[local.primaryLabel, { color: theme.colors.onSurfaceVariant }]}>Kalan Alacak</Text><Text adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.6} style={[local.primaryValue, { color: pendingCollection > 0 ? theme.colors.error : theme.colors.primary }]}>{formatTL(pendingCollection)}</Text></View>
@@ -190,7 +189,7 @@ export default function DashboardScreen({
         );
       })}
 
-      <DashboardSectionHeader title="Aylık hasat" detail="Son altı ayın kilogram dağılımı" actionLabel="Raporlar" onAction={() => onNavigate('reports')} />
+      <DashboardSectionHeader title="Aylık hasat" detail={`${monthlyChart.year} yılı kilogram dağılımı`} actionLabel="Raporlar" onAction={() => onNavigate('reports')} />
       <DashboardMonthlyChart data={monthlyChart.points} />
 
       <Pressable accessibilityRole="button" accessibilityLabel="Yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.floatingAdd, caylikDesign.shadow.soft, { backgroundColor: theme.colors.primary, shadowColor: theme.colors.shadow }, pressed && local.pressed]}><AppIcon name="plus" size={24} color={theme.colors.onPrimary} /><Text style={[local.floatingAddText, { color: theme.colors.onPrimary }]}>Yeni Hasat</Text></Pressable>

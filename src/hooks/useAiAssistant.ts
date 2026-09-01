@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { API_URL } from '../services/api';
 import { AiChatMessage, AiCreditTransaction, AuthFetch, fetchAiWallet, sendAiMessage, transcribeAiVoice } from '../services/aiAssistant';
@@ -16,7 +16,7 @@ export const useAiAssistant = (userId: string | undefined, authFetch: AuthFetch)
 
   useEffect(() => { requestRef.current = authFetch; }, [authFetch]);
 
-  const refreshWallet = async () => {
+  const refreshWallet = useCallback(async () => {
     if (!userId) return;
     try {
       const wallet = await fetchAiWallet(requestRef.current, API_URL);
@@ -25,7 +25,7 @@ export const useAiAssistant = (userId: string | undefined, authFetch: AuthFetch)
     } catch (walletError) {
       setError(walletError instanceof Error ? walletError.message : 'Kredi bilgisi alınamadı.');
     }
-  };
+  }, [userId]);
 
   useEffect(() => {
     // Reset assistant state when a different account becomes active.
@@ -35,7 +35,7 @@ export const useAiAssistant = (userId: string | undefined, authFetch: AuthFetch)
     setTransactions([]);
     setError('');
     if (userId) void refreshWallet();
-  }, [userId]);
+  }, [refreshWallet, userId]);
 
   const ask = async (rawMessage: string) => {
     const message = rawMessage.trim();
