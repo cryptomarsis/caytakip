@@ -62,8 +62,7 @@
         }
       ],
       "expo-image",
-      "expo-asset",
-      "expo-iap"
+      "expo-asset"
     ],
     "extra": {
       "router": {},
