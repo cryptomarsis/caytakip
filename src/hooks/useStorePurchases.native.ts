@@ -86,7 +86,10 @@ export const useStorePurchases = (
       if (!selectedPackage) throw new Error('Bu paket şu anda mağazada bulunamadı.');
       await revenueCat.default.purchasePackage(selectedPackage);
       await refreshWallet();
-      Alert.alert('Satın alma tamamlandı', 'Kredileriniz hesabınıza işlendi. Görünmesi birkaç saniye sürebilir.');
+      Alert.alert(
+        'Satın alma tamamlandı',
+        'Gerçek mağaza satın alımlarında kredi bakiyesi doğrulama tamamlanınca güncellenir. TestFlight Sandbox işlemleri gerçek kredi bakiyesine eklenmez.',
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || '');
       if (!message.toLocaleLowerCase('tr-TR').includes('cancel')) Alert.alert('Satın alma tamamlanamadı', message || 'Lütfen tekrar deneyin.');

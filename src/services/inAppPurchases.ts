@@ -25,6 +25,7 @@ export type IapVerification = {
   creditsGranted: number;
   credits: number;
   environment?: string;
+  sandbox?: boolean;
 };
 
 export class IapVerificationError extends Error {
@@ -86,5 +87,6 @@ export const verifyApplePurchase = async (
     creditsGranted: Number(data?.creditsGranted || 0),
     credits: Number(data?.credits || 0),
     environment: data?.environment ? String(data.environment) : undefined,
+    sandbox: Boolean(data?.sandbox),
   };
 };

@@ -467,7 +467,9 @@ const AiCreditTransactionSchema = new mongoose.Schema({
   model: { type: String, default: '' },
   inputTokens: { type: Number, default: 0 },
   outputTokens: { type: Number, default: 0 },
-  responseText: { type: String, default: '', maxlength: 12000 }
+  responseText: { type: String, default: '', maxlength: 12000 },
+  environment: { type: String, enum: ['', 'Production', 'Sandbox'], default: '' },
+  countsTowardBalance: { type: Boolean, default: true }
 }, { timestamps: true });
 AiCreditTransactionSchema.index({ userId: 1, requestId: 1 }, { unique: true });
 AiCreditTransactionSchema.index({ userId: 1, createdAt: -1 });
@@ -1077,6 +1079,31 @@ app.post('/api/receipts/parse', requireAuth, limitPublicUsage('receipt-parse', 1
   }
 });
 
+const isSandboxPurchaseEnvironment = (value) => String(value || '').trim().toLowerCase() === 'sandbox';
+
+const excludeHistoricalSandboxCredits = async (userId) => {
+  const sandboxPurchases = await InAppPurchase.find({
+    userId,
+    environment: { $regex: /^sandbox$/i }
+  }).select('transactionId provider').lean();
+  if (!sandboxPurchases.length) return;
+
+  const requestIds = sandboxPurchases.flatMap((purchase) => {
+    const transactionId = String(purchase.transactionId || '').trim();
+    if (!transactionId) return [];
+    return [
+      `purchase:apple:${transactionId}`,
+      `purchase:revenuecat:${transactionId}`
+    ];
+  });
+  if (!requestIds.length) return;
+
+  await AiCreditTransaction.updateMany(
+    { userId, requestId: { $in: requestIds }, countsTowardBalance: { $ne: false } },
+    { $set: { environment: 'Sandbox', countsTowardBalance: false } }
+  );
+};
+
 const ensureAiWallet = async (userId) => {
   let profile = await UserProfile.findOne({ userId }).select('userId name aiCredits').lean();
   if (!profile) return null;
@@ -1102,10 +1129,14 @@ const ensureAiWallet = async (userId) => {
     if (error?.code !== 11000) throw error;
   });
 
+  // Eski sürümlerde Sandbox satın alımları gerçek bakiyeye eklenebiliyordu.
+  // İlgili hareketleri bir kez işaretleyip canlı bakiyeden hariç tutuyoruz.
+  await excludeHistoricalSandboxCredits(userId);
+
   // Kredi bakiyesinin tek doğruluk kaynağı hareket defteridir. Böylece eski
   // kullanıcılarda eksik alan veya yarım kalmış ilk kurulum 0 kredi göstermez.
   const ledger = await AiCreditTransaction.aggregate([
-    { $match: { userId } },
+    { $match: { userId, countsTowardBalance: { $ne: false } } },
     { $group: {
       _id: null,
       completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, '$amount', 0] } },
@@ -1176,7 +1207,11 @@ app.get('/api/ai/wallet', requireAuth, async (req, res) => {
     await releaseStaleAiReservations(req.auth.userId);
     const profile = await ensureAiWallet(req.auth.userId);
     if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
-    const transactions = await AiCreditTransaction.find({ userId: req.auth.userId, status: 'completed' })
+    const transactions = await AiCreditTransaction.find({
+      userId: req.auth.userId,
+      status: 'completed',
+      countsTowardBalance: { $ne: false }
+    })
       .sort({ _id: -1 }).limit(20).select('type amount balanceAfter description createdAt inputTokens outputTokens').lean();
     res.json({ credits: Math.max(0, Number(profile.aiCredits || 0)), transactions });
   } catch (error) {
@@ -1206,6 +1241,7 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
   const userId = String(event.app_user_id || '').trim();
   const transactionId = String(event.transaction_id || event.original_transaction_id || '').trim();
   const productId = String(event.product_id || '').trim();
+  const sandboxPurchase = isSandboxPurchaseEnvironment(event.environment);
   if (eventType === 'TEST') return res.json({ received: true, test: true });
   const catalogProduct = APPLE_IAP_PRODUCTS[productId];
   if (!eventId || !userId || userId.startsWith('$RCAnonymousID:') || !transactionId || !catalogProduct) {
@@ -1217,36 +1253,49 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
   try {
     let replayed = false;
     let balanceAfter = 0;
+    await ensureAiWallet(userId);
     await session.withTransaction(async () => {
       const duplicate = await InAppPurchase.findOne({ $or: [{ revenueCatEventId: eventId }, { platform: 'apple', transactionId }] }).session(session).lean();
       if (duplicate) {
         replayed = true;
         return;
       }
-      const wallet = await UserProfile.findOneAndUpdate(
-        { userId },
-        { $inc: { aiCredits: catalogProduct.credits } },
-        { returnDocument: 'after', session }
-      ).select('aiCredits').lean();
+      const wallet = sandboxPurchase
+        ? await UserProfile.findOne({ userId }).session(session).select('aiCredits').lean()
+        : await UserProfile.findOneAndUpdate(
+          { userId },
+          { $inc: { aiCredits: catalogProduct.credits } },
+          { returnDocument: 'after', session }
+        ).select('aiCredits').lean();
       if (!wallet) throw Object.assign(new Error('User not found'), { code: 'REVENUECAT_USER_NOT_FOUND' });
       balanceAfter = Number(wallet.aiCredits || 0);
       await InAppPurchase.create([{
         platform: 'apple', provider: 'revenuecat', revenueCatEventId: eventId,
         transactionId, originalTransactionId: String(event.original_transaction_id || transactionId),
         userId, productId, kind: catalogProduct.kind, environment: String(event.environment || ''),
-        creditsGranted: catalogProduct.credits,
+        creditsGranted: sandboxPurchase ? 0 : catalogProduct.credits,
         purchaseDate: event.purchased_at_ms ? new Date(Number(event.purchased_at_ms)) : null,
         expiresDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
       }], { session });
       await AiCreditTransaction.create([{
         userId, type: 'purchase', requestId: `purchase:revenuecat:${transactionId}`,
-        amount: catalogProduct.credits, balanceAfter, description: catalogProduct.label,
-        model: 'revenuecat', responseText: productId
+        amount: sandboxPurchase ? 0 : catalogProduct.credits,
+        balanceAfter,
+        description: sandboxPurchase ? `Sandbox testi · ${catalogProduct.label}` : catalogProduct.label,
+        model: 'revenuecat', responseText: productId,
+        environment: sandboxPurchase ? 'Sandbox' : 'Production',
+        countsTowardBalance: !sandboxPurchase
       }], { session });
     });
     return res.json(replayed
       ? { received: true, replayed: true }
-      : { received: true, creditsGranted: catalogProduct.credits, credits: balanceAfter });
+      : {
+        received: true,
+        creditsGranted: sandboxPurchase ? 0 : catalogProduct.credits,
+        credits: balanceAfter,
+        environment: sandboxPurchase ? 'Sandbox' : 'Production',
+        sandbox: sandboxPurchase
+      });
   } catch (error) {
     if (error?.code === 11000) return res.json({ received: true, replayed: true });
     if (error?.code === 'REVENUECAT_USER_NOT_FOUND') return res.status(404).json({ error: 'User not found' });
@@ -1336,7 +1385,9 @@ app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30
 
     await ensureAiWallet(req.auth.userId);
     const quantity = Math.max(1, Math.min(10, Number(transaction?.quantity || 1)));
-    const creditsToGrant = catalogProduct.credits * quantity;
+    const sandboxPurchase = isSandboxPurchaseEnvironment(environment || transaction?.environment);
+    const purchasedCredits = catalogProduct.credits * quantity;
+    const creditsToGrant = sandboxPurchase ? 0 : purchasedCredits;
     const session = await mongoose.startSession();
     let balanceAfter = 0;
     try {
@@ -1370,13 +1421,25 @@ app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30
         await AiCreditTransaction.create([{
           userId: req.auth.userId, requestId: `purchase:apple:${verifiedTransactionId}`,
           type: 'purchase', status: 'completed', amount: creditsToGrant,
-          balanceAfter, description: `App Store · ${catalogProduct.label}`
+          balanceAfter,
+          description: sandboxPurchase
+            ? `App Store Sandbox testi · ${catalogProduct.label}`
+            : `App Store · ${catalogProduct.label}`,
+          environment: sandboxPurchase ? 'Sandbox' : 'Production',
+          countsTowardBalance: !sandboxPurchase
         }], { session });
       });
     } finally {
       await session.endSession();
     }
-    res.json({ verified: true, replayed: false, creditsGranted: creditsToGrant, credits: balanceAfter, environment });
+    res.json({
+      verified: true,
+      replayed: false,
+      creditsGranted: creditsToGrant,
+      credits: balanceAfter,
+      environment,
+      sandbox: sandboxPurchase
+    });
   } catch (error) {
     if (error?.code === 'PURCHASE_OWNED_BY_ANOTHER_USER') return res.status(409).json({ error: 'Bu satın alma başka bir Çaylık hesabına bağlı.' });
     if (error?.code === 11000) {
