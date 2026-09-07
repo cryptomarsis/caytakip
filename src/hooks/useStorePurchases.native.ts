@@ -7,6 +7,7 @@ import { isStoreProductId, type StoreProductId } from '../services/inAppPurchase
 import { trackTikTokPurchase } from '../services/adTracking';
 
 const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY || 'appl_ZMzoEtiIbrAKPLWMBXJLMTGbFwx';
+const REVENUECAT_ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY || '';
 const EXPO_GO = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
 type RevenueCatModule = typeof import('react-native-purchases');
 
@@ -38,10 +39,13 @@ export const useStorePurchases = (
   }, []);
 
   const connectStore = useCallback(async () => {
-    if (Platform.OS !== 'ios') throw new Error('Satın alma yalnızca iOS mağazasında kullanılabilir.');
-    if (EXPO_GO) throw new Error('Satın alma Expo Go’da kullanılamaz. TestFlight sürümünü kullanın.');
+    if (Platform.OS !== 'ios' && Platform.OS !== 'android') throw new Error('Satın alma bu platformda kullanılamaz.');
+    if (EXPO_GO) throw new Error('Satın alma Expo Go’da kullanılamaz. Mağaza test sürümünü kullanın.');
     if (!userId) throw new Error('Mağazaya bağlanmak için yeniden giriş yapın.');
     if (connectingRef.current) return connectingRef.current;
+
+    const apiKey = Platform.OS === 'ios' ? REVENUECAT_IOS_KEY : REVENUECAT_ANDROID_KEY;
+    if (!apiKey) throw new Error('Google Play satın alma ayarları henüz tamamlanmadı.');
 
     const connection = (async () => {
       const revenueCat = await import('react-native-purchases');
@@ -49,7 +53,7 @@ export const useStorePurchases = (
 
       const isConfigured = await revenueCat.default.isConfigured();
       if (!isConfigured) {
-        revenueCat.default.configure({ apiKey: REVENUECAT_IOS_KEY, appUserID: userId });
+        revenueCat.default.configure({ apiKey, appUserID: userId });
       } else if (activeUserRef.current !== userId) {
         await revenueCat.default.logIn(userId);
       }
@@ -78,7 +82,7 @@ export const useStorePurchases = (
   }, [loadOfferings, userId]);
 
   useEffect(() => {
-    if (Platform.OS !== 'ios' || EXPO_GO || !userId) {
+    if ((Platform.OS !== 'ios' && Platform.OS !== 'android') || EXPO_GO || !userId) {
       activeUserRef.current = null;
       void Promise.resolve().then(() => {
         setConnected(false);
