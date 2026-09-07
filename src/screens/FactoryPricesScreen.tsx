@@ -9,6 +9,20 @@ import { formatTL, formatDisplayDate } from '../utils/format';
 const dateValue = (value:any) => { const raw=String(value||'').trim(); const m=raw.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/); if(m) return new Date(Number(m[3]),Number(m[2])-1,Number(m[1])).getTime(); const d=new Date(raw).getTime(); return Number.isNaN(d)?0:d; };
 const PRICE_TYPES = ['Peşin', 'Haftalık', 'Aylık', 'Vadeli'] as const;
 
+const detailLinesOf = (price: any) => [
+  price.gecerlilikBaslangic ? `Geçerlilik: ${formatDisplayDate(price.gecerlilikBaslangic)}` : '',
+  price.vadeGun ? `Vade: ${price.vadeGun} gün` : '',
+  String(price.politika || '').trim(),
+  String(price.aciklama || '').trim(),
+  price.kaynak ? `Kaynak: ${String(price.kaynak).trim()}` : '',
+].filter(Boolean);
+
+function PriceDetails({ price, color }: { price: any; color: string }) {
+  const lines = detailLinesOf(price);
+  if (!lines.length) return null;
+  return <View style={local.priceDetails}>{lines.map((line, index) => <View key={`${line}-${index}`} style={local.priceDetailLine}><View style={[local.priceDetailDot, { backgroundColor: color }]} /><Text style={[local.priceDetailText, { color }]}>{line}</Text></View>)}</View>;
+}
+
 export default function FactoryPricesScreen(props: any) {
   const theme = useTheme();
   const { factoryPrices, handleDelete, handleSaveFactoryPrice, isAdmin, priceForm, setPriceForm } = props;
@@ -45,6 +59,7 @@ export default function FactoryPricesScreen(props: any) {
       vadeGun: latestForSelectedFactory.vadeGun ? String(latestForSelectedFactory.vadeGun) : '',
       politika: latestForSelectedFactory.politika || '',
       kaynak: latestForSelectedFactory.kaynak || '',
+      aciklama: latestForSelectedFactory.aciklama || '',
     });
   };
 
@@ -76,7 +91,8 @@ export default function FactoryPricesScreen(props: any) {
       {priceForm.fiyatTuru==='Vadeli' && <><Text style={[styles.label, { color: theme.colors.onSurface }]}>Vade (Gün)</Text><TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.vadeGun} onChangeText={(t)=>setPriceForm({...priceForm,vadeGun:t})} keyboardType="numeric" placeholder="Örn: 30" /></>}
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Geçerlilik Başlangıcı (GG.AA.YYYY)</Text>
       <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.gecerlilikBaslangic || priceForm.tarih} onChangeText={(t)=>setPriceForm({...priceForm,tarih:t,gecerlilikBaslangic:t})} placeholder="12.08.2026" />
-      <Text style={[styles.label, { color: theme.colors.onSurface }]}>Açıklama</Text><TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.politika} onChangeText={(t)=>setPriceForm({...priceForm,politika:t})} placeholder="Prim, vade, kampanya vb." />
+      <Text style={[styles.label, { color: theme.colors.onSurface }]}>Ödeme / Anlaşma Detayı</Text><TextInput multiline textAlignVertical="top" style={[styles.input, local.multilineInput, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.politika} onChangeText={(t)=>setPriceForm({...priceForm,politika:t})} placeholder="Örn: 1/3 kuru çay, kalan 2/3 haftalık ödeme" />
+      <Text style={[styles.label, { color: theme.colors.onSurface }]}>Ek Açıklama</Text><TextInput multiline textAlignVertical="top" style={[styles.input, local.multilineInput, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.aciklama} onChangeText={(t)=>setPriceForm({...priceForm,aciklama:t})} placeholder="Örn: Ekim ayı vadeli, prim ve kampanya koşulları" />
       <Text style={[styles.label, { color: theme.colors.onSurface }]}>Kaynak</Text><TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={priceForm.kaynak} onChangeText={(t)=>setPriceForm({...priceForm,kaynak:t})} placeholder="Firma duyurusu / telefon..." />
       <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFactoryPrice}><View style={styles.submitBtnContent}><AppIcon name="content-save-outline" size={20} color="#FFFFFF" /><Text style={styles.submitBtnText}>Fiyatı Kaydet</Text></View></TouchableOpacity>
     </View>}
@@ -95,13 +111,15 @@ export default function FactoryPricesScreen(props: any) {
           <Text style={[styles.factoryName, { color: theme.colors.onSurface }]}>{f.firma}</Text>
         </View>
         {cashPrice ? <View style={[styles.factoryMainPrice, { backgroundColor: theme.colors.primaryContainer }]}>
-          <View><Text style={[styles.factoryPriceLabel, { color: theme.colors.onSurfaceVariant }]}>Peşin fiyat</Text><Text style={[styles.factoryPriceValue, { color: theme.colors.onPrimaryContainer }]}>{formatTL(Number(cashPrice.fiyat)||0)} / KG</Text><Text style={[styles.factoryPriceDate, { color: theme.colors.onSurfaceVariant }]}>{formatDisplayDate(cashPrice.tarih)}</Text></View>
+          <View style={{ flex: 1 }}><Text style={[styles.factoryPriceLabel, { color: theme.colors.onSurfaceVariant }]}>Peşin fiyat</Text><Text style={[styles.factoryPriceValue, { color: theme.colors.onPrimaryContainer }]}>{formatTL(Number(cashPrice.fiyat)||0)} / KG</Text><Text style={[styles.factoryPriceDate, { color: theme.colors.onSurfaceVariant }]}>{formatDisplayDate(cashPrice.tarih)}</Text><PriceDetails price={cashPrice} color={theme.colors.onPrimaryContainer} /></View>
           {isAdmin && <TouchableOpacity style={styles.compactDeleteBtn} onPress={()=>handleDelete('factory-prices', cashPrice._id, 'Fiyat')}><Text style={styles.compactDeleteText}>Sil</Text></TouchableOpacity>}
         </View> : <Text style={[styles.factoryEmptyPrice, { color: theme.colors.onSurfaceVariant }]}>Peşin fiyat girilmemiş.</Text>}
         {otherPrices.map((p:any) => <View key={p._id} style={[styles.factoryDetailRow, { borderTopColor: theme.colors.outline }]}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.factoryDetailLabel, { color: theme.colors.onSurface }]}>{p.fiyatTuru}</Text>
             <Text style={[styles.factoryDetailValue, { color: theme.colors.onSurfaceVariant }]}>{formatTL(Number(p.fiyat)||0)} / KG{p.vadeGun ? ` · ${p.vadeGun} gün` : ''}</Text>
+            <Text style={[local.priceDate, { color: theme.colors.onSurfaceVariant }]}>{formatDisplayDate(p.tarih)}</Text>
+            <PriceDetails price={p} color={theme.colors.onSurfaceVariant} />
           </View>
           {isAdmin && <TouchableOpacity style={styles.compactDeleteBtn} onPress={()=>handleDelete('factory-prices', p._id, 'Fiyat')}><Text style={styles.compactDeleteText}>Sil</Text></TouchableOpacity>}
         </View>)}
@@ -111,6 +129,12 @@ export default function FactoryPricesScreen(props: any) {
 }
 
 const local = StyleSheet.create({
+  multilineInput: { minHeight: 88, paddingTop: 12 },
+  priceDate: { marginTop: 3, fontSize: 12, fontWeight: '600' },
+  priceDetails: { marginTop: 8, gap: 5 },
+  priceDetailLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  priceDetailDot: { width: 5, height: 5, borderRadius: 3, marginTop: 7, opacity: 0.7 },
+  priceDetailText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '600' },
   factoryChips: { gap: 8, paddingBottom: 10 },
   factoryChip: { minHeight: 42, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
   factoryChipText: { fontSize: 13, fontWeight: '800' },

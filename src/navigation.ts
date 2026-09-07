@@ -3,7 +3,7 @@ import { AppIconName } from './components/app-icon';
 export type ActiveTab =
   | 'dashboard' | 'harvest' | 'history' | 'collections' | 'receivables'
   | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings'
-  | 'assistant' | 'creditStore' | 'admin';
+  | 'assistant' | 'creditStore' | 'advertise' | 'admin';
 
 export type DesktopMenuItem = {
   group: string;
@@ -17,6 +17,7 @@ export const getDesktopMenuItems = (isAdmin: boolean): DesktopMenuItem[] => [
   { group: 'GENEL', tab: 'dashboard', icon: 'view-dashboard-outline', label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
   { group: 'GENEL', tab: 'assistant', icon: 'robot-happy-outline', label: 'Çaylık Asistan', helper: 'Çay üretimi için yapay zekâ desteği' },
   { group: 'GENEL', tab: 'creditStore', icon: 'credit-card-outline', label: 'Kredi Yükle', helper: 'Kredi paketleri ve Çaylık Pro' },
+  { group: 'GENEL', tab: 'advertise', icon: 'bullhorn-outline', label: 'Reklam Ver', helper: 'Reklam başvurusu oluştur ve takip et' },
   { group: 'GENEL', tab: 'harvest', icon: 'leaf-circle-outline', label: 'Hasat Ekle', helper: 'Yeni hasat kaydı' },
   { group: 'GENEL', tab: 'history', icon: 'history', label: 'Hasat Geçmişi', helper: 'Eski kayıtları bul ve düzenle' },
   { group: 'ÖDEMELER', tab: 'collections', icon: 'hand-coin-outline', label: 'Ödeme Al', helper: 'Tahsilat işlemleri' },

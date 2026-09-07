@@ -22,6 +22,13 @@ import { useAiAssistant } from '../hooks/useAiAssistant';
 import { useAppData } from '../hooks/useAppData';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { useStorePurchases } from '../hooks/useStorePurchases';
+import {
+  dismissAdTrackingPrompt,
+  getAdTrackingState,
+  hasSeenAdTrackingPrompt,
+  requestAdTrackingConsent,
+  trackTikTokRegistration,
+} from '../services/adTracking';
 import { ActiveTab, getDesktopMenuItems, mobileNavItems } from '../navigation';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
@@ -37,7 +44,10 @@ import MoreScreen from '../screens/MoreScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AssistantScreen from '../screens/AssistantScreen';
 import CreditStoreScreen from '../screens/CreditStoreScreen';
+import AdvertiseScreen from '../screens/AdvertiseScreen';
 import AuthScreen from '../screens/AuthScreen';
+import AdTrackingConsentPrompt from '../components/AdTrackingConsentPrompt';
+import AdMobBanner from '../components/AdMobBanner';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
 const ONBOARDING_STEPS = [
@@ -65,6 +75,8 @@ export default function App() {
   const [operationFeedback, setOperationFeedback] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ endpoint: string; id: string; title: string; status: 'confirming' | 'deleting' | 'error'; message?: string } | null>(null);
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
+  const [adTrackingPromptVisible, setAdTrackingPromptVisible] = useState(false);
+  const [adTrackingPromptBusy, setAdTrackingPromptBusy] = useState(false);
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -204,6 +216,16 @@ export default function App() {
   const aiAssistant = useAiAssistant(currentUser?.userId, authFetch);
   const refreshAssistantWallet = aiAssistant.refreshWallet;
   const storePurchases = useStorePurchases(currentUser?.userId, authFetch, aiAssistant.refreshWallet);
+  const handleRewardedAdEarned = async () => {
+    const response = await authFetch(`${API_URL}/ai/rewarded-ad`, { method: 'POST', headers: getAuthHeaders() });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showOperationFeedback('Ücretsiz Kredi', data?.error || 'Reklam ödülü hesabınıza eklenemedi.', 'error');
+      return;
+    }
+    await aiAssistant.refreshWallet();
+    showOperationFeedback('10 Kredi Kazandınız', 'Reklam ödülü hesabınıza eklendi.', 'success');
+  };
   const backgroundActionsRef = useRef({ fetchData, refreshPendingSyncCount, syncOfflineQueue });
   useEffect(() => {
     backgroundActionsRef.current = { fetchData, refreshPendingSyncCount, syncOfflineQueue };
@@ -289,6 +311,33 @@ export default function App() {
     return () => { active = false; };
   }, [currentUser?.userId]);
 
+  // İlk kullanım rehberi tamamlandıktan sonra reklam ölçümü tercihini bir kez sorarız.
+  // Expo Go ve web gibi native SDK içermeyen ortamlarda hiçbir pencere gösterilmez.
+  useEffect(() => {
+    let active = true;
+    const userId = currentUser?.userId;
+    if (!userId || onboardingStep !== null) {
+      return () => { active = false; };
+    }
+
+    Promise.all([
+      AsyncStorage.getItem(`${ONBOARDING_STORAGE_PREFIX}:${userId}`),
+      hasSeenAdTrackingPrompt(),
+      getAdTrackingState(),
+    ]).then(([onboardingStatus, promptSeen, trackingState]) => {
+      if (!active) return;
+      const canAsk = onboardingStatus === 'done'
+        && !promptSeen
+        && trackingState !== 'unsupported'
+        && trackingState !== 'granted';
+      setAdTrackingPromptVisible(canAsk);
+    }).catch(() => {
+      if (active) setAdTrackingPromptVisible(false);
+    });
+
+    return () => { active = false; };
+  }, [currentUser?.userId, onboardingStep]);
+
   useEffect(() => {
     if (!currentUser) return;
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -353,6 +402,7 @@ export default function App() {
         showAuthFeedback('Giriş Başarısız', authMode === 'login' ? 'Kayıt bulunamadı veya oturum oluşturulamadı.' : 'Profil kaydedildi ancak güvenli oturum oluşturulamadı.');
         return;
       }
+      if (authMode === 'register') void trackTikTokRegistration();
       const userData: UserSession = {
         userId: profile.userId,
         name: profile.name || authName.trim() || 'Üretici',
@@ -453,6 +503,25 @@ export default function App() {
       await AsyncStorage.setItem(`${ONBOARDING_STORAGE_PREFIX}:${userId}`, 'done');
     } catch {
       // Rehber tekrar görünse bile uygulamanın kullanılmasını engelleme.
+    }
+  };
+
+  const allowAdTrackingFromPrompt = async () => {
+    setAdTrackingPromptBusy(true);
+    try {
+      await requestAdTrackingConsent();
+    } finally {
+      setAdTrackingPromptBusy(false);
+      setAdTrackingPromptVisible(false);
+    }
+  };
+
+  const dismissAdTrackingFromPrompt = async () => {
+    setAdTrackingPromptVisible(false);
+    try {
+      await dismissAdTrackingPrompt();
+    } catch {
+      // Tercih depolanamasa da uygulamanın ana akışını kesmeyiz.
     }
   };
 
@@ -1246,6 +1315,15 @@ export default function App() {
               purchasingProductId={storePurchases.purchasingProductId}
               restoring={storePurchases.restoring}
               storeStatus={storePurchases.status}
+              onRewardedAdEarned={handleRewardedAdEarned}
+            />
+          )}
+          {activeTab === 'advertise' && (
+            <AdvertiseScreen
+              token={currentUser.token}
+              credits={aiAssistant.credits}
+              onBuyCredits={() => setActiveTab('creditStore')}
+              onCreditsChanged={aiAssistant.refreshWallet}
             />
           )}
           {/* HASAT EKLE TABI */}
@@ -1354,6 +1432,7 @@ export default function App() {
             <Text style={[styles.assistantFabText, { color: paperTheme.colors.onPrimary }]}>Asistan{aiAssistant.credits !== null ? ` · ${aiAssistant.credits}` : ''}</Text>
           </TouchableOpacity>
         )}
+        {!isDesktop && activeTab !== 'assistant' && <AdMobBanner />}
         {!isDesktop && (
           <View style={[styles.mobileBottomNav, { backgroundColor: paperTheme.colors.surface, borderTopColor: paperTheme.colors.outline }]}>
             {mobileNavItems.map((item) => {
@@ -1424,6 +1503,13 @@ export default function App() {
             </View>
           </View>
         </Modal>
+
+        <AdTrackingConsentPrompt
+          visible={adTrackingPromptVisible}
+          busy={adTrackingPromptBusy}
+          onAllow={() => void allowAdTrackingFromPrompt()}
+          onDismiss={() => void dismissAdTrackingFromPrompt()}
+        />
 
         <Modal
           visible={Boolean(deleteConfirmation)}

@@ -58,6 +58,9 @@ export interface FactoryPriceRecord {
   fiyatTuru?: 'Haftalık' | 'Aylık' | 'Peşin' | 'Vadeli' | string;
   vadeGun?: number | string;
   gecerlilikBaslangic?: string;
+  politika?: string;
+  kaynak?: string;
+  aciklama?: string;
 }
 
 export interface AdRecord {

@@ -6,6 +6,7 @@ import { AppIcon } from '../components/app-icon';
 import { CaylikButton, CaylikSurface } from '../components/caylik-ui';
 import { API_ORIGIN } from '../services/api';
 import type { StoreProductId } from '../services/inAppPurchases';
+import RewardedAdButton from '../components/RewardedAdButton';
 
 export type CreditProductId = StoreProductId;
 
@@ -33,9 +34,10 @@ type Props = {
   purchasingProductId?: CreditProductId | null;
   restoring?: boolean;
   storeStatus?: string;
+  onRewardedAdEarned?: () => Promise<void> | void;
 };
 
-export default function CreditStoreScreen({ credits, onBack, onPurchase, onRestore, prices = {}, purchasingProductId = null, restoring = false, storeStatus = '' }: Props) {
+export default function CreditStoreScreen({ credits, onBack, onPurchase, onRestore, prices = {}, purchasingProductId = null, restoring = false, storeStatus = '', onRewardedAdEarned }: Props) {
   const theme = useTheme();
 
   return (
@@ -63,6 +65,8 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
           </View>
         </View>
       </CaylikSurface>
+
+      {!!onRewardedAdEarned && <CaylikSurface style={local.rewardCard}><View style={local.rewardInner}><View style={{ flex: 1 }}><Text style={[local.freeTitle, { color: theme.colors.onSurface }]}>Ücretsiz kredi kazan</Text><Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Kısa bir reklamı sonuna kadar izleyerek 10 asistan kredisi kazanın.</Text></View><RewardedAdButton onEarned={onRewardedAdEarned} /></View></CaylikSurface>}
 
       <CaylikSurface style={local.proInfoCard}>
         <View style={local.proInfoHeader}>
@@ -122,6 +126,8 @@ const local = StyleSheet.create({
   balanceValue: { fontSize: 21, fontWeight: '900' },
   balanceLabel: { fontSize: 10, fontWeight: '700' },
   freeCard: { marginBottom: 14 },
+  rewardCard: { marginBottom: 14 },
+  rewardInner: { padding: 15, gap: 12 },
   freeInner: { padding: 15, flexDirection: 'row', gap: 12, alignItems: 'center' },
   giftIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   freeTitle: { fontSize: 16, fontWeight: '900', marginBottom: 3 },

@@ -1,9 +1,12 @@
+import { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { PaperProvider } from 'react-native-paper';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AppThemeProvider, useAppTheme } from '@/context/app-theme';
+import { initializeAdTracking } from '@/services/adTracking';
+import { initializeAdMob } from '@/services/adMob';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -21,6 +24,11 @@ function ThemedLayout() {
       border: paperTheme.colors.outline,
     },
   };
+
+  useEffect(() => {
+    initializeAdTracking().catch(() => undefined);
+    initializeAdMob().catch(() => undefined);
+  }, []);
 
   return (
     <PaperProvider theme={paperTheme}>

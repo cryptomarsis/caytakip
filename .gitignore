@@ -1,11 +1,17 @@
 node_modules/
 .npm-cache/
+.gradle-codex/
+.npm-cache/
+.npm-cache-codex/
 .env
 .env.*
 !.env.example
 .expo/
 .idea/
 .gradle-user/
+.gradle-codex/
+.expo-codex/
+.android-codex/
 build/
 dist/
 release/
@@ -19,6 +25,8 @@ mycreds.txt
 *.pem
 *.key
 *.p8
+GoogleService-Info.plist
+google-services.json
 service-account*.json
 secrets/
 src.rar

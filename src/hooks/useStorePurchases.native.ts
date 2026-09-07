@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 
 import type { AuthFetch } from '../services/aiAssistant';
 import { isStoreProductId, type StoreProductId } from '../services/inAppPurchases';
+import { trackTikTokPurchase } from '../services/adTracking';
 
 const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY || 'appl_ZMzoEtiIbrAKPLWMBXJLMTGbFwx';
 const EXPO_GO = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
@@ -16,6 +17,7 @@ export const useStorePurchases = (
 ) => {
   const revenueCatRef = useRef<RevenueCatModule | null>(null);
   const activeUserRef = useRef<string | null>(null);
+  const connectingRef = useRef<Promise<RevenueCatModule> | null>(null);
   const [connected, setConnected] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [prices, setPrices] = useState<Partial<Record<StoreProductId, string>>>({});
@@ -35,6 +37,46 @@ export const useStorePurchases = (
     return offerings;
   }, []);
 
+  const connectStore = useCallback(async () => {
+    if (Platform.OS !== 'ios') throw new Error('Satın alma yalnızca iOS mağazasında kullanılabilir.');
+    if (EXPO_GO) throw new Error('Satın alma Expo Go’da kullanılamaz. TestFlight sürümünü kullanın.');
+    if (!userId) throw new Error('Mağazaya bağlanmak için yeniden giriş yapın.');
+    if (connectingRef.current) return connectingRef.current;
+
+    const connection = (async () => {
+      const revenueCat = await import('react-native-purchases');
+      revenueCatRef.current = revenueCat;
+
+      const isConfigured = await revenueCat.default.isConfigured();
+      if (!isConfigured) {
+        revenueCat.default.configure({ apiKey: REVENUECAT_IOS_KEY, appUserID: userId });
+      } else if (activeUserRef.current !== userId) {
+        await revenueCat.default.logIn(userId);
+      }
+
+      activeUserRef.current = userId;
+      await loadOfferings(revenueCat);
+      setConnected(true);
+      setConfigured(true);
+      setStatus('RevenueCat bağlantısı hazır.');
+      return revenueCat;
+    })();
+
+    connectingRef.current = connection;
+    try {
+      return await connection;
+    } catch (error) {
+      revenueCatRef.current = null;
+      activeUserRef.current = null;
+      setConnected(false);
+      setConfigured(false);
+      setStatus(error instanceof Error ? error.message : 'App Store bağlantısı kurulamadı.');
+      throw error;
+    } finally {
+      if (connectingRef.current === connection) connectingRef.current = null;
+    }
+  }, [loadOfferings, userId]);
+
   useEffect(() => {
     if (Platform.OS !== 'ios' || EXPO_GO || !userId) {
       activeUserRef.current = null;
@@ -44,47 +86,20 @@ export const useStorePurchases = (
       });
       return;
     }
-    let cancelled = false;
-    const connect = async () => {
-      try {
-        const revenueCat = await import('react-native-purchases');
-        if (cancelled) return;
-        revenueCatRef.current = revenueCat;
-        if (!revenueCat.default.isConfigured()) {
-          revenueCat.default.configure({ apiKey: REVENUECAT_IOS_KEY, appUserID: userId });
-        } else if (activeUserRef.current !== userId) {
-          await revenueCat.default.logIn(userId);
-        }
-        if (cancelled) return;
-        activeUserRef.current = userId;
-        setConnected(true);
-        setConfigured(true);
-        await loadOfferings(revenueCat);
-        if (!cancelled) setStatus('RevenueCat bağlantısı hazır.');
-      } catch (error) {
-        if (!cancelled) {
-          setConnected(false);
-          setConfigured(false);
-          setStatus(error instanceof Error ? error.message : 'Satın alma bağlantısı kurulamadı.');
-        }
-      }
-    };
-    void connect();
-    return () => { cancelled = true; };
-  }, [loadOfferings, userId]);
+    void Promise.resolve().then(connectStore).catch(() => undefined);
+  }, [connectStore, userId]);
 
   const purchase = useCallback(async (id: StoreProductId) => {
-    const revenueCat = revenueCatRef.current;
-    if (!revenueCat || !configured || activeUserRef.current !== userId) {
-      Alert.alert('Satın alma hazır değil', 'Mağaza hesabı hazırlanıyor. Lütfen kısa süre sonra tekrar deneyin.');
-      return;
-    }
     setPurchasingProductId(id);
     try {
+      const revenueCat = revenueCatRef.current && configured && activeUserRef.current === userId
+        ? revenueCatRef.current
+        : await connectStore();
       const offerings = await loadOfferings(revenueCat);
       const selectedPackage = offerings.current?.availablePackages.find((item) => item.product.identifier === id);
       if (!selectedPackage) throw new Error('Bu paket şu anda mağazada bulunamadı.');
       await revenueCat.default.purchasePackage(selectedPackage);
+      void trackTikTokPurchase();
       await refreshWallet();
       Alert.alert(
         'Satın alma tamamlandı',
@@ -96,7 +111,7 @@ export const useStorePurchases = (
     } finally {
       setPurchasingProductId(null);
     }
-  }, [configured, loadOfferings, refreshWallet, userId]);
+  }, [configured, connectStore, loadOfferings, refreshWallet, userId]);
 
   const restore = useCallback(async () => {
     const revenueCat = revenueCatRef.current;

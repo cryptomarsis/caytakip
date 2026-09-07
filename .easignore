@@ -1,11 +1,16 @@
 node_modules/
 .git/
+/android/
+/ios/
 .expo/
 .expo-*/
 .expo-iap-verification-check/
 .npm-cache/
 .idea/
 .gradle-user/
+.gradle-codex/
+.expo-codex/
+.android-codex/
 build/
 dist/
 release/

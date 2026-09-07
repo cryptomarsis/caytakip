@@ -5,6 +5,12 @@ import { type ThemePreference, useAppTheme } from '../context/app-theme';
 import { API_ORIGIN, API_URL, fetchWithTimeout } from '../services/api';
 import { styles } from '../styles/styles';
 import { CaylikScreenHeader } from '../components/caylik-ui';
+import {
+  disableAdTracking,
+  getAdTrackingState,
+  requestAdTrackingConsent,
+  type AdTrackingState,
+} from '../services/adTracking';
 
 type Props = {
   currentUser: { token?: string } | null;
@@ -27,6 +33,8 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
   const [feedbackSubject, setFeedbackSubject] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [sendingFeedback, setSendingFeedback] = useState(false);
+  const [adTrackingState, setAdTrackingState] = useState<AdTrackingState>('disabled');
+  const [updatingAdTracking, setUpdatingAdTracking] = useState(false);
 
   useEffect(() => {
     fetchWithTimeout(`${API_URL}/legal/privacy`)
@@ -35,6 +43,32 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
       .catch(() => setPrivacy(null))
       .finally(() => setLoadingPrivacy(false));
   }, []);
+
+  useEffect(() => {
+    getAdTrackingState().then(setAdTrackingState).catch(() => setAdTrackingState('disabled'));
+  }, []);
+
+  const updateAdTracking = async () => {
+    setUpdatingAdTracking(true);
+    try {
+      const nextState = adTrackingState === 'granted'
+        ? await disableAdTracking()
+        : await requestAdTrackingConsent();
+      setAdTrackingState(nextState);
+
+      if (nextState === 'granted') {
+        Alert.alert('Reklam ölçümü', 'Reklam kampanyalarının performans ölçümüne izin verildi.');
+      } else if (nextState === 'denied') {
+        Alert.alert('Reklam ölçümü', 'İzin cihaz ayarlarından kapatılmış. Dilerseniz Ayarlar uygulamasından değiştirebilirsiniz.');
+      } else if (nextState === 'disabled') {
+        Alert.alert('Reklam ölçümü', 'Tercihiniz kaydedildi. TikTok ölçümünü de tamamen kapatmak için uygulamayı kapatıp yeniden açın.');
+      }
+    } catch {
+      Alert.alert('Reklam ölçümü', 'Tercihiniz şu anda güncellenemedi.');
+    } finally {
+      setUpdatingAdTracking(false);
+    }
+  };
 
   const confirmDelete = () => {
     Alert.alert(
@@ -93,6 +127,30 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
         ]}
         style={{ marginTop: 10 }}
       />
+    </View>
+    <View style={[styles.formCard, themeStyles.card]}>
+      <Text style={[styles.formTitle, themeStyles.title]}>Reklam ve kampanya ölçümü</Text>
+      <Text style={[styles.formHelp, themeStyles.body]}>
+        Bu izin, hangi reklam kampanyalarının uygulamaya yeni kullanıcı kazandırdığını anlamamıza yardım eder. Hasat, firma ve alacak bilgileriniz reklam platformlarıyla paylaşılmaz.
+      </Text>
+      {adTrackingState === 'unsupported' ? (
+        <Text style={[styles.listSubText, themeStyles.body]}>Bu ayar yeni uygulama paketinde kullanılabilir.</Text>
+      ) : (
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={[styles.secondaryBtn, { marginTop: 10, backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.primary }]}
+          disabled={updatingAdTracking}
+          onPress={() => void updateAdTracking()}
+        >
+          <Text style={[styles.secondaryBtnText, { color: theme.colors.primary }]}>
+            {updatingAdTracking
+              ? 'GÜNCELLENİYOR...'
+              : adTrackingState === 'granted'
+                ? 'ÖLÇÜM İZNİNİ KAPAT'
+                : 'ÖLÇÜM İZNİ VER'}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
     <View style={[styles.formCard, themeStyles.card]}>
       <Text style={[styles.formTitle, themeStyles.title]}>Verilerim güvende mi?</Text>

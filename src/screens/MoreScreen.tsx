@@ -4,7 +4,7 @@ import { useTheme } from 'react-native-paper';
 import { AppIcon, AppIconName } from '../components/app-icon';
 import { CaylikActionCard, CaylikScreenHeader } from '../components/caylik-ui';
 
-type Tab = 'assistant' | 'creditStore' | 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings';
+type Tab = 'assistant' | 'creditStore' | 'advertise' | 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings';
 type Props = { isAdmin: boolean; onNavigate: (tab: Tab | 'admin') => void };
 type MenuItem = { tab: Tab; label: string; detail: string; icon: AppIconName; tone: string; soft: string };
 
@@ -43,6 +43,10 @@ export default function MoreScreen({ isAdmin, onNavigate }: Props) {
       </View>
 
       <View style={local.accountActions}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reklam ver" style={[local.accountAction, { backgroundColor: theme.colors.tertiaryContainer, borderColor: theme.colors.tertiary }]} onPress={() => onNavigate('advertise')}>
+          <View style={[local.accountIcon, { backgroundColor: theme.colors.tertiary }]}><AppIcon name="bullhorn-outline" size={22} color={theme.colors.onTertiary} /></View>
+          <View style={{ flex: 1 }}><Text style={[local.accountTitle, { color: theme.colors.onTertiaryContainer }]}>Reklam Ver</Text><Text style={[local.advertiseDetail, { color: theme.colors.onSurfaceVariant }]}>Başvuru oluştur, yayın durumunu izle</Text></View><AppIcon name="chevron-right" size={20} color={theme.colors.tertiary} />
+        </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" style={[local.accountAction, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]} onPress={() => onNavigate('creditStore')}>
           <View style={[local.accountIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="wallet-plus-outline" size={22} color={theme.colors.secondary} /></View>
           <Text style={[local.accountTitle, { color: theme.colors.onSurface }]}>Kredi ve Pro</Text><AppIcon name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} />
@@ -86,6 +90,7 @@ const local = StyleSheet.create({
   accountAction: { minHeight: 64, borderRadius: 19, borderWidth: 1, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 11 },
   accountIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   accountTitle: { flex: 1, fontSize: 14, fontWeight: '900' },
+  advertiseDetail: { fontSize: 11, lineHeight: 15, marginTop: 2 },
   adminCard: { borderWidth: 1, borderRadius: 22, padding: 16, marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 13 },
   adminIcon: { width: 52, height: 52, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   adminTitle: { fontSize: 17, fontWeight: '900' },

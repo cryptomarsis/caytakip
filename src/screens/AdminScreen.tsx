@@ -5,6 +5,9 @@ import { styles } from '../styles/styles';
 import { formatTL } from '../utils/format';
 import { CaylikScreenHeader } from '../components/caylik-ui';
 import { useTheme } from 'react-native-paper';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { AppIcon } from '../components/app-icon';
 
 const ADMIN_PAGE_SIZE = 7;
 const sortProducersByName = (items: any[]) => [...items].sort((left, right) =>
@@ -13,7 +16,7 @@ const sortProducersByName = (items: any[]) => [...items].sort((left, right) =>
 
 const imageUrlOf = (value: unknown) => {
   const url = String(value || '').trim();
-  return /^https?:\/\/\S+$/i.test(url) ? url : '';
+  return /^(https?:\/\/\S+|data:image\/(png|jpe?g|webp);base64,)/i.test(url) ? url : '';
 };
 
 function BannerCard({ ad, preview = false }: { ad: any; preview?: boolean }) {
@@ -46,6 +49,17 @@ function BannerCard({ ad, preview = false }: { ad: any; preview?: boolean }) {
 
 export default function AdminScreen(props: any) {
   const theme = useTheme();
+  const chooseBannerImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Fotoğraf izni gerekli', 'Banner görseli seçmek için fotoğraf erişimine izin verin.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (result.canceled || !result.assets[0]?.uri) return;
+    const rendered = await ImageManipulator.manipulateAsync(result.assets[0].uri, [{ resize: { width: 1200 } }], { compress: 0.68, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+    if (rendered.base64) updateAdForm('gorselUrl', `data:image/jpeg;base64,${rendered.base64}`);
+  };
   const { adForm, ads, handleDelete, handleSaveAd, setAdForm, currentUser } = props;
   const [users, setUsers] = useState<any[]>([]);
   const [query, setQuery] = useState('');
@@ -57,6 +71,33 @@ export default function AdminScreen(props: any) {
   const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
   const [summary, setSummary] = useState({ producerCount: 0, totalKg: 0, totalSales: 0, totalPaid: 0, remaining: 0 });
   const [loadError, setLoadError] = useState('');
+  const [adApplications, setAdApplications] = useState<any[]>([]);
+  const [reviewingAdId, setReviewingAdId] = useState('');
+
+  const loadAdApplications = useCallback(async () => {
+    if (!currentUser?.token) return;
+    try {
+      const response = await fetchWithTimeout(`${API_URL}/admin/ad-applications`, { headers: { Authorization: `Bearer ${currentUser.token}` } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Reklam başvuruları yüklenemedi.');
+      setAdApplications(Array.isArray(data.items) ? data.items : []);
+    } catch (error: any) { setLoadError(error.message); }
+  }, [currentUser]);
+
+  const reviewAdApplication = async (item: any, status: 'approved' | 'rejected') => {
+    const perform = async () => {
+      setReviewingAdId(item._id);
+      try {
+        const response = await fetchWithTimeout(`${API_URL}/admin/ad-applications/${item._id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` }, body: JSON.stringify({ status }) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Başvuru sonuçlandırılamadı.');
+        await loadAdApplications();
+        Alert.alert(status === 'approved' ? 'Reklam yayınlandı' : 'Başvuru reddedildi', status === 'approved' ? 'Reklam seçilen süre boyunca banner alanında gösterilecek.' : 'Kullanıcının reklam kredisi iade edildi.');
+      } catch (error: any) { Alert.alert('Reklam Başvurusu', error.message); }
+      finally { setReviewingAdId(''); }
+    };
+    Alert.alert(status === 'approved' ? 'Reklamı onayla' : 'Başvuruyu reddet', status === 'approved' ? `${item.firma} reklamı yayınlansın mı?` : 'Başvuru reddedilecek ve kredi kullanıcıya iade edilecek.', [{ text: 'Vazgeç', style: 'cancel' }, { text: status === 'approved' ? 'Onayla' : 'Reddet', style: status === 'approved' ? 'default' : 'destructive', onPress: () => void perform() }]);
+  };
 
   const loadAdminData = useCallback(async (requestedPage = page) => {
     if (!currentUser?.token) return;
@@ -90,13 +131,18 @@ export default function AdminScreen(props: any) {
     } finally {
       setLoadingUsers(false);
     }
-  }, [activityFilter, cityFilter, currentUser, page, query]);
+  }, [activityFilter, cityFilter, currentUser, page, query, setPage]);
 
   useEffect(() => {
     const hasFilters = Boolean(query || cityFilter || activityFilter !== 'all');
     const timer = setTimeout(() => { loadAdminData(page); }, hasFilters ? 300 : 0);
     return () => clearTimeout(timer);
   }, [currentUser?.token, page, query, cityFilter, activityFilter, loadAdminData]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => { void loadAdApplications(); }, 0);
+    return () => clearTimeout(timer);
+  }, [loadAdApplications]);
 
   const toggleUser = async (user: any, active: boolean) => {
     setBusy(true);
@@ -198,6 +244,23 @@ export default function AdminScreen(props: any) {
       </View>
 
       <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
+        <Text style={[styles.formTitle, { color: theme.colors.onSurface }]}>Reklam Başvuruları</Text>
+        <Text style={[styles.listSubText, { color: theme.colors.onSurfaceVariant }]}>Kullanıcıların krediyle gönderdiği reklamları kontrol ederek yayınlayın veya reddedin.</Text>
+        {adApplications.filter((item) => item.status === 'pending').length === 0 ? <Text style={styles.emptyText}>Bekleyen reklam başvurusu yok.</Text> : adApplications.filter((item) => item.status === 'pending').map((item) => (
+          <View key={item._id} style={[styles.listItem, { display: 'flex', flexDirection: 'column', alignItems: 'stretch', backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outlineVariant, borderWidth: 1 }]}>
+            {!!imageUrlOf(item.gorselUrl) && <Image source={{ uri: item.gorselUrl }} style={{ width: '100%', height: 140, borderRadius: 12, marginBottom: 10 }} resizeMode="cover" />}
+            <Text style={[styles.listTitle, { color: theme.colors.onSurface }]}>{item.baslik}</Text>
+            <Text style={[styles.listSubText, { color: theme.colors.onSurfaceVariant }]}>{item.firma} · {item.durationDays} gün · {item.creditsCharged} kredi</Text>
+            {!!item.aciklama && <Text style={[styles.listSubText, { color: theme.colors.onSurface, marginTop: 7 }]}>{item.aciklama}</Text>}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+              <TouchableOpacity disabled={!!reviewingAdId} onPress={() => void reviewAdApplication(item, 'rejected')} style={[styles.secondaryBtn, { flex: 1, marginTop: 0 }]}><Text style={styles.secondaryBtnText}>REDDET</Text></TouchableOpacity>
+              <TouchableOpacity disabled={!!reviewingAdId} onPress={() => void reviewAdApplication(item, 'approved')} style={[styles.submitBtn, { flex: 1, marginTop: 0 }]}><Text style={styles.submitBtnText}>{reviewingAdId === item._id ? 'İŞLENİYOR...' : 'ONAYLA'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
         <Text style={[styles.formTitle, { color: theme.colors.onSurface }]}>Ana Sayfa Bannerı</Text>
         <Text style={[styles.bannerHelp, { color: theme.colors.onSurfaceVariant }]}>Duyuru kartı yerine ana sayfada görselli, sade bir banner görünür. Sadece firma adı zorunludur.</Text>
 
@@ -207,7 +270,8 @@ export default function AdminScreen(props: any) {
         <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={adForm.baslik} onChangeText={(value) => updateAdForm('baslik', value)} placeholder="Boş bırakırsanız firma adı kullanılır" />
         <Text style={styles.label}>Görsel bağlantısı (isteğe bağlı)</Text>
         <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={adForm.gorselUrl} onChangeText={(value) => updateAdForm('gorselUrl', value)} placeholder="https://site.com/banner.jpg" autoCapitalize="none" keyboardType="url" />
-        <Text style={styles.bannerHelp}>Görselin herkesin açabildiği bir internet bağlantısı olması gerekir. Bağlantı eklenmezse uygulama sade yeşil bir banner kullanır.</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => void chooseBannerImage()} style={[styles.secondaryBtn, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }]}><AppIcon name="image-plus" size={20} color={theme.colors.primary} /><Text style={styles.secondaryBtnText}>TELEFONDAN FOTOĞRAF SEÇ</Text></TouchableOpacity>
+        <Text style={styles.bannerHelp}>İsterseniz bağlantı yapıştırın, isterseniz telefondan fotoğraf seçin. Görsel eklenmezse sade yeşil alan kullanılır.</Text>
         <Text style={styles.label}>Kısa açıklama (isteğe bağlı)</Text>
         <TextInput style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]} placeholderTextColor={theme.colors.onSurfaceVariant} value={adForm.aciklama} onChangeText={(value) => updateAdForm('aciklama', value)} placeholder="Örn: Güncel yaş çay alım fiyatları" multiline />
         <Text style={styles.label}>Tıklanınca açılacak bağlantı (isteğe bağlı)</Text>

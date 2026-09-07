@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
-import { Image, Linking, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import AdMobNativeCard from '../components/AdMobNativeCard';
+import { Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 
 import { AppIcon } from '../components/app-icon';
@@ -14,7 +15,7 @@ import { caylikDesign } from '../context/app-theme';
 import { AdRecord, HarvestRecord } from '../types';
 import { formatDisplayDate, formatTL, netTotalOf, remainingTotalOf, toServerDate } from '../utils/format';
 
-type DashboardDestination = 'assistant' | 'harvest' | 'history' | 'collections' | 'receivables' | 'expense' | 'prices' | 'reports';
+type DashboardDestination = 'assistant' | 'advertise' | 'harvest' | 'history' | 'collections' | 'receivables' | 'expense' | 'prices' | 'reports';
 
 type DashboardProps = {
   ads: AdRecord[];
@@ -37,7 +38,7 @@ const MONTH_NAMES = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', '
 
 const imageUrlOf = (value: unknown) => {
   const url = String(value || '').trim();
-  return /^https?:\/\/\S+$/i.test(url) ? url : '';
+  return /^(https?:\/\/\S+|data:image\/(png|jpe?g|webp);base64,)/i.test(url) ? url : '';
 };
 
 const actionUrlOf = (ad: AdRecord) => {
@@ -56,12 +57,12 @@ const dateTimestamp = (value: unknown) => {
   return 0;
 };
 
-function SponsorBanner({ ad }: { ad: AdRecord }) {
+function SponsorBanner({ ad, onPress, width }: { ad: AdRecord; onPress: () => void; width?: number }) {
   const theme = useTheme();
   const imageUrl = imageUrlOf(ad.gorselUrl);
-  const actionUrl = actionUrlOf(ad);
   const title = String(ad.baslik || ad.firma || 'Çaylık duyurusu').trim();
   const firm = String(ad.firma || '').trim();
+  const description = String(ad.aciklama || '').trim();
   const content = (
     <>
       {imageUrl ? (
@@ -72,14 +73,51 @@ function SponsorBanner({ ad }: { ad: AdRecord }) {
       <View style={local.bannerCopy}>
         <Text style={[local.bannerEyebrow, { color: theme.colors.primary }]}>{String(ad.kategori || '').toLocaleLowerCase('tr-TR') === 'duyuru' ? 'DUYURU' : 'SPONSORLU'}</Text>
         <Text numberOfLines={2} style={[local.bannerTitle, { color: theme.colors.onSurface }]}>{title}</Text>
+        {!!description && <Text numberOfLines={2} style={[local.bannerDescription, { color: theme.colors.onSurfaceVariant }]}>{description}</Text>}
         {!!firm && <Text numberOfLines={1} style={[local.bannerDetail, { color: theme.colors.onSurfaceVariant }]}>{firm}</Text>}
       </View>
-      {!!actionUrl && <AppIcon name="arrow-top-right" size={20} color={theme.colors.primary} />}
+      <AppIcon name="chevron-right" size={22} color={theme.colors.primary} />
     </>
   );
-  const style = [local.banner, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }];
-  if (!actionUrl) return <View style={style}>{content}</View>;
-  return <Pressable accessibilityRole="link" accessibilityLabel={`${title} bağlantısını aç`} onPress={() => void Linking.openURL(actionUrl).catch(() => undefined)} style={({ pressed }) => [style, pressed && local.pressed]}>{content}</Pressable>;
+  const style = [local.banner, width ? { width } : null, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }];
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${title} ayrıntılarını aç`} onPress={onPress} style={({ pressed }) => [style, pressed && local.pressed]}>{content}</Pressable>;
+}
+
+function SponsorCarousel({ ads }: { ads: AdRecord[] }) {
+  const theme = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [selected, setSelected] = useState<AdRecord | null>(null);
+  const cardWidth = Math.min(Math.max(viewportWidth - 40, 280), caylikDesign.contentMaxWidth);
+  if (!ads.length) return null;
+  const selectedImage = selected ? imageUrlOf(selected.gorselUrl) : '';
+  const selectedAction = selected ? actionUrlOf(selected) : '';
+  return <>
+    <ScrollView
+      horizontal
+      pagingEnabled
+      snapToInterval={cardWidth + caylikDesign.spacing.sm}
+      decelerationRate="fast"
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={local.bannerTrack}
+      onMomentumScrollEnd={(event) => setActiveIndex(Math.round(event.nativeEvent.contentOffset.x / (cardWidth + caylikDesign.spacing.sm)))}
+    >
+      {ads.map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} width={cardWidth} onPress={() => setSelected(ad)} />)}
+    </ScrollView>
+    {ads.length > 1 && <View style={local.bannerDots}>{ads.map((ad, index) => <View key={ad._id || index} style={[local.bannerDot, { backgroundColor: index === activeIndex ? theme.colors.primary : theme.colors.outlineVariant }, index === activeIndex && local.bannerDotActive]} />)}</View>}
+    <Modal visible={Boolean(selected)} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
+      <View style={local.modalBackdrop}>
+        <View style={[local.adModal, { backgroundColor: theme.colors.surface }]}>
+          <View style={local.modalHeader}><Text style={[local.modalEyebrow, { color: theme.colors.primary }]}>DUYURU DETAYI</Text><Pressable accessibilityRole="button" accessibilityLabel="Detayı kapat" onPress={() => setSelected(null)} style={local.modalClose}><AppIcon name="close" size={24} color={theme.colors.onSurface} /></Pressable></View>
+          {!!selectedImage && <Image source={{ uri: selectedImage }} style={local.modalImage} resizeMode="cover" />}
+          <Text style={[local.modalTitle, { color: theme.colors.onSurface }]}>{selected?.baslik || selected?.firma}</Text>
+          {!!selected?.firma && <Text style={[local.modalFirm, { color: theme.colors.primary }]}>{selected.firma}</Text>}
+          {!!selected?.aciklama && <ScrollView style={local.modalBodyScroll}><Text style={[local.modalBody, { color: theme.colors.onSurfaceVariant }]}>{selected.aciklama}</Text></ScrollView>}
+          {!!selectedAction && <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(selectedAction).catch(() => undefined)} style={[local.modalAction, { backgroundColor: theme.colors.primary }]}><Text style={[local.modalActionText, { color: theme.colors.onPrimary }]}>İletişime geç / Ayrıntıyı aç</Text><AppIcon name="arrow-top-right" size={19} color={theme.colors.onPrimary} /></Pressable>}
+        </View>
+      </View>
+    </Modal>
+  </>;
 }
 
 function AssistantEntry({ credits, onPress }: { credits?: number | null; onPress: () => void }) {
@@ -143,7 +181,7 @@ export default function DashboardScreen({
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   return (
     <View style={[local.screen, { maxWidth: caylikDesign.contentMaxWidth }]}>
-      {ads.filter((ad) => ad.slot === 'dashboard_top').slice(0, 1).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
+      <SponsorCarousel ads={ads.filter((ad) => ad.slot === 'dashboard_top')} />
 
       <View style={[local.summaryCard, caylikDesign.shadow.soft, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant, shadowColor: theme.colors.shadow }]}>
         <View style={local.summaryHeader}><View style={[local.summaryIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="leaf" size={21} color={theme.colors.primary} /></View><Text style={[local.summaryTitle, { color: theme.colors.onSurface }]}>Sezon durumunuz</Text></View>
@@ -157,7 +195,15 @@ export default function DashboardScreen({
         </View>
       </View>
 
+      <AdMobNativeCard />
+
       <AssistantEntry credits={assistantCredits} onPress={() => onNavigate('assistant')} />
+
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reklam ver" activeOpacity={0.82} onPress={() => onNavigate('advertise')} style={[local.advertiseCard, { backgroundColor: theme.colors.secondaryContainer, borderColor: theme.colors.secondary }]}>
+        <View style={[local.advertiseIcon, { backgroundColor: theme.colors.secondary }]}><AppIcon name="bullhorn-outline" size={24} color={theme.colors.onSecondary} /></View>
+        <View style={{ flex: 1 }}><Text style={[local.advertiseTitle, { color: theme.colors.onSecondaryContainer }]}>Reklam Ver</Text><Text style={[local.advertiseText, { color: theme.colors.onSurfaceVariant }]}>Markanızı Çaylık kullanıcılarına tanıtın</Text></View>
+        <View style={[local.advertiseAction, { backgroundColor: theme.colors.surface }]}><Text style={{ color: theme.colors.secondary, fontWeight: '900' }}>Başla</Text><AppIcon name="chevron-right" size={18} color={theme.colors.secondary} /></View>
+      </TouchableOpacity>
 
       <DashboardSectionHeader title="Son teslimatlar" detail="En son eklenen hasat kayıtları" actionLabel="Tümünü gör" onAction={() => onNavigate('history')} />
       {recentHarvests.length === 0 ? <DashboardEmptyState icon="leaf-off" text="Henüz teslimat kaydı bulunmuyor." /> : recentHarvests.map((item, index) => {
@@ -194,7 +240,7 @@ export default function DashboardScreen({
 
       <Pressable accessibilityRole="button" accessibilityLabel="Yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.floatingAdd, caylikDesign.shadow.soft, { backgroundColor: theme.colors.primary, shadowColor: theme.colors.shadow }, pressed && local.pressed]}><AppIcon name="plus" size={24} color={theme.colors.onPrimary} /><Text style={[local.floatingAddText, { color: theme.colors.onPrimary }]}>Yeni Hasat</Text></Pressable>
 
-      {ads.filter((ad) => ad.slot === 'dashboard_middle').slice(0, 1).map((ad, index) => <SponsorBanner key={ad._id || index} ad={ad} />)}
+      <SponsorCarousel ads={ads.filter((ad) => ad.slot === 'dashboard_middle')} />
       <View style={{ height: compact ? caylikDesign.spacing.md : caylikDesign.spacing.xl }} />
     </View>
   );
@@ -211,6 +257,11 @@ const local = StyleSheet.create({
   summaryHeader: { flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm, marginBottom: caylikDesign.spacing.md },
   summaryIcon: { width: 40, height: 40, borderRadius: caylikDesign.radius.sm, alignItems: 'center', justifyContent: 'center' },
   summaryTitle: { fontSize: caylikDesign.type.bodyLarge, fontWeight: '900' },
+  advertiseCard: { minHeight: 84, borderWidth: 1, borderRadius: 22, padding: 14, marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  advertiseIcon: { width: 48, height: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  advertiseTitle: { fontSize: 16, fontWeight: '900' },
+  advertiseText: { fontSize: 12, lineHeight: 17, marginTop: 3 },
+  advertiseAction: { minHeight: 38, borderRadius: 13, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 3 },
   primaryMetrics: { flexDirection: 'row', gap: caylikDesign.spacing.sm },
   primaryMetric: { flex: 1, minWidth: 0, paddingVertical: caylikDesign.spacing.sm },
   primaryMetricBorder: { borderLeftWidth: 1, paddingLeft: caylikDesign.spacing.md },
@@ -220,13 +271,30 @@ const local = StyleSheet.create({
   secondaryMetric: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.xs },
   secondaryLabel: { fontSize: 10, fontWeight: '800' },
   secondaryValue: { marginTop: 2, fontSize: 14, fontWeight: '900' },
-  banner: { minHeight: 88, borderRadius: caylikDesign.radius.lg, borderWidth: 1, padding: caylikDesign.spacing.sm, marginBottom: caylikDesign.spacing.md, flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm },
+  bannerTrack: { gap: caylikDesign.spacing.sm },
+  banner: { minHeight: 112, borderRadius: caylikDesign.radius.lg, borderWidth: 1, padding: caylikDesign.spacing.sm, flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm },
   bannerImage: { width: 64, height: 64, borderRadius: caylikDesign.radius.md },
   bannerMark: { width: 52, height: 52, borderRadius: caylikDesign.radius.md, alignItems: 'center', justifyContent: 'center' },
   bannerCopy: { flex: 1 },
   bannerEyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   bannerTitle: { marginTop: 3, fontSize: caylikDesign.type.bodyLarge, lineHeight: 20, fontWeight: '900' },
+  bannerDescription: { marginTop: 4, fontSize: caylikDesign.type.caption, lineHeight: 17, fontWeight: '600' },
   bannerDetail: { marginTop: 3, fontSize: caylikDesign.type.caption, fontWeight: '600' },
+  bannerDots: { flexDirection: 'row', alignSelf: 'center', gap: 6, marginTop: 8, marginBottom: caylikDesign.spacing.md },
+  bannerDot: { width: 7, height: 7, borderRadius: 4 },
+  bannerDotActive: { width: 20 },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
+  adModal: { maxHeight: '86%', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: caylikDesign.spacing.lg, paddingBottom: 34 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1.1 },
+  modalClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  modalImage: { width: '100%', height: 210, borderRadius: caylikDesign.radius.lg, marginTop: caylikDesign.spacing.sm },
+  modalTitle: { marginTop: caylikDesign.spacing.md, fontSize: 24, lineHeight: 30, fontWeight: '900' },
+  modalFirm: { marginTop: 5, fontSize: 15, fontWeight: '800' },
+  modalBodyScroll: { marginTop: caylikDesign.spacing.md, flexGrow: 0 },
+  modalBody: { fontSize: 16, lineHeight: 24, fontWeight: '500' },
+  modalAction: { minHeight: 52, borderRadius: caylikDesign.radius.md, marginTop: caylikDesign.spacing.lg, paddingHorizontal: caylikDesign.spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  modalActionText: { fontSize: 15, fontWeight: '900' },
   hero: { minHeight: 188, borderRadius: 30, padding: caylikDesign.spacing.xl, overflow: 'hidden', justifyContent: 'space-between' },
   heroDecor: { position: 'absolute', width: 190, height: 190, borderRadius: caylikDesign.radius.pill, right: -70, top: -72, opacity: 0.12 },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm },

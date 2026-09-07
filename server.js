@@ -8,6 +8,7 @@ const path = require('path');
 const { AppStoreServerAPIClient, Environment } = require('@apple/app-store-server-library');
 const { assessReceiptConfidence } = require('./server/receiptConfidence');
 const { createAdminMetricPipeline, getAdminProducerFilter, metricKey, numericValue, toAdminProducer } = require('./server/adminMetrics');
+const { AD_CAMPAIGN_PACKAGES, getAdCampaignCredits, isAdContentAllowed } = require('./server/adCampaign');
 
 const app = express();
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
@@ -458,7 +459,7 @@ const FeedbackSchema = new mongoose.Schema({
 const AiCreditTransactionSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   requestId: { type: String, required: true },
-  type: { type: String, enum: ['welcome', 'assistant', 'purchase', 'refund', 'admin'], required: true },
+  type: { type: String, enum: ['welcome', 'assistant', 'purchase', 'refund', 'admin', 'rewarded_ad', 'ad_campaign'], required: true },
   status: { type: String, enum: ['pending', 'reserved', 'completed', 'failed'], default: 'completed', index: true },
   amount: { type: Number, required: true },
   reservedCredits: { type: Number, default: 0 },
@@ -541,12 +542,33 @@ const AdSchema = new mongoose.Schema({
   userPhone: String
 }, { timestamps: true });
 
+const AdApplicationSchema = new mongoose.Schema({
+  userId: { type: String, required: true, index: true },
+  userPhone: { type: String, default: '' },
+  firma: { type: String, required: true, trim: true, maxlength: 100 },
+  baslik: { type: String, required: true, trim: true, maxlength: 100 },
+  aciklama: { type: String, default: '', trim: true, maxlength: 1000 },
+  telefon: { type: String, default: '', trim: true, maxlength: 40 },
+  link: { type: String, default: '', trim: true, maxlength: 500 },
+  gorselUrl: { type: String, default: '' },
+  slot: { type: String, enum: ['dashboard_top', 'dashboard_middle'], default: 'dashboard_top' },
+  durationDays: { type: Number, enum: [7, 14, 30], required: true },
+  creditsCharged: { type: Number, required: true, min: 1 },
+  status: { type: String, enum: ['pending', 'approved', 'rejected', 'ended'], default: 'pending', index: true },
+  adminNote: { type: String, default: '', maxlength: 500 },
+  reviewedBy: { type: String, default: '' },
+  reviewedAt: { type: Date, default: null },
+  publishedAdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ad', default: null }
+}, { timestamps: true });
+AdApplicationSchema.index({ status: 1, createdAt: -1 });
+
 const Harvest = mongoose.model('Harvest', HarvestSchema);
 const Payment = mongoose.model('Payment', PaymentSchema);
 const Expense = mongoose.model('Expense', ExpenseSchema);
 const Garden = mongoose.model('Garden', GardenSchema);
 const FactoryPrice = mongoose.model('FactoryPrice', FactoryPriceSchema);
 const Ad = mongoose.model('Ad', AdSchema);
+const AdApplication = mongoose.model('AdApplication', AdApplicationSchema);
 const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
 const Feedback = mongoose.model('Feedback', FeedbackSchema);
 
@@ -881,6 +903,8 @@ app.delete('/api/users/me', requireAuth, async (req, res) => {
       Session.deleteMany({ userId: auth.userId }),
       IdempotencyRecord.deleteMany({ userId: auth.userId }),
       OtpChallenge.deleteMany({ phone: auth.phone }),
+      AdApplication.deleteMany({ userId: auth.userId }),
+      Ad.deleteMany({ userId: auth.userId }),
       AiCreditTransaction.deleteMany({ userId: auth.userId }),
       UserProfile.deleteOne({ userId: auth.userId })
     ]);
@@ -1303,6 +1327,28 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
     return res.status(500).json({ error: 'Webhook processing failed' });
   } finally {
     await session.endSession();
+  }
+});
+
+app.post('/api/ai/rewarded-ad', requireAuth, async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+    const now = new Date();
+    const dayKey = now.toISOString().slice(0, 10);
+    const todayStart = new Date(`${dayKey}T00:00:00.000Z`);
+    const dailyCount = await AiCreditTransaction.countDocuments({ userId, type: 'rewarded_ad', status: 'completed', createdAt: { $gte: todayStart } });
+    if (dailyCount >= 3) return res.status(429).json({ error: 'Bugünkü ücretsiz reklam kredisi sınırına ulaştınız.', code: 'DAILY_REWARD_LIMIT' });
+    const requestId = `rewarded-ad:${userId}:${dayKey}:${dailyCount + 1}`;
+    const existing = await AiCreditTransaction.findOne({ userId, requestId }).lean();
+    if (existing) return res.json({ credits: Number(existing.balanceAfter || 0), creditsGranted: 0, replayed: true });
+    const profile = await UserProfile.findOneAndUpdate({ userId }, { $inc: { aiCredits: 10 } }, { returnDocument: 'after' }).select('aiCredits').lean();
+    if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
+    await AiCreditTransaction.create({ userId, requestId, type: 'rewarded_ad', status: 'completed', amount: 10, balanceAfter: Number(profile.aiCredits || 0), description: 'Ödüllü reklam kredisi' });
+    res.json({ credits: Number(profile.aiCredits || 0), creditsGranted: 10 });
+  } catch (error) {
+    if (error?.code === 11000) return res.status(409).json({ error: 'Bu reklam ödülü daha önce işlendi.' });
+    console.error('REWARDED AD CREDIT ERROR:', error.message);
+    res.status(500).json({ error: 'Reklam kredisi hesaba eklenemedi.' });
   }
 });
 
@@ -2220,7 +2266,8 @@ app.delete('/api/factory-prices/:id', requireAuth, requireAdmin, async (req, res
 app.get('/api/ads', requireAuth, async (req, res) => {
   try {
     const data = await Ad.find({ aktif: true }).sort({ createdAt: -1 });
-    res.json(data);
+    const now = Date.now();
+    res.json(data.filter((item) => !item.bitis || Number.isNaN(Date.parse(item.bitis)) || Date.parse(item.bitis) >= now));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2254,6 +2301,110 @@ app.delete('/api/ads/:id', requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/ad-applications/mine', requireAuth, async (req, res) => {
+  try {
+    const items = await AdApplication.find({ userId: req.auth.userId }).sort({ createdAt: -1 }).limit(50).lean();
+    res.json({ items, packages: AD_CAMPAIGN_PACKAGES });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/ad-applications', requireAuth, async (req, res) => {
+  const durationDays = Number(req.body.durationDays);
+  const creditsRequired = getAdCampaignCredits(durationDays);
+  const firma = String(req.body.firma || '').trim();
+  const baslik = String(req.body.baslik || '').trim();
+  const aciklama = String(req.body.aciklama || '').trim();
+  const gorselUrl = String(req.body.gorselUrl || '').trim();
+  if (req.body.acceptedRules !== true) return res.status(400).json({ error: 'Reklam yayın kurallarını kabul etmeniz gerekir.' });
+  if (!creditsRequired) return res.status(400).json({ error: 'Geçerli bir reklam süresi seçin.' });
+  if (!firma || !baslik) return res.status(400).json({ error: 'Firma ve reklam başlığı zorunludur.' });
+  if (!aciklama && !gorselUrl) return res.status(400).json({ error: 'Açıklama veya reklam görselinden en az birini ekleyin.' });
+  if (!isAdContentAllowed(firma, baslik, aciklama)) return res.status(400).json({ error: 'Bu reklam içeriği Çaylık yayın kurallarına uygun değil.' });
+
+  let charged = false;
+  let createdApplicationId = null;
+  try {
+    const wallet = await UserProfile.findOneAndUpdate(
+      { userId: req.auth.userId, aiCredits: { $gte: creditsRequired } },
+      { $inc: { aiCredits: -creditsRequired } },
+      { returnDocument: 'after' }
+    ).select('aiCredits').lean();
+    if (!wallet) {
+      const current = await UserProfile.findOne({ userId: req.auth.userId }).select('aiCredits').lean();
+      return res.status(402).json({ error: `Bu paket için ${creditsRequired} kredi gerekiyor.`, code: 'INSUFFICIENT_CREDITS', credits: Number(current?.aiCredits || 0), requiredCredits: creditsRequired });
+    }
+    charged = true;
+    const item = await AdApplication.create({
+      userId: req.auth.userId, userPhone: req.auth.phone,
+      firma, baslik, aciklama,
+      telefon: String(req.body.telefon || '').trim(), link: String(req.body.link || '').trim(), gorselUrl,
+      durationDays, creditsCharged: creditsRequired, status: 'pending', slot: 'dashboard_top'
+    });
+    createdApplicationId = item._id;
+    await AiCreditTransaction.create({
+      userId: req.auth.userId, requestId: `ad-application:${item._id}`, type: 'ad_campaign', status: 'completed',
+      amount: -creditsRequired, balanceAfter: Number(wallet.aiCredits || 0), description: `${durationDays} günlük reklam başvurusu`
+    });
+    res.status(201).json({ item, credits: Number(wallet.aiCredits || 0) });
+  } catch (err) {
+    if (createdApplicationId) await AdApplication.deleteOne({ _id: createdApplicationId }).catch(() => undefined);
+    if (charged) {
+      const wallet = await UserProfile.findOneAndUpdate({ userId: req.auth.userId }, { $inc: { aiCredits: creditsRequired } }, { returnDocument: 'after' }).select('aiCredits').lean().catch(() => null);
+      await AiCreditTransaction.create({
+        userId: req.auth.userId, requestId: `ad-create-refund:${createdApplicationId || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type: 'refund', status: 'completed',
+        amount: creditsRequired, balanceAfter: Number(wallet?.aiCredits || 0), description: 'Oluşturulamayan reklam başvurusu kredi iadesi'
+      }).catch(() => undefined);
+    }
+    res.status(400).json({ error: err.message || 'Reklam başvurusu oluşturulamadı.' });
+  }
+});
+
+app.get('/api/admin/ad-applications', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const filter = ['pending', 'approved', 'rejected', 'ended'].includes(status) ? { status } : {};
+    const items = await AdApplication.find(filter).sort({ createdAt: -1 }).limit(200).lean();
+    res.json({ items });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/admin/ad-applications/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const decision = String(req.body.status || '').trim();
+    if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'Onay veya ret kararı seçin.' });
+    const application = await AdApplication.findById(req.params.id);
+    if (!application) return res.status(404).json({ error: 'Reklam başvurusu bulunamadı.' });
+    if (application.status !== 'pending') return res.status(409).json({ error: 'Bu başvuru daha önce sonuçlandırılmış.' });
+
+    if (decision === 'approved') {
+      const start = new Date();
+      const end = new Date(start.getTime() + application.durationDays * 86400000);
+      const ad = await Ad.create({
+        slot: application.slot, firma: application.firma, baslik: application.baslik,
+        aciklama: application.aciklama, telefon: application.telefon, link: application.link,
+        gorselUrl: application.gorselUrl, aktif: true,
+        baslangic: start.toISOString(), bitis: end.toISOString(),
+        userId: application.userId, userPhone: application.userPhone
+      });
+      application.publishedAdId = ad._id;
+    } else {
+      const wallet = await UserProfile.findOneAndUpdate(
+        { userId: application.userId }, { $inc: { aiCredits: application.creditsCharged } }, { returnDocument: 'after' }
+      ).select('aiCredits').lean();
+      await AiCreditTransaction.create({
+        userId: application.userId, requestId: `ad-refund:${application._id}`, type: 'refund', status: 'completed',
+        amount: application.creditsCharged, balanceAfter: Number(wallet?.aiCredits || 0), description: 'Reddedilen reklam başvurusu kredi iadesi'
+      });
+    }
+    application.status = decision;
+    application.adminNote = String(req.body.adminNote || '').trim();
+    application.reviewedBy = req.auth.userId;
+    application.reviewedAt = new Date();
+    await application.save();
+    res.json({ item: application });
+  } catch (err) { res.status(400).json({ error: err.message || 'Başvuru sonuçlandırılamadı.' }); }
 });
 
 // EXPENSE ROUTES
@@ -2492,10 +2643,10 @@ app.patch('/api/admin/users/:id/status', requireAuth, requireAdmin, async (req, 
 
 app.get('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases] = await Promise.all([
-      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
+    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases] = await Promise.all([
+      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AdApplication.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
     ]);
-    res.json({ version: 'V18', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases });
+    res.json({ version: 'V19', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2503,7 +2654,7 @@ app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
     const models = [
-      [UserProfile, body.users], [Harvest, body.harvests], [Payment, body.payments], [Expense, body.expenses], [Garden, body.gardens], [FactoryPrice, body.factoryPrices], [Ad, body.ads], [AiCreditTransaction, body.aiCreditTransactions], [InAppPurchase, body.inAppPurchases]
+      [UserProfile, body.users], [Harvest, body.harvests], [Payment, body.payments], [Expense, body.expenses], [Garden, body.gardens], [FactoryPrice, body.factoryPrices], [Ad, body.ads], [AdApplication, body.adApplications], [AiCreditTransaction, body.aiCreditTransactions], [InAppPurchase, body.inAppPurchases]
     ];
     let restored = 0;
     for (const [Model, rows] of models) {
@@ -2533,10 +2684,10 @@ app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
 
 const runAutomaticBackup = async () => {
   try {
-    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases] = await Promise.all([
-      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
+    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases] = await Promise.all([
+      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AdApplication.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
     ]);
-    const payload = { version: 'V18', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, aiCreditTransactions, inAppPurchases };
+    const payload = { version: 'V19', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases };
     if (BACKUP_WEBHOOK_URL) {
       const encrypted = createEncryptedBackup(payload);
       if (!encrypted) throw new Error('Dış yedek için BACKUP_ENCRYPTION_KEY zorunludur.');
