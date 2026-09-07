@@ -61,7 +61,7 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
       } else if (nextState === 'denied') {
         Alert.alert('Reklam ölçümü', 'İzin cihaz ayarlarından kapatılmış. Dilerseniz Ayarlar uygulamasından değiştirebilirsiniz.');
       } else if (nextState === 'disabled') {
-        Alert.alert('Reklam ölçümü', 'Tercihiniz kaydedildi. TikTok ölçümünü de tamamen kapatmak için uygulamayı kapatıp yeniden açın.');
+        Alert.alert('Reklam ölçümü', 'Reklam ve kampanya ölçümü tercihiniz kaydedildi.');
       }
     } catch {
       Alert.alert('Reklam ölçümü', 'Tercihiniz şu anda güncellenemedi.');
