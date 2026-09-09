@@ -669,6 +669,12 @@ const buildUserFilter = (req) => {
 
 // --- ROUTES ---
 
+// AdMob, App Store kaydindaki gelistirici alan adinin kokunde bu dosyayi arar.
+// Bu rota veritabani ve kimlik dogrulama gerektirmeden duz metin dondurmelidir.
+app.get('/app-ads.txt', (req, res) => {
+  res.type('text/plain').send('google.com, pub-4870931624363029, DIRECT, f08c47fec0942fa0\n');
+});
+
 app.get('/api/health/live', (req, res) => res.json({ ok: true, service: 'cay-ureticisi-takip' }));
 app.get('/api/health', (req, res) => {
   const databaseReady = isDatabaseReady();
