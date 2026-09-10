@@ -362,6 +362,8 @@ const HarvestSchema = new mongoose.Schema({
   aciklama: String,
   bahce: String,
   receiptFingerprint: { type: String, default: undefined },
+  qualityFlags: [{ type: String }],
+  adminMetricsExcluded: { type: Boolean, default: false },
   
   // Vadeli Takip İçin Alanlar
   isVadeli: { type: Boolean, default: false },
@@ -440,7 +442,8 @@ const UserProfileSchema = new mongoose.Schema({
   pinSalt: { type: String, select: false },
   loginFailures: { type: Number, default: 0 },
   loginLockedUntil: { type: Date, default: null },
-  role: { type: String, enum: ['admin', 'user'], default: 'user' },
+  role: { type: String, enum: ['admin', 'manager', 'user'], default: 'user' },
+  adminPermissions: [{ type: String, enum: ['view_metrics', 'manage_users', 'manage_prices', 'manage_ads'] }],
   active: { type: Boolean, default: true },
   city: { type: String, trim: true, default: '' },
   lastActiveAt: { type: Date, default: null, index: true },
@@ -594,9 +597,21 @@ const requireAuth = (req, res, next) => {
 };
 
 const requireAdmin = (req, res, next) => {
-  if (req.auth?.role !== 'admin') return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
+  if (req.auth?.role === 'admin') return next();
+  if (req.auth?.role !== 'manager') return res.status(403).json({ error: 'Bu işlemi sadece yönetici yapabilir.' });
+  const path = String(req.originalUrl || req.path || '');
+  let requiredPermission = '';
+  if (path.includes('/factory-prices')) requiredPermission = 'manage_prices';
+  else if (path.includes('/ads') || path.includes('/ad-applications')) requiredPermission = 'manage_ads';
+  else if (path.includes('/admin/users/') && path.includes('/status')) requiredPermission = 'manage_users';
+  else if (path.includes('/admin/producers') || path.includes('/admin/summary') || path.includes('/flagged-harvests') || path.includes('/admin/harvests/')) requiredPermission = 'view_metrics';
+  if (!requiredPermission || !req.auth.adminPermissions?.includes(requiredPermission)) {
+    return res.status(403).json({ error: 'Bu işlem için yönetici izniniz bulunmuyor.' });
+  }
   next();
 };
+
+const ADMIN_PERMISSION_KEYS = ['view_metrics', 'manage_users', 'manage_prices', 'manage_ads'];
 
 const publicRateWindows = new Map();
 const limitPublicUsage = (scope, maxRequests, windowMs) => (req, res, next) => {
@@ -710,13 +725,14 @@ const issueTokens = async (profile) => {
     userId: profile.userId,
     phone: profile.phone,
     role: profile.role,
+    adminPermissions: Array.isArray(profile.adminPermissions) ? profile.adminPermissions : [],
     name: profile.name,
     exp: Math.floor(Date.now() / 1000) + ACCESS_TTL_SECONDS
   });
   const refreshToken = makeRefreshToken();
   await Session.create({ tokenHash: hashRefreshToken(refreshToken), userId: profile.userId, expiresAt: new Date(Date.now() + REFRESH_TTL_MS) });
   UserProfile.updateOne({ _id: profile._id }, { $set: { lastActiveAt: new Date() } }).catch(() => {});
-  return { token: accessToken, refreshToken, userId: profile.userId, phone: profile.phone, name: profile.name, role: profile.role };
+  return { token: accessToken, refreshToken, userId: profile.userId, phone: profile.phone, name: profile.name, role: profile.role, adminPermissions: Array.isArray(profile.adminPermissions) ? profile.adminPermissions : [] };
 };
 
 const findLegacyUser = async (phone) => {
@@ -1739,6 +1755,14 @@ app.get('/api/harvests', requireAuth, async (req, res) => {
   }
 });
 
+const detectHarvestQualityFlags = ({ kg, price, total }) => {
+  const flags = [];
+  if (kg >= 50000) flags.push('unusually_high_kg');
+  if (price >= 200) flags.push('unusually_high_price');
+  if (total >= 10000000) flags.push('unusually_high_total');
+  return flags;
+};
+
 app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) => {
   try {
     const { userId, userPhone } = getUserIdentifier(req);
@@ -1767,6 +1791,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     }
     const amounts = calculateHarvestAmounts(kgVal, fiyatVal);
     const toplam = amounts.netTutar;
+    const qualityFlags = detectHarvestQualityFlags({ kg: kgVal, price: fiyatVal, total: toplam });
     if (tahsilatVal > toplam + 0.01) return res.status(400).json({ error: 'Tahsilat toplam satış tutarından fazla olamaz.' });
     const kalan = toplam - tahsilatVal;
 
@@ -1793,6 +1818,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       aciklama: String(req.body.aciklama || '').trim(),
       bahce: String(req.body.bahce || req.body.garden || '').trim(),
       receiptFingerprint,
+      qualityFlags,
       isVadeli,
       vadeTarihi,
       toplamTutar: toplam,
@@ -2540,7 +2566,10 @@ app.post('/api/feedback', requireAuth, async (req, res) => {
 
 // ADMIN ROUTES
 // ADMIN / PRODUCER MANAGEMENT
-const adminMetricPipeline = (match = {}) => createAdminMetricPipeline(match, HARVEST_WITHHOLDING_RATE);
+const adminMetricPipeline = (match = {}) => createAdminMetricPipeline(
+  { ...match, adminMetricsExcluded: { $ne: true } },
+  HARVEST_WITHHOLDING_RATE
+);
 const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '', activity = 'all' } = {}) => {
   const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
   // Eski uygulama sürümleri limit=25 gönderse de yönetici listesi her cihazda
@@ -2551,7 +2580,7 @@ const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '',
   const totalPages = Math.max(1, Math.ceil(total / safeLimit));
   const currentPage = Math.min(safePage, totalPages);
   const profiles = await UserProfile.find(profileFilter)
-    .select('userId phone name city role active lastActiveAt createdAt')
+    .select('userId phone name city role active adminPermissions lastActiveAt createdAt')
     .collation({ locale: 'tr', strength: 1 })
     .sort({ name: 1, _id: 1 })
     .skip((currentPage - 1) * safeLimit)
@@ -2584,7 +2613,10 @@ const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '',
       totalPaid: numericValue(totalMetric.totalPaid) + numericValue(row.totalPaid),
       harvestCount: numericValue(totalMetric.harvestCount) + numericValue(row.harvestCount)
     }), {});
-    return toAdminProducer(profile, metric);
+    return {
+      ...toAdminProducer(profile, metric),
+      adminPermissions: Array.isArray(profile.adminPermissions) ? profile.adminPermissions : []
+    };
   });
   return { items, page: currentPage, limit: safeLimit, total, totalPages };
 };
@@ -2629,6 +2661,50 @@ app.get('/api/admin/summary', requireAuth, requireAdmin, async (req, res) => {
     res.json(await getAdminSummary());
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+app.get('/api/admin/flagged-harvests', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const items = await Harvest.find({
+      $or: [
+        { qualityFlags: { $exists: true, $ne: [] } },
+        { kg: { $gte: 50000 } },
+        { weight: { $gte: 50000 } },
+        { fiyat: { $gte: 200 } },
+        { toplamTutar: { $gte: 10000000 } }
+      ]
+    })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .select('userId userPhone producerName uretici tarih firma kg weight fiyat toplamTutar qualityFlags adminMetricsExcluded createdAt')
+      .lean();
+    res.json({
+      items: items.map((item) => ({
+        ...item,
+        qualityFlags: item.qualityFlags?.length
+          ? item.qualityFlags
+          : detectHarvestQualityFlags({
+            kg: numeric(item.kg ?? item.weight),
+            price: numeric(item.fiyat),
+            total: numeric(item.toplamTutar)
+          })
+      }))
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/admin/harvests/:id/metrics', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const adminMetricsExcluded = req.body?.included === false;
+    const item = await Harvest.findOneAndUpdate(
+      { _id: req.params.id },
+      { $set: { adminMetricsExcluded } },
+      { returnDocument: 'after' }
+    ).select('qualityFlags adminMetricsExcluded').lean();
+    if (!item) return res.status(404).json({ error: 'Hasat kaydı bulunamadı.' });
+    adminSummaryCache = { expiresAt: 0, value: null };
+    res.json({ ...item, included: item.adminMetricsExcluded !== true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 // Eski yönetici ekranları için uyumluluk rotası. Yeni uygulama sayfalı /producers
 // rotasını kullanır; bu rota en fazla 100 üretici döndürür.
 app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
@@ -2643,6 +2719,22 @@ app.patch('/api/admin/users/:id/status', requireAuth, requireAdmin, async (req, 
     const active = Boolean(req.body.active);
     const user = await UserProfile.findOneAndUpdate({ _id: req.params.id }, { $set: { active } }, { returnDocument: 'after' });
     if (!user) return res.status(404).json({ error: 'Üretici bulunamadı.' });
+    res.json(user);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/admin/users/:id/admin-access', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const requested = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
+    const adminPermissions = [...new Set(requested.filter((item) => ADMIN_PERMISSION_KEYS.includes(item)))];
+    const role = adminPermissions.length ? 'manager' : 'user';
+    const user = await UserProfile.findOneAndUpdate(
+      { _id: req.params.id, role: { $ne: 'admin' } },
+      { $set: { role, adminPermissions } },
+      { returnDocument: 'after' }
+    ).select('userId name phone role adminPermissions').lean();
+    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı veya ana yönetici değiştirilemez.' });
+    await Session.deleteMany({ userId: user.userId });
     res.json(user);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
