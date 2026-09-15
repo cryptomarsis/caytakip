@@ -9,6 +9,8 @@ const { AppStoreServerAPIClient, Environment } = require('@apple/app-store-serve
 const { assessReceiptConfidence } = require('./server/receiptConfidence');
 const { createAdminMetricPipeline, getAdminProducerFilter, metricKey, numericValue, toAdminProducer } = require('./server/adminMetrics');
 const { AD_CAMPAIGN_PACKAGES, getAdCampaignCredits, isAdContentAllowed } = require('./server/adCampaign');
+const { normalizeStoreProductId } = require('./shared/storeProducts');
+const { entryActivityPipeline, mergeEntryActivity } = require('./server/entryActivity');
 
 const app = express();
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
@@ -447,6 +449,8 @@ const UserProfileSchema = new mongoose.Schema({
   active: { type: Boolean, default: true },
   city: { type: String, trim: true, default: '' },
   lastActiveAt: { type: Date, default: null, index: true },
+  quotaPlans: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  quotaRevision: { type: Number, default: 0 },
   aiCredits: { type: Number, default: AI_INITIAL_CREDITS, min: 0 }
 }, { timestamps: true });
 
@@ -574,6 +578,15 @@ const Ad = mongoose.model('Ad', AdSchema);
 const AdApplication = mongoose.model('AdApplication', AdApplicationSchema);
 const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
 const Feedback = mongoose.model('Feedback', FeedbackSchema);
+const SeasonReminderPolicy = mongoose.model('SeasonReminderPolicy', new mongoose.Schema({
+  _id: { type: String },
+  settings: {
+    enabled: { type: Boolean, default: false }, hour: Number, minute: Number,
+    seasonStart: String, seasonEnd: String,
+  },
+  revision: { type: Number, default: 0 },
+  updatedBy: String,
+}, { timestamps: true }));
 
 // HELPER FUNCTIONS
 const getAuthUser = (req) => {
@@ -1289,7 +1302,8 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
   const productId = String(event.product_id || '').trim();
   const sandboxPurchase = isSandboxPurchaseEnvironment(event.environment);
   if (eventType === 'TEST') return res.json({ received: true, test: true });
-  const catalogProduct = APPLE_IAP_PRODUCTS[productId];
+  const catalogId = normalizeStoreProductId(productId, event.store === 'PLAY_STORE' ? 'android' : 'ios');
+  const catalogProduct = catalogId ? APPLE_IAP_PRODUCTS[catalogId] : null;
   if (!eventId || !userId || userId.startsWith('$RCAnonymousID:') || !transactionId || !catalogProduct) {
     return res.status(400).json({ error: 'Invalid RevenueCat event' });
   }
@@ -2598,6 +2612,12 @@ const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '',
     rows = await Harvest.aggregate(adminMetricPipeline({ $or: identifiers }));
   }
 
+  const activityGroups = {};
+  if (identifiers.length) {
+    await Promise.all(Object.entries({ harvest: Harvest, payment: Payment, expense: Expense, garden: Garden }).map(async ([kind, Model]) => {
+      activityGroups[kind] = await Model.aggregate(entryActivityPipeline({ $or: identifiers, ...(kind === 'payment' ? { legacyDetail: { $ne: true } } : {}) }));
+    }));
+  }
   const items = profiles.map((profile) => {
     const userId = String(profile.userId || '').trim();
     const phone = String(profile.phone || '').trim();
@@ -2615,6 +2635,7 @@ const listAdminProducers = async ({ page = 1, limit = 7, search = '', city = '',
     }), {});
     return {
       ...toAdminProducer(profile, metric),
+      entryActivity: mergeEntryActivity(profile, activityGroups),
       adminPermissions: Array.isArray(profile.adminPermissions) ? profile.adminPermissions : []
     };
   });
@@ -2646,6 +2667,10 @@ const getAdminSummary = async () => {
   adminSummaryCache = { value, expiresAt: Date.now() + ADMIN_SUMMARY_CACHE_TTL_MS };
   return value;
 };
+require('./server/quotaRoutes')(app, { requireAuth, UserProfile, Harvest });
+require('./server/seasonReminderRoutes')(app, { requireAuth, UserProfile, SeasonReminderPolicy });
+require('./server/activityExportRoutes')(app, { requireAuth, UserProfile, Harvest, Payment, Expense, Garden });
+
 app.get('/api/admin/producers', requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await listAdminProducers(req.query || {});
