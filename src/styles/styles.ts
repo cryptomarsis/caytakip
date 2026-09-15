@@ -1,4 +1,5 @@
 import { StyleSheet } from 'react-native';
+import { caylikDesign, caylikLightTheme } from '../context/app-theme';
 
 export const styles = StyleSheet.create({
   container: {
@@ -6,7 +7,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#F4F7F2'
   },
   authScreen: {
-    paddingHorizontal: 18
+    backgroundColor: '#F8F3E7'
   },
   authKeyboardAvoider: {
     flex: 1,
@@ -14,18 +15,19 @@ export const styles = StyleSheet.create({
   },
   authScrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    paddingVertical: 24
+    alignItems: 'center',
+    paddingBottom: 22
   },
   authCard: {
-    backgroundColor: '#FFFFFF',
-    width: '100%',
+    backgroundColor: '#FFFDF8',
+    width: '92%',
     maxWidth: 460,
     alignSelf: 'center',
-    padding: 24,
-    borderRadius: 24,
+    marginTop: -32,
+    padding: 22,
+    borderRadius: 30,
     borderWidth: 1,
-    borderColor: '#DCE9E0',
+    borderColor: '#E8E0D3',
     shadowColor: '#123D2C',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.09,
@@ -75,6 +77,31 @@ export const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     textAlign: 'center'
   },
+  authHero: { width: '100%', minHeight: 310, backgroundColor: '#0B4A35', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', paddingTop: 18, paddingBottom: 54, borderBottomLeftRadius: 54, borderBottomRightRadius: 54 },
+  authHeroGlow: { position: 'absolute', width: 280, height: 280, borderRadius: 140, backgroundColor: '#176747', opacity: 0.42 },
+  authLogoWrap: { width: 126, height: 126, borderRadius: 38, overflow: 'hidden', shadowColor: '#D6C45A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 18, elevation: 8 },
+  authHeroLogo: { width: '100%', height: '100%' },
+  authHeroTitle: { color: '#FFF9EC', fontSize: 44, lineHeight: 52, fontWeight: '800', marginTop: 14, letterSpacing: -1 },
+  authHeroSubtitle: { color: '#E8EFE8', fontSize: 16, fontWeight: '600', marginTop: 2 },
+  authFormTitle: { width: '100%', color: '#103F2F', fontSize: 27, lineHeight: 33, fontWeight: '900', letterSpacing: -0.4 },
+  authField: { width: '100%', marginBottom: 12 },
+  authFieldLabel: { color: '#234C3D', fontSize: 14, fontWeight: '800', marginBottom: 7, marginLeft: 2 },
+  authInputShell: { width: '100%', minHeight: 58, borderRadius: 18, borderWidth: 1, borderColor: '#C9D7CE', backgroundColor: '#FAFCF8', flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15 },
+  authInput: { flex: 1, minHeight: 56, color: '#183E31', fontSize: 16, paddingVertical: 10 },
+  authHelp: { color: '#66786D', fontSize: 12, lineHeight: 17, marginTop: -4, marginBottom: 6 },
+  authSubmitBtn: { width: '100%', minHeight: 60, borderRadius: 20, backgroundColor: '#0B6042', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 7, shadowColor: '#063526', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 5 },
+  authSubmitText: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
+  authDivider: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 18 },
+  authDividerLine: { flex: 1, height: 1, backgroundColor: '#D7DED8' },
+  authDividerText: { color: '#78877E', fontSize: 14, fontWeight: '600' },
+  authModeButton: { width: '100%', minHeight: 56, borderRadius: 18, borderWidth: 1.5, borderColor: '#0B6042', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  authModeButtonText: { color: '#0B6042', fontSize: 16, fontWeight: '900' },
+  authFeedback: { width: '100%', marginBottom: 15, padding: 13, borderRadius: 14, borderWidth: 1 },
+  authFeedbackError: { backgroundColor: '#FDECEC', borderColor: '#F2B8B5' },
+  authFeedbackInfo: { backgroundColor: '#E9F5EE', borderColor: '#B7DCC7' },
+  authFeedbackTitle: { fontWeight: '900', marginBottom: 3 },
+  authFeedbackText: { color: '#39443E', lineHeight: 20 },
+  authLegal: { width: '88%', maxWidth: 430, color: '#64746B', fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 17 },
   label: {
     alignSelf: 'flex-start',
     fontSize: 15,
@@ -88,7 +115,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#F8FAF7',
     borderWidth: 1,
     borderColor: '#D7E1D7',
-    borderRadius: 18,
+    borderRadius: caylikDesign.radius.sm,
     minHeight: 56,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -98,17 +125,17 @@ export const styles = StyleSheet.create({
   },
   submitBtn: {
     width: '100%',
-    backgroundColor: '#1F6B4F',
+    backgroundColor: caylikLightTheme.colors.primary,
     minHeight: 58,
     paddingVertical: 15,
-    borderRadius: 20,
+    borderRadius: caylikDesign.radius.md,
     alignItems: 'center',
     marginTop: 18,
     shadowColor: '#092A1D',
-    shadowOpacity: 0.16,
+    shadowOpacity: 0.04,
     shadowRadius: 9,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 3
+    elevation: 1
   },
   submitBtnText: {
     color: '#ffffff',

@@ -10,6 +10,7 @@ type Props = {
   value: string;
   onChange: (value: string) => void;
   minimumDate?: Date;
+  disabled?: boolean;
 };
 
 const parseDisplayDate = (value: string) => {
@@ -22,7 +23,7 @@ const parseDisplayDate = (value: string) => {
 const formatDate = (date: Date) =>
   `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
 
-export default function DatePickerField({ label, value, onChange, minimumDate }: Props) {
+export default function DatePickerField({ label, value, onChange, minimumDate, disabled = false }: Props) {
   const theme = useTheme();
   const initialDate = useMemo(() => parseDisplayDate(value), [value]);
   const [visible, setVisible] = useState(false);
@@ -48,6 +49,8 @@ export default function DatePickerField({ label, value, onChange, minimumDate }:
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel={`${label} seç`}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
         activeOpacity={0.8}
         onPress={open}
         style={[local.inputShell, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }]}
@@ -68,7 +71,7 @@ export default function DatePickerField({ label, value, onChange, minimumDate }:
           <View style={local.overlay}>
             <View style={[local.modal, { backgroundColor: theme.colors.surface }]}>
               <Text style={[local.modalTitle, { color: theme.colors.onSurface }]}>{label}</Text>
-              <DateTimePicker value={draftDate} mode="date" display="inline" locale="tr-TR" minimumDate={minimumDate} onChange={onPickerChange} accentColor={theme.colors.primary} />
+              <DateTimePicker value={draftDate} mode="date" display="inline" locale="tr-TR" minimumDate={minimumDate} onChange={onPickerChange} accentColor={theme.colors.primary} themeVariant={theme.dark ? 'dark' : 'light'} />
               <View style={local.actions}>
                 <TouchableOpacity onPress={() => setVisible(false)} style={local.action}><Text style={[local.actionText, { color: theme.colors.onSurfaceVariant }]}>Vazgeç</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => { onChange(formatDate(draftDate)); setVisible(false); }} style={[local.action, { backgroundColor: theme.colors.primary }]}><Text style={[local.actionText, { color: theme.colors.onPrimary }]}>Tarihi Seç</Text></TouchableOpacity>
@@ -91,6 +94,6 @@ const local = StyleSheet.create({
   modal: { borderRadius: 24, padding: 18 },
   modalTitle: { fontSize: 19, fontWeight: '900', marginBottom: 8 },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
-  action: { minHeight: 44, borderRadius: 13, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
+  action: { minHeight: 48, borderRadius: 13, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
   actionText: { fontSize: 14, fontWeight: '900' },
 });

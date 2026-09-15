@@ -1,51 +1,59 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
 const DURATION = 600;
 
-export function AnimatedSplashOverlay() {
+export function AnimatedSplashOverlay({ onFinished }: { onFinished?: () => void } = {}) {
   const [animate, setAnimate] = useState(false);
   const [visible, setVisible] = useState(true);
 
+  useEffect(() => {
+    if (!animate) return;
+    const timer = setTimeout(() => { setVisible(false); onFinished?.(); }, 1050);
+    return () => clearTimeout(timer);
+  }, [animate, onFinished]);
+
   if (!visible) return null;
 
-  const splashKeyframe = new Keyframe({
+  const splashLogoKeyframe = new Keyframe({
     0: {
+      transform: [{ scale: 0.86 }],
+      opacity: 0,
+    },
+    38: {
+      transform: [{ scale: 1.04 }],
+      opacity: 1,
+      easing: Easing.out(Easing.cubic),
+    },
+    72: {
       transform: [{ scale: 1 }],
       opacity: 1,
-    },
-    20: {
-      opacity: 1,
-    },
-    70: {
-      opacity: 0,
-      easing: Easing.elastic(0.7),
+      easing: Easing.inOut(Easing.cubic),
     },
     100: {
       opacity: 0,
-      transform: [{ scale: 1 }],
-      easing: Easing.elastic(0.7),
+      transform: [{ scale: 0.98 }],
+      easing: Easing.in(Easing.cubic),
     },
   });
 
-  const image = <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />;
+  const image = (
+    <Image
+      accessibilityLabel="Çaylık logosu"
+      contentFit="cover"
+      style={styles.splashLogo}
+      source={require('@/assets/caylik-icon-v1.png')}
+    />
+  );
 
   return animate ? (
-    <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
-        'worklet';
-        if (finished) {
-          scheduleOnRN(setVisible, false);
-        }
-      })}
-      style={styles.splashOverlay}>
-      {image}
-    </Animated.View>
+    <View style={styles.splashOverlay}>
+      <Animated.View entering={splashLogoKeyframe.duration(1000)}>{image}</Animated.View>
+    </View>
   ) : (
     <View
       onLayout={() => {
@@ -140,9 +148,14 @@ const styles = StyleSheet.create({
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
+    backgroundColor: '#F8F3E7',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
+  },
+  splashLogo: {
+    width: 148,
+    height: 148,
+    borderRadius: 34,
   },
 });

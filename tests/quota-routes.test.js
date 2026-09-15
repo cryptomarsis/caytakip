@@ -6,7 +6,7 @@ const p = { id: 'one', label: 'Cüzdan', season: '1. Sürüm', startDate: '2026-
 function setup(records, updated = { quotaRevision: 1 }) {
   const routes = {}; const captures = {};
   const auth = () => {};
-  register({ get: (url, guard, handler) => { assert.equal(guard, auth); routes.get = handler; }, put: (url, guard, handler) => { assert.equal(guard, auth); routes.put = handler; } }, {
+  register({ get: (url, guard, handler) => { assert.equal(guard, auth); routes.get = handler; }, patch: (url, guard, handler) => { assert.equal(guard, auth); routes.patch = handler; }, put: (url, guard, handler) => { assert.equal(guard, auth); routes.put = handler; } }, {
     requireAuth: auth,
     Harvest: { find: (filter) => { captures.ownership = filter; return { lean: async () => records }; } },
     UserProfile: { findOneAndUpdate: async (filter, change) => { captures.write = { filter, change }; return updated; } },

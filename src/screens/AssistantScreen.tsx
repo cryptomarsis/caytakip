@@ -6,8 +6,10 @@ import * as Speech from 'expo-speech';
 import { useTheme } from 'react-native-paper';
 
 import { AppIcon } from '../components/app-icon';
+import { caylikDesign } from '../context/app-theme';
 import { CaylikButton, CaylikSurface } from '../components/caylik-ui';
 import { AiChatMessage, AiCreditTransaction } from '../services/aiAssistant';
+import { blockFeedbackSounds } from '../services/feedbackSounds';
 
 const suggestions = [
   'Bu sezonki hasat ve alacak durumumu özetle.',
@@ -17,6 +19,7 @@ const suggestions = [
 ];
 
 type Props = {
+  initialQuestion?: string;
   messages: AiChatMessage[];
   credits: number | null;
   transactions: AiCreditTransaction[];
@@ -29,9 +32,9 @@ type Props = {
   onOpenStore: () => void;
 };
 
-export default function AssistantScreen({ messages, credits, transactions, busy, transcribing, error, onAsk, onTranscribe, onClear, onOpenStore }: Props) {
+export default function AssistantScreen({ initialQuestion = '', messages, credits, transactions, busy, transcribing, error, onAsk, onTranscribe, onClear, onOpenStore }: Props) {
   const theme = useTheme();
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialQuestion);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
@@ -110,6 +113,10 @@ export default function AssistantScreen({ messages, credits, transactions, busy,
     if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
     void Speech.stop();
   }, []);
+  useEffect(() => {
+    blockFeedbackSounds(true);
+    return () => blockFeedbackSounds(false);
+  }, []);
 
   const submit = async (suggestion?: string) => {
     const message = String(suggestion ?? input).trim();
@@ -121,18 +128,18 @@ export default function AssistantScreen({ messages, credits, transactions, busy,
 
   return (
     <View>
-      <View style={local.headerRow}>
-        <View style={[local.iconWrap, { backgroundColor: theme.colors.primaryContainer }]}>
-          <AppIcon name="robot-happy-outline" size={29} color={theme.colors.primary} />
+      <View style={[local.headerRow, { flexDirection: 'column', alignItems: 'center', gap: 16 }]}>
+        <View style={{ alignItems: 'center', paddingTop: 12 }}>
+          <AppIcon name="robot-happy-outline" size={62} color={theme.colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[local.title, { color: theme.colors.onSurface }]}>Çaylık Asistan</Text>
-          <Text style={[local.subtitle, { color: theme.colors.onSurfaceVariant }]}>Çay üretimi ve kendi kayıtlarınız hakkında yardım alın.</Text>
+          <Text style={[local.title, { color: theme.colors.onSurface, fontFamily: caylikDesign.font.editorial, fontWeight: '700', textAlign: 'center', fontSize: caylikDesign.type.display }]}>Çaylık Asistan</Text>
+          <Text style={[local.subtitle, { color: theme.colors.onSurfaceVariant, textAlign: 'center' }]}>Bugün neyi kolaylaştıralım?</Text>
         </View>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Kredi yükle" onPress={onOpenStore} style={[local.creditBadge, { backgroundColor: theme.colors.secondaryContainer }]}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Kredi yükle" onPress={onOpenStore} style={[local.creditBadge, { backgroundColor: theme.colors.secondaryContainer, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, borderRadius: 999 }]}>
           <Text style={[local.creditValue, { color: theme.colors.onSecondaryContainer }]}>{credits === null ? '…' : credits}</Text>
           <Text style={[local.creditLabel, { color: theme.colors.onSecondaryContainer }]}>kredi</Text>
-          <Text style={[local.creditAction, { color: theme.colors.primary }]}>YÜKLE</Text>
+          <AppIcon name="chevron-right" size={18} color={theme.colors.primary} />
         </TouchableOpacity>
       </View>
 
@@ -147,7 +154,7 @@ export default function AssistantScreen({ messages, credits, transactions, busy,
       {messages.length === 0 && (
         <CaylikSurface style={local.introCard}>
           <View style={local.cardInner}>
-            <Text style={[local.cardTitle, { color: theme.colors.onSurface }]}>Size nasıl yardımcı olabilirim?</Text>
+            <Text style={[local.cardTitle, { color: theme.colors.onSurface }]}>Bugün neyi kolaylaştıralım?</Text>
             <Text style={[local.cardText, { color: theme.colors.onSurfaceVariant }]}>Bir konu seçin veya sorunuzu aşağıya yazın. Yanıtın uzunluğuna ve kullanılan yapay zekâ maliyetine göre kredi düşer.</Text>
             {suggestions.map((suggestion) => (
               <TouchableOpacity

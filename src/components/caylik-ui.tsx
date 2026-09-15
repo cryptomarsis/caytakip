@@ -37,24 +37,17 @@ export function CaylikButton({ children, onPress, disabled, mode = 'contained', 
         style,
       ]}
     >
-      {!!icon && <View style={[ui.buttonIcon, { backgroundColor: contained ? 'rgba(255,255,255,0.14)' : theme.colors.primaryContainer }]}><AppIcon name={icon} size={20} color={contained ? theme.colors.onPrimary : theme.colors.primary} /></View>}
-      <Text style={[ui.buttonLabel, { color: contained ? theme.colors.onPrimary : theme.colors.primary }]} numberOfLines={1}>{children}</Text>
-      {contained && (
-        <View style={ui.buttonArrow}>
-          <AppIcon name="arrow-right" size={17} color={theme.colors.onPrimary} />
-        </View>
-      )}
+      {!!icon && <View style={ui.buttonIcon}><AppIcon name={icon} size={22} color={contained ? theme.colors.onPrimary : theme.colors.primary} /></View>}
+      <Text style={[ui.buttonLabel, { color: contained ? theme.colors.onPrimary : theme.colors.primary }]}>{children}</Text>
     </Pressable>
   );
 }
 
-export function CaylikScreenHeader({ icon, eyebrow = 'ÇAYLIK', title, description }: { icon: AppIconName; eyebrow?: string; title: string; description?: string }) {
+export function CaylikScreenHeader({ title, description }: { icon: AppIconName; eyebrow?: string; title: string; description?: string }) {
   const theme = useTheme();
   return (
     <View style={ui.screenHeader}>
-      <View style={[ui.screenHeaderIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name={icon} size={25} color={theme.colors.primary} /></View>
       <View style={ui.screenHeaderCopy}>
-        <Text style={[ui.screenEyebrow, { color: theme.colors.primary }]}>{eyebrow}</Text>
         <Text style={[ui.screenTitle, { color: theme.colors.onBackground }]}>{title}</Text>
         {!!description && <Text style={[ui.screenDescription, { color: theme.colors.onSurfaceVariant }]}>{description}</Text>}
       </View>
@@ -66,7 +59,7 @@ export function CaylikSurface({ children, style }: { children: React.ReactNode; 
   const { paperTheme: theme } = useAppTheme();
   // Paper Card kendi iç yüzeyini bazı sürümlerde beyaz bırakabildiği için
   // tema yüzeylerini doğrudan View üzerinde çiziyoruz.
-  return <View style={[ui.surface, style, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}><View pointerEvents="none" style={[ui.surfaceAccent, { backgroundColor: theme.colors.primary }]} />{children}</View>;
+  return <View style={[ui.surface, style, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>{children}</View>;
 }
 
 export function CaylikActionCard({
@@ -103,23 +96,23 @@ const ui = StyleSheet.create({
     minHeight: 58,
     borderRadius: caylikDesign.radius.lg,
     borderWidth: 1,
-    paddingHorizontal: 9,
+    paddingHorizontal: caylikDesign.spacing.md,
+    paddingVertical: caylikDesign.spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
     shadowColor: '#092A1D',
-    shadowOpacity: 0.16,
+    shadowOpacity: 0.04,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    elevation: 1,
   },
   textButton: { borderWidth: 0, backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, paddingHorizontal: 12 },
   buttonDisabled: { opacity: 0.45, shadowOpacity: 0, elevation: 0 },
   buttonPressed: { transform: [{ scale: 0.985 }], opacity: 0.91, shadowOpacity: 0.05, elevation: 1 },
-  buttonIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  buttonLabel: { flexShrink: 1, fontSize: 15, fontWeight: '900', letterSpacing: 0.1, textAlign: 'center' },
-  buttonArrow: { width: 35, height: 35, borderRadius: 12, marginLeft: 12, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  buttonIcon: { width: 24, alignItems: 'center', justifyContent: 'center', marginRight: caylikDesign.spacing.sm },
+  buttonLabel: { flexShrink: 1, fontSize: caylikDesign.type.bodyLarge, fontWeight: '600', textAlign: 'center' },
   surface: {
     borderRadius: caylikDesign.radius.xl,
     borderWidth: 1,
@@ -147,7 +140,7 @@ const ui = StyleSheet.create({
   screenHeaderIcon: { width: 54, height: 54, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   screenHeaderCopy: { flex: 1, minWidth: 0 },
   screenEyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
-  screenTitle: { marginTop: 3, fontSize: caylikDesign.type.headline, lineHeight: 31, fontWeight: '900', letterSpacing: -0.55 },
+  screenTitle: { marginTop: 3, fontFamily: caylikDesign.font.editorial, fontSize: caylikDesign.type.headline, lineHeight: 34, fontWeight: '700', letterSpacing: -0.55 },
   screenDescription: { marginTop: 4, fontSize: caylikDesign.type.body, lineHeight: 20, fontWeight: '600' },
   notice: { backgroundColor: '#1F6B4F' },
 });

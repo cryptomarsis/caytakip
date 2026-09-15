@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 import { MD3DarkTheme, MD3LightTheme, type MD3Theme } from 'react-native-paper';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -9,6 +9,7 @@ const THEME_PREFERENCE_KEY = '@caylik_theme_preference';
 
 /** Çaylık arayüzünde ekranlar arasında ortak kullanılan tasarım ölçüleri. */
 export const caylikDesign = {
+  font: { editorial: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
   spacing: { xxs: 4, xs: 8, sm: 12, md: 16, lg: 20, xl: 24, xxl: 32 },
   radius: { sm: 12, md: 16, lg: 20, xl: 26, pill: 999 },
   type: { caption: 12, body: 14, bodyLarge: 16, title: 20, headline: 26, display: 34 },
@@ -24,12 +25,13 @@ export const caylikLightTheme = {
   roundness: 5,
   colors: {
     ...MD3LightTheme.colors,
-    primary: '#155B42', onPrimary: '#FFFFFF', primaryContainer: '#DDEFE5', onPrimaryContainer: '#103D2D',
-    secondary: '#B47A20', onSecondary: '#FFFFFF', secondaryContainer: '#F9EBCB', onSecondaryContainer: '#513500',
-    tertiary: '#247C69', onTertiary: '#FFFFFF', tertiaryContainer: '#DDF3EA', onTertiaryContainer: '#123E34',
+    primary: '#254B37', onPrimary: '#FFFFFF', primaryContainer: '#E2E8D9', onPrimaryContainer: '#254B37',
+    secondary: '#92532F', onSecondary: '#FFFFFF', secondaryContainer: '#F0E1D2', onSecondaryContainer: '#693A23',
+    tertiary: '#426347', onTertiary: '#FFFFFF', tertiaryContainer: '#E6EBDD', onTertiaryContainer: '#254B37',
     error: '#BA3B43', errorContainer: '#FFE8E8', onErrorContainer: '#64151B',
-    surface: '#FFFEFA', surfaceVariant: '#EEF2EC', onSurface: '#18221D', onSurfaceVariant: '#58645D',
-    outline: '#D8DED7', outlineVariant: '#E8ECE7', background: '#F6F5EF', onBackground: '#18221D',
+    surface: '#FFFCF6', surfaceVariant: '#EDE9DF', onSurface: '#26332B', onSurfaceVariant: '#5C645A',
+    outline: '#9B9F91', outlineVariant: '#DDDCD1', background: '#F5F1E8', onBackground: '#26332B',
+    elevation: { level0: 'transparent', level1: '#FFFCF6', level2: '#F5F1E8', level3: '#EDE9DF', level4: '#EDE9DF', level5: '#E2E8D9' },
   },
 };
 
@@ -38,16 +40,16 @@ export const caylikDarkTheme = {
   roundness: 5,
   colors: {
     ...MD3DarkTheme.colors,
-    primary: '#55D49A', onPrimary: '#062A1B', primaryContainer: '#173D2D', onPrimaryContainer: '#D9F8E8',
-    secondary: '#F0C66D', onSecondary: '#382B00', secondaryContainer: '#453817', onSecondaryContainer: '#FFE9AE',
-    tertiary: '#79D6C5', onTertiary: '#00382F', tertiaryContainer: '#164A42', onTertiaryContainer: '#C5F7EC',
+    primary: '#B8CEAD', onPrimary: '#203426', primaryContainer: '#364B39', onPrimaryContainer: '#E2ECD9',
+    secondary: '#D9A27E', onSecondary: '#382519', secondaryContainer: '#49392D', onSecondaryContainer: '#F4DCC8',
+    tertiary: '#B8CEAD', onTertiary: '#203426', tertiaryContainer: '#303F33', onTertiaryContainer: '#E2ECD9',
     error: '#FFB4AB', errorContainer: '#5A2423', onErrorContainer: '#FFDAD6',
-    surface: '#171C19', surfaceVariant: '#222824', onSurface: '#F4F7F5', onSurfaceVariant: '#B9C3BD',
+    surface: '#2C342E', surfaceVariant: '#343D35', onSurface: '#F2EEE5', onSurfaceVariant: '#C0C5B8',
     surfaceDisabled: '#242A26', onSurfaceDisabled: '#7F8983',
-    outline: '#46514B', outlineVariant: '#2B332F', background: '#0F1411', onBackground: '#F4F7F5',
+    outline: '#778172', outlineVariant: '#465044', background: '#202521', onBackground: '#F2EEE5',
     elevation: {
       ...MD3DarkTheme.colors.elevation,
-      level0: '#0F1411', level1: '#171C19', level2: '#1B211D', level3: '#202722', level4: '#222A25', level5: '#27302A',
+      level0: '#202521', level1: '#2C342E', level2: '#303A32', level3: '#343D35', level4: '#364237', level5: '#3C493D',
     },
   },
 };

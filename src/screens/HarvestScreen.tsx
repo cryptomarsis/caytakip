@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 
 import { AppIcon, AppIconName } from '../components/app-icon';
-import { CaylikButton, CaylikSurface } from '../components/caylik-ui';
+import { CaylikButton, CaylikSurface, CaylikScreenHeader } from '../components/caylik-ui';
 import DatePickerField from '../components/date-picker-field';
+import QuotaPlanPicker from '../components/QuotaPlanPicker';
+import { isCaykur } from '../../shared/quota';
 import { styles } from '../styles/styles';
-import { calculateAgriculturalDeductions, formatTL } from '../utils/format';
+import { calculateAgriculturalDeductions, formatTL, toServerDate, todayDisplayDate } from '../utils/format';
+import { lastHarvestDefaults } from '../utils/transactionTimeline';
 
 type FormFieldProps = {
   icon: AppIconName;
@@ -36,23 +39,20 @@ export default function HarvestScreen(props: any) {
   const theme = useTheme();
   const { currentUser, hForm, handleSaveHarvest, setHForm, onPickReceipt, receiptBusy, receiptNotice, receiptDraft, onConfirmReceipt, onDismissReceipt } = props;
   const [showDetails, setShowDetails] = useState(false);
+  const [showReceipt, setShowReceipt] = useState(false);
   const amounts = calculateAgriculturalDeductions(hForm.kg, hForm.fiyat);
 
   return (
     <View style={local.screen}>
-      <View style={[local.hero, { backgroundColor: theme.colors.primary }]}>
-        <View style={[local.heroGlow, { backgroundColor: theme.colors.primaryContainer }]} />
-        <View style={local.heroTop}>
-          <View style={local.heroIcon}><AppIcon name="leaf-circle-outline" size={29} color={theme.colors.onPrimary} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={[local.heroEyebrow, { color: theme.colors.onPrimary }]}>YENİ KAYIT</Text>
-            <Text style={[local.heroTitle, { color: theme.colors.onPrimary }]}>Hasadını kolayca kaydet</Text>
-          </View>
-        </View>
-        <Text style={[local.heroText, { color: theme.colors.onPrimary }]}>Kilo ve fiyatı gir; kesinti, net alacak ve vade takibini Çaylık hesaplasın.</Text>
-      </View>
+      <CaylikScreenHeader icon="leaf-circle-outline" title="Hasat ekle" description="Emeğini kayda al." />
+      {!!props.harvests?.length && <CaylikButton mode="outlined" icon="history" onPress={() => Alert.alert('Son seçimlerimi kullan', 'Firma, bahçe, sürgün ve cüzdan son kayıttan alınacak. Tarih bugün olacak; kilo ve fiyatı yeniden girmeniz gerekir. Mevcut form değişecek.', [{ text: 'Vazgeç', style: 'cancel' }, { text: 'Seçimleri getir', onPress: () => { const defaults = lastHarvestDefaults(props.harvests, todayDisplayDate()); if (defaults) setHForm({ ...hForm, ...defaults }); } }])}>Son firma / bahçe seçimlerimi getir</CaylikButton>}
+      <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showReceipt }} onPress={() => setShowReceipt(value => !value)} style={[local.detailsBar, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]}>
+        <AppIcon name="camera-outline" size={32} color={theme.colors.primary} />
+        <View style={{ flex: 1 }}><Text style={[local.sectionTitle, { color: theme.colors.onSurface }]}>Fişi tara</Text><Text style={[local.sectionDescription, { color: theme.colors.onSurfaceVariant }]}>Bilgileri fotoğraftan doldur</Text></View>
+        <AppIcon name={showReceipt ? 'chevron-up' : 'chevron-right'} size={24} color={theme.colors.primary} />
+      </TouchableOpacity>
 
-      <CaylikSurface style={[local.sectionCard, { backgroundColor: theme.colors.surface }]}>
+      {(showReceipt || receiptBusy || !!receiptNotice) && <CaylikSurface style={[local.sectionCard, { backgroundColor: theme.colors.surface }]}>
         <View style={local.cardContent}>
           <View style={local.sectionHead}>
             <View style={[local.sectionIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="line-scan" size={22} color={theme.colors.primary} /></View>
@@ -78,7 +78,7 @@ export default function HarvestScreen(props: any) {
                   <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Net ağırlık: {receiptDraft.netWeightKg ?? 'Bulunamadı'} KG</Text>
                   <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Tarih: {receiptDraft.date || 'Bulunamadı'}</Text>
                   {!!receiptDraft.paymentTerm && <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Ödeme: {receiptDraft.paymentTerm}</Text>}
-                  {receiptDraft.confidence !== undefined && <Text style={[local.receiptResultText, { color: receiptDraft.confidence >= 100 ? theme.colors.primary : theme.colors.secondary }]}>Okuma güveni: %{receiptDraft.confidence}</Text>}
+                  {receiptDraft.confidence !== undefined && <Text style={[local.receiptResultText, { color: theme.colors.onSurfaceVariant }]}>Okunan alan: {Math.round(receiptDraft.confidence * 3 / 100)} / 3 · Bu bir doğruluk puanı değildir. Tarih, fabrika ve kilogramı kontrol edin.</Text>}
                   {!!receiptDraft.warnings?.length && <Text style={[local.receiptResultText, { color: theme.colors.error }]}>Kontrol edin: {receiptDraft.warnings.join(', ')}</Text>}
                   <View style={local.receiptActions}>
                     <CaylikButton icon="close" mode="outlined" onPress={onDismissReceipt} style={local.receiptButton}>Vazgeç</CaylikButton>
@@ -89,17 +89,24 @@ export default function HarvestScreen(props: any) {
             </View>
           )}
         </View>
-      </CaylikSurface>
+      </CaylikSurface>}
 
       <CaylikSurface style={[local.sectionCard, { backgroundColor: theme.colors.surface }]}>
         <View style={local.cardContent}>
-          <View style={local.sectionHead}>
-            <View style={[local.sectionIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="sprout" size={22} color={theme.colors.primary} /></View>
-            <View style={{ flex: 1 }}><Text style={[local.sectionTitle, { color: theme.colors.onSurface }]}>Hasat bilgileri</Text><Text style={[local.sectionDescription, { color: theme.colors.onSurfaceVariant }]}>Kaydın temel satış bilgilerini gir.</Text></View>
-          </View>
-          <FormField icon="weight-kilogram" label="Miktar (KG) *" value={hForm.kg} onChangeText={(kg) => setHForm({ ...hForm, kg })} placeholder="Örn: 1000" keyboardType="decimal-pad" />
           <FormField icon="factory" label="Firma / Alıcı *" value={hForm.firma} onChangeText={(firma) => setHForm({ ...hForm, firma })} placeholder="Örn: ÇAYKUR veya özel fabrika" />
-          <FormField icon="currency-try" label="Brüt Birim Fiyat (TL) *" value={hForm.fiyat} onChangeText={(fiyat) => setHForm({ ...hForm, fiyat })} placeholder="Örn: 35,00" keyboardType="decimal-pad" />
+          <DatePickerField label="Teslim tarihi" value={hForm.date} onChange={(date) => setHForm({ ...hForm, date })} />
+          {isCaykur(hForm.firma) && <View style={local.fieldBlock}>
+            <Text style={[local.fieldLabel, { color: theme.colors.onSurface }]}>ÇAYKUR sürgünü</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {[1, 2, 3, 4].map(n => <CaylikButton key={n} mode={hForm.surum === `${n}. Sürüm` ? 'contained' : 'outlined'} disabled={props.saving} onPress={() => setHForm({ ...hForm, surum: `${n}. Sürüm`, quotaPlanId: '' })}>{n}. sürgün</CaylikButton>)}
+            </View>
+          </View>}
+          <QuotaPlanPicker authFetch={props.authFetch} firma={hForm.firma} season={hForm.surum} date={toServerDate(hForm.date)} value={hForm.quotaPlanId} disabled={props.saving} onChange={(quotaPlanId) => setHForm({ ...hForm, quotaPlanId })} />
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flex: 1 }}><FormField icon="weight-kilogram" label="Brüt miktar (KG) *" value={hForm.kg} onChangeText={(kg) => setHForm({ ...hForm, kg })} placeholder="420" keyboardType="decimal-pad" /></View>
+            <View style={{ flex: 1 }}><FormField icon="currency-try" label="Birim fiyat (TL) *" value={hForm.fiyat} onChangeText={(fiyat) => setHForm({ ...hForm, fiyat })} placeholder="35,00" keyboardType="decimal-pad" /></View>
+          </View>
+          <FormField icon="note-text-outline" label="Not" value={hForm.aciklama} onChangeText={(aciklama) => setHForm({ ...hForm, aciklama })} placeholder="Teslimatla ilgili bir not ekle" />
           <View style={[local.moneyCard, { backgroundColor: theme.colors.primaryContainer }]}>
             <View style={local.moneyTop}><Text style={[local.moneyEyebrow, { color: theme.colors.onPrimaryContainer }]}>TAHMİNİ NET ALACAK</Text><AppIcon name="calculator-variant-outline" size={21} color={theme.colors.primary} /></View>
             <Text style={[local.moneyValue, { color: theme.colors.onPrimaryContainer }]}>{formatTL(amounts.netTutar)}</Text>
@@ -120,7 +127,6 @@ export default function HarvestScreen(props: any) {
       {showDetails && (
         <CaylikSurface style={[local.sectionCard, { backgroundColor: theme.colors.surface }]}>
           <View style={local.cardContent}>
-            <FormField icon="calendar-outline" label="Tarih (GG.AA.YYYY)" value={hForm.date} onChangeText={(date) => setHForm({ ...hForm, date })} placeholder="12.08.2026" />
             <Text style={[styles.label, { color: theme.colors.onSurface }]}>Sürüm Seçimi</Text>
             <View style={styles.rowBtnGroup}>{['1. Sürüm', '2. Sürüm', '3. Sürüm', '4. Sürüm'].map((surum) => <TouchableOpacity key={surum} style={[styles.groupBtn, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline }, hForm.surum === surum && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }]} onPress={() => setHForm({ ...hForm, surum })}><Text style={[styles.groupBtnText, { color: theme.colors.onSurface }, hForm.surum === surum && { color: theme.colors.onPrimary, fontWeight: '800' }]}>{surum}</Text></TouchableOpacity>)}</View>
             {currentUser?.role === 'admin' && <FormField icon="account-outline" label="Üretici Adı" value={hForm.producer} onChangeText={(producer) => setHForm({ ...hForm, producer })} placeholder={currentUser?.name || 'Üretici Adı'} />}
@@ -128,11 +134,10 @@ export default function HarvestScreen(props: any) {
             <FormField icon="tree-outline" label="Bahçe" value={hForm.garden} onChangeText={(garden) => setHForm({ ...hForm, garden })} placeholder="Örn: Arka Bahçe" />
             <View style={[local.switchBar, { backgroundColor: theme.colors.surfaceVariant }]}><View><Text style={[local.detailsTitle, { color: theme.colors.onSurface }]}>Vadeli satış</Text><Text style={[local.detailsText, { color: theme.colors.onSurfaceVariant }]}>Ödeme tarihini takip et</Text></View><Switch value={hForm.isVadeli} onValueChange={(isVadeli) => setHForm({ ...hForm, isVadeli })} trackColor={{ false: theme.colors.outline, true: theme.colors.primary }} thumbColor={theme.colors.surface} /></View>
             {hForm.isVadeli && <DatePickerField label="Vade Tarihi" value={hForm.vadeTarihi} onChange={(vadeTarihi) => setHForm({ ...hForm, vadeTarihi })} minimumDate={new Date()} />}
-            <FormField icon="note-text-outline" label="Açıklama" value={hForm.aciklama} onChangeText={(aciklama) => setHForm({ ...hForm, aciklama })} placeholder="Notlar..." />
           </View>
         </CaylikSurface>
       )}
-      <CaylikButton icon="content-save-outline" onPress={handleSaveHarvest} style={local.saveButton}>Hasadı Kaydet</CaylikButton>
+      <CaylikButton icon="content-save-outline" disabled={props.saving} onPress={handleSaveHarvest} style={local.saveButton}>{props.saving ? 'Kaydediliyor…' : 'Hasadı Kaydet'}</CaylikButton>
       <Text style={[local.saveHint, { color: theme.colors.onSurfaceVariant }]}>Kaydetmeden önce bilgileri kontrol edebilirsin.</Text>
     </View>
   );

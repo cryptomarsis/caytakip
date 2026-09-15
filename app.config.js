@@ -28,10 +28,10 @@ if (metaAppID && metaClientToken) {
       displayName: 'Çaylık',
       scheme: `fb${metaAppID}`,
       advertiserIDCollectionEnabled: false,
-      autoLogAppEventsEnabled: true,
-      isAutoInitEnabled: true,
+      autoLogAppEventsEnabled: false,
+      isAutoInitEnabled: false,
       iosUserTrackingPermission:
-        'Reklamların performansını ölçmek ve size daha uygun tanıtımlar sunmak için izin verin.',
+        'İzninizle uygulama kullanım verileri reklam ortaklarının verileriyle eşleştirilerek kampanya performansı ölçülür ve reklamlar kişiselleştirilir.',
     },
   ]);
 }

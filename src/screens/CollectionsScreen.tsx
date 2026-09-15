@@ -3,8 +3,10 @@ import { FlatList, NativeScrollEvent, NativeSyntheticEvent, Text, TextInput, Tou
 import { useTheme } from 'react-native-paper';
 import { styles } from '../styles/styles';
 import { AppIcon } from '../components/app-icon';
-import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
+import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf, parseMoney } from '../utils/format';
 import { PaymentRecord } from '../types';
+import DatePickerField from '../components/date-picker-field';
+import { caylikDesign } from '../context/app-theme';
 import { CaylikScreenHeader } from '../components/caylik-ui';
 
 const recordTime = (value?: string) => {
@@ -17,12 +19,13 @@ const recordTime = (value?: string) => {
 
 export default function CollectionsScreen(props: any) {
   const theme = useTheme();
-  const selectedCardColor = theme.dark ? '#174C38' : theme.colors.primary;
+  const selectedCardColor = theme.colors.primary;
   const { handleSpecificHarvestPayment, harvests, payments, handleDelete, openPaymentEditModal, prepareLegacyPaymentForEdit, payAmount, payDate, payDesc, payHarvestId, setPayAmount, setPayDate, setPayDesc, setPayHarvestId } = props;
   const scrollRef = useRef<FlatList<any>>(null);
   const { width } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const cardWidth = Math.max(280, width - 64);
+  const [showHarvestPicker, setShowHarvestPicker] = useState(false);
+  const cardWidth = Math.max(240, Math.min(width, caylikDesign.contentMaxWidth) - 64);
   const cardStep = cardWidth + 12;
 
   const pendingHarvests = useMemo(
@@ -89,16 +92,7 @@ export default function CollectionsScreen(props: any) {
     <View>
       <CaylikScreenHeader icon="hand-coin-outline" eyebrow="TAHSİLAT YÖNETİMİ" title="Ödeme Al" description="Bekleyen hasadı seçin ve alınan ödemeyi güvenle kaydedin." />
       <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <View style={{ width: 50, height: 50, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primaryContainer }}>
-            <AppIcon name="wallet-bifold-outline" size={27} color={theme.colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.formTitle, { color: theme.colors.onSurface, marginBottom: 2 }]}>Ödeme Al</Text>
-            <Text style={{ color: theme.colors.primary, fontWeight: '800', fontSize: 12, letterSpacing: 0.7 }}>ALACAĞINI KAYDET</Text>
-          </View>
-        </View>
-        <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>
+        <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant, display: showHarvestPicker ? 'flex' : 'none' }]}>
           Her kart bir hasat kaydıdır. Doğru hasadı bulmak için kartları sağa-sola kaydırın veya Önceki / Sonraki düğmelerini kullanın.
         </Text>
 
@@ -106,6 +100,12 @@ export default function CollectionsScreen(props: any) {
           <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>Bekleyen ödemesi olan hasat kaydı yok.</Text>
         ) : (
           <>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ödeme alınacak hasadı seç" accessibilityState={{ expanded: showHarvestPicker }} onPress={() => setShowHarvestPicker(value => !value)} style={{ minHeight: 64, padding: 14, borderWidth: 1, borderColor: theme.colors.outlineVariant, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <AppIcon name="factory" color={theme.colors.primary} />
+              <View style={{ flex: 1 }}><Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>Ödeme alınacak hasat</Text><Text style={{ color: theme.colors.onSurface, fontSize: 17, fontWeight: '600' }}>{selected?.firma || 'Hasat seç'}</Text><Text style={{ color: theme.colors.onSurfaceVariant }}>{formatDisplayDate(selected?.tarih)} · {selected?.kg || selected?.weight || 0} kg</Text></View>
+              <AppIcon name={showHarvestPicker ? 'chevron-up' : 'chevron-down'} color={theme.colors.primary} />
+            </TouchableOpacity>
+            <View style={{ display: showHarvestPicker ? 'flex' : 'none' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <Text style={[styles.label, { color: theme.colors.onSurface }]}>Hasat Kaydı</Text>
               <View style={{ backgroundColor: theme.colors.primaryContainer, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
@@ -198,20 +198,12 @@ export default function CollectionsScreen(props: any) {
               </TouchableOpacity>
             </View>
 
+            </View>
             <View style={{ backgroundColor: theme.colors.primaryContainer, borderRadius: 14, padding: 13, marginBottom: 12 }}>
               <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: '900' }}>Kalan ödeme: {formatTL(selectedRemaining)}</Text>
             </View>
           </>
         )}
-
-        <Text style={[styles.label, { color: theme.colors.onSurface }]}>Tahsilat Tarihi (GG.AA.YYYY)</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
-          placeholderTextColor={theme.colors.onSurfaceVariant}
-          placeholder="12.08.2026"
-          value={payDate}
-          onChangeText={setPayDate}
-        />
 
         <Text style={[styles.label, { color: theme.colors.onSurface }]}>Alınan Tutar (TL)</Text>
         <TextInput
@@ -223,6 +215,9 @@ export default function CollectionsScreen(props: any) {
           onChangeText={setPayAmount}
         />
 
+        <DatePickerField label="Ödeme tarihi" value={payDate} onChange={setPayDate} />
+
+
         <Text style={[styles.label, { color: theme.colors.onSurface }]}>Not (İsteğe Bağlı)</Text>
         <TextInput
           style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
@@ -233,8 +228,13 @@ export default function CollectionsScreen(props: any) {
           autoCorrect={false}
         />
 
-        <TouchableOpacity style={[styles.submitBtn, { opacity: pendingHarvests.length === 0 ? 0.5 : 1 }]} disabled={pendingHarvests.length === 0} onPress={handleSpecificHarvestPayment}>
-          <View style={styles.submitBtnContent}><AppIcon name="hand-coin-outline" size={21} color="#FFFFFF" /><Text style={styles.submitBtnText}>Ödemeyi Kaydet</Text></View>
+        {selected && <View style={{ backgroundColor: theme.colors.secondaryContainer, padding: 16, borderRadius: 16, marginVertical: 12, gap: 6 }}>
+          <Text style={{ color: theme.colors.onSecondaryContainer }}>Mevcut alacak: {formatTL(selectedRemaining)}</Text>
+          <Text style={{ color: theme.colors.onSecondaryContainer }}>Bu tahsilat: {formatTL(Math.max(0, parseMoney(payAmount) || 0))}</Text>
+          <Text style={{ color: theme.colors.onSecondaryContainer, fontWeight: '700', fontSize: 20 }}>Kalan alacak: {formatTL(Math.max(0, selectedRemaining - (parseMoney(payAmount) || 0)))}</Text>
+        </View>}
+        <TouchableOpacity style={[styles.submitBtn, { backgroundColor: theme.colors.primary, opacity: pendingHarvests.length === 0 ? 0.5 : 1 }]} disabled={pendingHarvests.length === 0} onPress={handleSpecificHarvestPayment}>
+          <View style={styles.submitBtnContent}><AppIcon name="hand-coin-outline" size={21} color={theme.colors.onPrimary} /><Text style={[styles.submitBtnText, { color: theme.colors.onPrimary }]}>Tahsilatı kaydet</Text></View>
         </TouchableOpacity>
       </View>
 

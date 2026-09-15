@@ -4,8 +4,8 @@
     "slug": "cay-ureticisi",
     "description": "Çaylık; çay üreticileri için sade hasat, ödeme, gider ve fabrika fiyatı takibi.",
     "scheme": "cayureticisi",
-    "version": "1.0.15",
-    "orientation": "portrait",
+    "version": "1.0.16",
+    "orientation": "default",
     "backgroundColor": "#F8F3E7",
     "icon": "./assets/caylik-icon-v1.png",
     "userInterfaceStyle": "automatic",
@@ -13,6 +13,15 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.cryptomarsis.cayureticisi",
       "buildNumber": "5",
+      "infoPlist": {
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait"
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown"
+        ]
+      },
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -49,7 +58,10 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-sharing",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        { "sounds": ["./assets/sounds/due_reminder.wav"] }
+      ],
       "expo-secure-store",
       [
         "expo-audio",
@@ -68,20 +80,27 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash.png",
+          "image": "./assets/caylik-icon-v1.png",
+          "imageWidth": 180,
           "resizeMode": "contain",
           "backgroundColor": "#F8F3E7"
         }
       ],
       "expo-image",
       "expo-asset",
-      "expo-tracking-transparency"
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "İzninizle uygulama kullanım verileri reklam ortaklarının verileriyle eşleştirilerek kampanya performansı ölçülür ve reklamlar kişiselleştirilir."
+        }
+      ]
       ,
       [
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-4870931624363029~6235691078",
-          "iosAppId": "ca-app-pub-4870931624363029~5191921346"
+          "iosAppId": "ca-app-pub-4870931624363029~5191921346",
+          "delayAppMeasurementInit": true
         }
       ]
     ],

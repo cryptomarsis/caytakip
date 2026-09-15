@@ -4,11 +4,12 @@ import { useTheme } from 'react-native-paper';
 import { AppIcon, AppIconName } from '../components/app-icon';
 import { CaylikActionCard, CaylikScreenHeader } from '../components/caylik-ui';
 
-type Tab = 'assistant' | 'creditStore' | 'advertise' | 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings';
+type Tab = 'assistant' | 'creditStore' | 'advertise' | 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'quota';
 type Props = { isAdmin: boolean; onNavigate: (tab: Tab | 'admin') => void };
 type MenuItem = { tab: Tab; label: string; detail: string; icon: AppIconName; tone: string; soft: string };
 
 const items: MenuItem[] = [
+  { tab: 'quota', label: 'ÇAYKUR Kota Takip', detail: 'Kotanı gir, teslimatların otomatik düşsün', icon: 'leaf-circle-outline', tone: '#254B37', soft: '#DCE6D8' },
   { tab: 'history', label: 'Hasat Geçmişi', detail: 'Kayıtlarınızı bulun, filtreleyin ve düzenleyin', icon: 'timeline-clock-outline', tone: '#49B783', soft: 'rgba(73,183,131,0.16)' },
   { tab: 'expense', label: 'Giderler', detail: 'Masraflarınızı kaydedin ve takip edin', icon: 'receipt-text-outline', tone: '#E46E73', soft: 'rgba(228,110,115,0.16)' },
   { tab: 'gardens', label: 'Bahçeler', detail: 'Bahçelerinizi ve verimini yönetin', icon: 'greenhouse', tone: '#8FC35C', soft: 'rgba(143,195,92,0.16)' },

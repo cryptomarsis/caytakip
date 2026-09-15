@@ -8,6 +8,9 @@ export const API_TIMEOUTS = {
 
 export const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = API_TIMEOUTS.default) => {
   const controller = new AbortController();
+  const abortRequest = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', abortRequest, { once: true });
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutError = new Error('Sunucu yanıt vermekte gecikti. Lütfen birkaç saniye sonra tekrar deneyin.');
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -23,5 +26,6 @@ export const fetchWithTimeout = async (url: string, options: RequestInit = {}, t
     throw new Error('İnternet veya sunucu bağlantısı kurulamadı.');
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    options.signal?.removeEventListener('abort', abortRequest);
   }
 };

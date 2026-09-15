@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, TextInput, TouchableOpacity } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import { AppIcon } from '../components/app-icon';
@@ -19,12 +19,18 @@ const detailLinesOf = (price: any) => [
 
 function PriceDetails({ price, color }: { price: any; color: string }) {
   const lines = detailLinesOf(price);
+  const [expanded, setExpanded] = useState(false);
   if (!lines.length) return null;
-  return <View style={local.priceDetails}>{lines.map((line, index) => <View key={`${line}-${index}`} style={local.priceDetailLine}><View style={[local.priceDetailDot, { backgroundColor: color }]} /><Text style={[local.priceDetailText, { color }]}>{line}</Text></View>)}</View>;
+  return <View style={local.priceDetails}>
+    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color, fontWeight: '600' }}>Koşulları {expanded ? 'gizle' : 'incele'}</Text><AppIcon name={expanded ? 'chevron-up' : 'chevron-right'} size={20} color={color} /></TouchableOpacity>
+    {expanded && lines.map((line, index) => <View key={`${line}-${index}`} style={local.priceDetailLine}><View style={[local.priceDetailDot, { backgroundColor: color }]} /><Text style={[local.priceDetailText, { color }]}>{line}</Text></View>)}
+  </View>;
 }
 
 export default function FactoryPricesScreen(props: any) {
   const theme = useTheme();
+  const [query, setQuery] = useState('');
+  const [priceFilter, setPriceFilter] = useState('Tümü');
   const { factoryPrices, handleDelete, handleSaveFactoryPrice, isAdmin, priceForm, setPriceForm } = props;
   const latestByFactory = useMemo(() => {
     const map = new Map<string, any>();
@@ -41,6 +47,10 @@ export default function FactoryPricesScreen(props: any) {
     firma,
     rows: PRICE_TYPES.map(type => latestByFactory.find((p:any)=>String(p.firma||'').trim()===firma && String(p.fiyatTuru||'Peşin')===type) || null)
   })), [factories, latestByFactory]);
+  const visibleRows = useMemo(() => currentRows
+    .filter(f => f.firma.toLocaleLowerCase('tr-TR').includes(query.trim().toLocaleLowerCase('tr-TR')))
+    .map(f => ({ ...f, rows: f.rows.map(p => p && (priceFilter === 'Tümü' || (p.fiyatTuru || 'Peşin') === priceFilter) ? p : null) }))
+    .filter(f => f.rows.some(Boolean)), [currentRows, query, priceFilter]);
   const best = useMemo(() => {
     const rows = latestByFactory.filter(p => PRICE_TYPES.includes(String(p.fiyatTuru||'Peşin') as typeof PRICE_TYPES[number]));
     return rows.sort((a:any,b:any)=>Number(b.fiyat||0)-Number(a.fiyat||0))[0] || null;
@@ -102,7 +112,11 @@ export default function FactoryPricesScreen(props: any) {
       <View style={{ flex: 1 }}><Text style={[styles.bestPriceLabel, { color: theme.colors.onSecondaryContainer }]}>En yüksek güncel fiyat</Text><Text style={[styles.bestPriceValue, { color: theme.colors.onSecondaryContainer }]}>{best.firma} · {formatTL(Number(best.fiyat)||0)} / KG</Text><Text style={[styles.bestPriceMeta, { color: theme.colors.onSurfaceVariant }]}>{best.fiyatTuru || 'Peşin'} · {formatDisplayDate(best.tarih)}</Text></View>
     </View>}
 
-    {currentRows.length===0 ? <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>Henüz fabrika fiyatı eklenmedi.</Text> : currentRows.map((f:any) => {
+    <TextInput accessibilityLabel="Fabrika ara" placeholder="Fabrika ara" value={query} onChangeText={setQuery} placeholderTextColor={theme.colors.onSurfaceVariant} style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.onSurface, borderColor: theme.colors.outlineVariant }]} />
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 16 }}>
+      {['Tümü', ...PRICE_TYPES].map(type => <TouchableOpacity key={type} accessibilityRole="button" accessibilityState={{ selected: priceFilter === type }} onPress={() => setPriceFilter(type)} style={{ minHeight: 48, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 12, backgroundColor: priceFilter === type ? theme.colors.primary : theme.colors.surfaceVariant }}><Text style={{ color: priceFilter === type ? theme.colors.onPrimary : theme.colors.onSurface }}>{type}</Text></TouchableOpacity>)}
+    </ScrollView>
+    {visibleRows.length===0 ? <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>{currentRows.length ? 'Aramanıza uygun fiyat bulunamadı.' : 'Henüz fabrika fiyatı eklenmedi.'}</Text> : visibleRows.map((f:any) => {
       const cashPrice = f.rows[0];
       const otherPrices = f.rows.slice(1).filter(Boolean);
       return <View key={f.firma} style={[styles.factoryCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
@@ -113,7 +127,7 @@ export default function FactoryPricesScreen(props: any) {
         {cashPrice ? <View style={[styles.factoryMainPrice, { backgroundColor: theme.colors.primaryContainer }]}>
           <View style={{ flex: 1 }}><Text style={[styles.factoryPriceLabel, { color: theme.colors.onSurfaceVariant }]}>Peşin fiyat</Text><Text style={[styles.factoryPriceValue, { color: theme.colors.onPrimaryContainer }]}>{formatTL(Number(cashPrice.fiyat)||0)} / KG</Text><Text style={[styles.factoryPriceDate, { color: theme.colors.onSurfaceVariant }]}>{formatDisplayDate(cashPrice.tarih)}</Text><PriceDetails price={cashPrice} color={theme.colors.onPrimaryContainer} /></View>
           {isAdmin && <TouchableOpacity style={styles.compactDeleteBtn} onPress={()=>handleDelete('factory-prices', cashPrice._id, 'Fiyat')}><Text style={styles.compactDeleteText}>Sil</Text></TouchableOpacity>}
-        </View> : <Text style={[styles.factoryEmptyPrice, { color: theme.colors.onSurfaceVariant }]}>Peşin fiyat girilmemiş.</Text>}
+        </View> : priceFilter === 'Tümü' && <Text style={[styles.factoryEmptyPrice, { color: theme.colors.onSurfaceVariant }]}>Peşin fiyat girilmemiş.</Text>}
         {otherPrices.map((p:any) => <View key={p._id} style={[styles.factoryDetailRow, { borderTopColor: theme.colors.outline }]}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.factoryDetailLabel, { color: theme.colors.onSurface }]}>{p.fiyatTuru}</Text>

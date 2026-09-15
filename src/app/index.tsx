@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Image, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions, Keyboard } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, StatusBar, Switch, Platform, Linking, useWindowDimensions, Keyboard, AppState } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import NetInfo from '@react-native-community/netinfo';
@@ -9,11 +9,17 @@ import * as Sharing from 'expo-sharing';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useTheme } from 'react-native-paper';
 import { AppIcon } from '../components/app-icon';
+import { TeaWordmark } from '../components/tea-brand';
+import { MobileBrandHeader } from '../components/mobile-brand-header';
 import DatePickerField from '../components/date-picker-field';
 import { API_TIMEOUTS, API_URL, fetchWithTimeout } from '../services/api';
-import { clearDueNotifications, setupNotifications } from '../services/dueNotifications';
+import { clearDueNotifications, setupNotifications, syncDueNotifications } from '../services/dueNotifications';
+import { playFeedbackSound, stopFeedbackSound } from '../services/feedbackSounds';
+import { cancelDailyReminder, syncDailyReminder, refreshDailyReminderPolicy } from '../services/dailyReminder';
+import { setNotificationOwner } from '../services/notificationQueue';
 import { saveSession, getSession, clearSession } from '../services/session';
-import { clearOfflineData } from '../services/offlineQueue';
+import { createSessionLifecycle, type SessionScope } from '../services/sessionLifecycle';
+import { clearOfflineData, discardOfflineRequest } from '../services/offlineQueue';
 import { UserSession, HarvestRecord, PaymentRecord } from '../types';
 import { formatTL, normalizePhone, formatDisplayDate, toServerDate, parseMoney, todayDisplayDate, calculateAgriculturalDeductions, remainingTotalOf } from '../utils/format';
 import { styles } from '../styles/styles';
@@ -32,6 +38,9 @@ import {
 import { ActiveTab, getDesktopMenuItems, mobileNavItems } from '../navigation';
 import DashboardScreen from '../screens/DashboardScreen';
 import HarvestScreen from '../screens/HarvestScreen';
+import QuotaScreen from '../screens/QuotaScreen';
+import QuotaPlanPicker from '../components/QuotaPlanPicker';
+import HarvestReward from '../components/HarvestReward';
 import HarvestHistoryScreen from '../screens/HarvestHistoryScreen';
 import CollectionsScreen from '../screens/CollectionsScreen';
 import ReceivablesScreen from '../screens/ReceivablesScreen';
@@ -47,6 +56,7 @@ import CreditStoreScreen from '../screens/CreditStoreScreen';
 import AdvertiseScreen from '../screens/AdvertiseScreen';
 import AuthScreen from '../screens/AuthScreen';
 import AdTrackingConsentPrompt from '../components/AdTrackingConsentPrompt';
+import { shouldRequestTracking } from '../utils/trackingPromptPolicy';
 import AdMobBanner from '../components/AdMobBanner';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
@@ -63,9 +73,20 @@ export default function App() {
   const { width: windowWidth } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && windowWidth >= 960;
   const paperTheme = useTheme();
-  const refreshPromiseRef = useRef<Promise<UserSession | null> | null>(null);
+  const authCleanupRef = useRef<Promise<void> | null>(null);
+  const harvestSavingRef = useRef(false);
   // Kullanıcı Giriş / Kayıt State'leri
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
+  const [authSession] = useState(() => createSessionLifecycle({ save: saveSession, clear: clearSession, changed: (user) => {
+    setNotificationOwner(user?.userId || null);
+    setCurrentUser(user);
+  } }));
+  const [harvestReward, setHarvestReward] = useState<{ id: number; userId: string; kind: 'harvest' | 'payment'; value: string } | null>(null);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => { if (state !== 'active') stopFeedbackSound(); });
+    return () => { subscription.remove(); stopFeedbackSound(); };
+  }, []);
+  useEffect(() => () => stopFeedbackSound(), [currentUser?.userId]);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authPhone, setAuthPhone] = useState('');
   const [authName, setAuthName] = useState('');
@@ -80,6 +101,7 @@ export default function App() {
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [assistantDraft, setAssistantDraft] = useState<{ userId: string; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
 
@@ -94,6 +116,7 @@ export default function App() {
   // Form State'leri
   const todayTR = todayDisplayDate();
   const [hForm, setHForm] = useState({
+    quotaPlanId: '',
     date: todayTR,
     surum: '1. Sürüm',
     producer: '',
@@ -125,7 +148,7 @@ export default function App() {
   const [editingHarvest, setEditingHarvest] = useState<HarvestRecord | null>(null);
   const [harvestEditModalVisible, setHarvestEditModalVisible] = useState(false);
   const [editHarvestForm, setEditHarvestForm] = useState({
-    date: '', surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: ''
+    quotaPlanId: '', date: '', surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: ''
   });
   // Tahsilat kaydı düzenleme formu. Tahsilat ayrı kayıt olduğu için yapılan
   // değişiklik, bağlı hasadın kalan alacağını sunucuda otomatik günceller.
@@ -139,7 +162,7 @@ export default function App() {
   const [payDesc, setPayDesc] = useState('');
   const [payDate, setPayDate] = useState(todayTR);
 
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const desktopMenuItems = getDesktopMenuItems(Boolean(isAdmin));
   const activeDesktopMenu = desktopMenuItems.find((item) => item.tab === activeTab);
 
@@ -163,36 +186,38 @@ export default function App() {
     ...(currentUser?.token ? { Authorization: `Bearer ${currentUser.token}` } : {})
   });
 
-  const refreshAccessToken = async (): Promise<UserSession | null> => {
-    if (!currentUser?.refreshToken) return null;
-    try {
+  const refreshAccessToken = useCallback(async (user: UserSession): Promise<UserSession | null> => {
+    if (!user.refreshToken) return null;
       const res = await fetchWithTimeout(`${API_URL}/auth/refresh`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: currentUser.refreshToken })
+        body: JSON.stringify({ refreshToken: user.refreshToken })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.token || !data?.refreshToken) { await clearSession(); setCurrentUser(null); return null; }
-      const nextUser: UserSession = { ...currentUser, userId: data.userId || currentUser.userId, name: data.name || currentUser.name, phone: normalizePhone(data.phone || currentUser.phone), role: data.role === 'admin' ? 'admin' : 'user', token: data.token, refreshToken: data.refreshToken };
-      setCurrentUser(nextUser); await saveSession(nextUser); return nextUser;
-    } catch { return null; }
-  };
+      if (!res.ok || !data?.token || !data?.refreshToken) return null;
+      return { ...user, userId: data.userId || user.userId, name: data.name || user.name, phone: normalizePhone(data.phone || user.phone), role: data.role === 'admin' ? 'admin' : data.role === 'manager' ? 'manager' : 'user', adminPermissions: Array.isArray(data.adminPermissions) ? data.adminPermissions : [], token: data.token, refreshToken: data.refreshToken };
+  }, []);
 
-  const authFetch = async (url: string, options: RequestInit = {}, timeout = API_TIMEOUTS.default) => {
+  const authFetchScoped = useCallback(async (url: string, options: RequestInit = {}, timeout = API_TIMEOUTS.default): Promise<{ response: Response; scope: SessionScope }> => {
     const makeOptions = (user: UserSession) => ({ ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}), Authorization: `Bearer ${user.token}` } });
-    if (!currentUser?.token) throw new Error('Oturum bulunamadı.');
-    let res = await fetchWithTimeout(url, makeOptions(currentUser), timeout);
-    if (res.status !== 401) return res;
-    // Birden fazla veri isteği aynı anda 401 alırsa refresh token yalnızca bir
-    // kez kullanılmalıdır. Diğer istekler aynı yenileme sonucunu bekler.
-    if (!refreshPromiseRef.current) {
-      refreshPromiseRef.current = refreshAccessToken().finally(() => {
-        refreshPromiseRef.current = null;
-      });
-    }
-    const nextUser = await refreshPromiseRef.current;
-    if (!nextUser) return res;
-    return fetchWithTimeout(url, makeOptions(nextUser), timeout);
-  };
+    const started = authSession.capture();
+    if (!started.user?.token) throw new Error('Oturum bulunamadı.');
+    let scope = started;
+    let response = await fetchWithTimeout(url, makeOptions(started.user), timeout);
+    if (!authSession.isCurrent(started)) throw new Error('Oturum değişti.');
+    if (response.status !== 401) return { response, scope };
+    // Shared refresh is scoped to this account generation; late T1 failures reuse T2.
+    const nextUser = await authSession.refreshOnce(started, refreshAccessToken);
+    if (!authSession.isCurrent(started)) throw new Error('Oturum değişti.');
+    if (!nextUser) return { response, scope };
+    scope = authSession.capture();
+    response = await fetchWithTimeout(url, makeOptions(nextUser), timeout);
+    if (!authSession.isCurrent(started)) throw new Error('Oturum değişti.');
+    return { response, scope };
+  }, [authSession, refreshAccessToken]);
+  const authFetch = useCallback(async (url: string, options: RequestInit = {}, timeout = API_TIMEOUTS.default) => {
+    if (!currentUser || authSession.capture().user !== currentUser) throw new Error('Oturum değişti.');
+    return (await authFetchScoped(url, options, timeout)).response;
+  }, [authFetchScoped, authSession, currentUser]);
 
   const {
     harvests,
@@ -217,15 +242,13 @@ export default function App() {
   const refreshAssistantWallet = aiAssistant.refreshWallet;
   const storePurchases = useStorePurchases(currentUser?.userId, authFetch, aiAssistant.refreshWallet);
   const handleRewardedAdEarned = async () => {
-    const response = await authFetch(`${API_URL}/ai/rewarded-ad`, { method: 'POST', headers: getAuthHeaders() });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      showOperationFeedback('Ücretsiz Kredi', data?.error || 'Reklam ödülü hesabınıza eklenemedi.', 'error');
-      return;
-    }
     await aiAssistant.refreshWallet();
     showOperationFeedback('10 Kredi Kazandınız', 'Reklam ödülü hesabınıza eklendi.', 'success');
   };
+  const policyRequest = useCallback((url: string, options?: RequestInit, timeout?: number) => {
+    if (!currentUser || authSession.capture().user !== currentUser) return Promise.reject(new Error('Oturum değişti.'));
+    return authFetch(url, options, timeout);
+  }, [authFetch, authSession, currentUser]);
   const backgroundActionsRef = useRef({ fetchData, refreshPendingSyncCount, syncOfflineQueue });
   useEffect(() => {
     backgroundActionsRef.current = { fetchData, refreshPendingSyncCount, syncOfflineQueue };
@@ -236,59 +259,91 @@ export default function App() {
   }, [activeTab, currentUser?.userId, refreshAssistantWallet]);
 
   const postOrQueue = async (endpoint: string, body: Record<string, unknown>) => {
+    const scope = authSession.capture();
+    if (!scope.user) throw new Error('Oturum bulunamadı.');
+    const requestId = `entry-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    // Persist BEFORE sending: a crash or lost response must reuse the same identity.
+    await queueOfflineRequest(endpoint, body, requestId);
     const network = await NetInfo.fetch();
-    // Electron'da NetInfo her zaman doğru durum döndürmeyebiliyor. Bilgisayarda
-    // kaydı çevrimdışı kuyruğa atmadan önce gerçek sunucu isteğini denemek gerekir.
-    const isDefinitelyOffline = Platform.OS !== 'web' && (!network.isConnected || network.isInternetReachable === false);
-    if (isDefinitelyOffline) {
-      await queueOfflineRequest(endpoint, body);
-      return { queued: true as const };
-    }
-
+    if (!authSession.isCurrent(scope)) throw new Error('Oturum değişti.');
+    const offline = Platform.OS !== 'web' && (!network.isConnected || network.isInternetReachable === false);
+    if (offline) return { queued: true as const };
     try {
       const response = await authFetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { ...getAuthHeaders(), 'Idempotency-Key': `online-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` },
-        body: JSON.stringify(body)
+        method: 'POST', headers: { ...getAuthHeaders(), 'Idempotency-Key': requestId }, body: JSON.stringify(body)
       });
-      return { queued: false as const, response };
-    } catch (error) {
-      const latestNetwork = await NetInfo.fetch();
-      const wentOffline = Platform.OS !== 'web' && (!latestNetwork.isConnected || latestNetwork.isInternetReachable === false);
-      if (wentOffline) {
-        await queueOfflineRequest(endpoint, body);
-        return { queued: true as const };
+      if (!authSession.isCurrent(scope)) throw new Error('Oturum değişti.');
+      const data = await response.clone().json().catch(() => null);
+      if (response.ok && (data?._id || data?.payment?._id)) {
+        await discardOfflineRequest(scope.user.userId, requestId);
+        await refreshPendingSyncCount();
+        return { queued: false as const, response };
       }
-      throw error;
+      if (response.status >= 400 && response.status < 500 && ![401, 408, 429].includes(response.status) && data?.code !== 'REQUEST_IN_PROGRESS') {
+        await discardOfflineRequest(scope.user.userId, requestId);
+        await refreshPendingSyncCount();
+        return { queued: false as const, response };
+      }
+      return { queued: true as const };
+    } catch (error) {
+      if (!authSession.isCurrent(scope)) throw error;
+      // Unknown outcome stays durable. Never ask the user to create a second copy.
+      return { queued: true as const };
     }
   };
 
   // Uygulama Açılışında Oturumu Kontrol Et
   useEffect(() => {
+    let active = true;
     const checkSavedSession = async () => {
       try {
-        const savedUser = await getSession();
-        if (savedUser?.token && savedUser?.refreshToken) { setCurrentUser(savedUser); } else if (savedUser) { await clearSession(); }
+        await authSession.restore(getSession, () => active);
       } catch (error) {
         console.log('Oturum okuma hatası:', error);
       } finally {
-        setInitialCheckDone(true);
+        if (active) setInitialCheckDone(true);
       }
     };
     checkSavedSession();
-  }, []);
+    return () => { active = false; };
+  }, [authSession]);
 
   useEffect(() => {
+    let active = true;
     if (currentUser) {
       const actions = backgroundActionsRef.current;
-      setupNotifications();
+      void setupNotifications().then(() => active ? syncDailyReminder(currentUser.userId) : undefined).catch(() => undefined);
       actions.refreshPendingSyncCount();
       actions.syncOfflineQueue().then((result) => {
         if (result.synced > 0) actions.fetchData();
       });
       actions.fetchData();
     }
+    return () => { active = false; };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!initialCheckDone) return;
+    let active = true;
+    const userId = currentUser?.userId;
+    const token = currentUser?.token;
+    setNotificationOwner(userId || null);
+    const refreshSeasonReminder = () => {
+      if (!active) return;
+      void (async () => {
+        if (!userId) { await cancelDailyReminder(); return; }
+        // First reconcile cached finite plans (also removes personal legacy schedules).
+        await syncDailyReminder(userId);
+        if (active && token) await refreshDailyReminderPolicy(userId, token, policyRequest);
+      })().catch(() => { if (__DEV__) console.log('Ortak sezon planı güncellenemedi; sonraki bağlantıda yeniden denenecek.'); });
+    };
+    // Replenish only while the account is being used. Every scheduled date remains finite.
+    refreshSeasonReminder();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshSeasonReminder();
+    });
+    return () => { active = false; setNotificationOwner(null); subscription.remove(); };
+  }, [currentUser?.userId, currentUser?.token, initialCheckDone, policyRequest]);
 
   useEffect(() => {
     let active = true;
@@ -316,7 +371,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const userId = currentUser?.userId;
-    if (!userId || onboardingStep !== null) {
+    if (Platform.OS === 'ios' || !userId || onboardingStep !== null) {
       return () => { active = false; };
     }
 
@@ -326,10 +381,7 @@ export default function App() {
       getAdTrackingState(),
     ]).then(([onboardingStatus, promptSeen, trackingState]) => {
       if (!active) return;
-      const canAsk = onboardingStatus === 'done'
-        && !promptSeen
-        && trackingState !== 'unsupported'
-        && trackingState !== 'granted';
+      const canAsk = shouldRequestTracking(Platform.OS, onboardingStatus === 'done', promptSeen, trackingState);
       setAdTrackingPromptVisible(canAsk);
     }).catch(() => {
       if (active) setAdTrackingPromptVisible(false);
@@ -385,6 +437,7 @@ export default function App() {
   };
 
   const handleAuth = async () => {
+    if (authCleanupRef.current || authSession.capture().user) return;
     // iPhone'da sayı klavyesinde "Bitti" tuşu yoktur. Butona basıldığında
     // klavyeyi kapatıp işlemi görünür ve tek dokunuşla başlatırız.
     Keyboard.dismiss();
@@ -395,9 +448,11 @@ export default function App() {
     if (authMode === 'register' && !authName.trim()) { showAuthFeedback('Eksik Bilgi', 'Lütfen Ad Soyad girin.'); return; }
     if (!/^\d{6}$/.test(cleanPin)) { showAuthFeedback('Eksik Bilgi', 'Lütfen 6 haneli giriş şifrenizi belirleyin.'); return; }
     if (authMode === 'register' && cleanPin !== authPinConfirm.replace(/\D/g, '')) { showAuthFeedback('Şifre Eşleşmiyor', 'Giriş şifreleri aynı olmalıdır.'); return; }
+    let authAttempt = authSession.beginAuthentication();
     setLoading(true);
     try {
       const profile = authMode === 'register' ? await saveProfile(cleanPhone, authName, cleanPin) : await syncProfile(cleanPhone, cleanPin);
+      if (!authSession.isCurrent(authAttempt)) return;
       if (!profile?.token) {
         showAuthFeedback('Giriş Başarısız', authMode === 'login' ? 'Kayıt bulunamadı veya oturum oluşturulamadı.' : 'Profil kaydedildi ancak güvenli oturum oluşturulamadı.');
         return;
@@ -407,13 +462,16 @@ export default function App() {
         userId: profile.userId,
         name: profile.name || authName.trim() || 'Üretici',
         phone: normalizePhone(profile.phone || cleanPhone),
-        role: profile.role === 'admin' ? 'admin' : 'user',
+        role: profile.role === 'admin' ? 'admin' : profile.role === 'manager' ? 'manager' : 'user',
+        adminPermissions: Array.isArray(profile.adminPermissions) ? profile.adminPermissions : [],
         token: profile.token,
         refreshToken: profile.refreshToken
       };
-      setCurrentUser(userData); await saveSession(userData);
+      if (!await authSession.replace(userData, authAttempt)) return;
+      authAttempt = authSession.capture();
       if (Platform.OS !== 'web') Alert.alert(authMode === 'register' ? 'Kayıt Başarılı' : 'Giriş Başarılı', `Hoş geldiniz, ${userData.name}!`);
     } catch (e: any) {
+      if (!authSession.isCurrent(authAttempt)) return;
       if (e?.code === 'PIN_SETUP_REQUIRED') {
         setAuthMode('register');
         setAuthPin('');
@@ -422,50 +480,90 @@ export default function App() {
       }
       else showAuthFeedback('Giriş Yapılamadı', e?.message || 'Giriş işlemi başarısız.');
     }
-    finally { setLoading(false); }
+    finally { if (authSession.isCurrent(authAttempt)) setLoading(false); }
   };
 
   // Çıkış Yap
   const handleLogout = async () => {
-    try {
-      if (currentUser?.refreshToken) await fetchWithTimeout(`${API_URL}/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: currentUser.refreshToken }) });
-    } catch {}
-    if (currentUser?.userId) await clearDueNotifications(currentUser.userId);
-    await clearSession();
-    setCurrentUser(null);
+    if (authCleanupRef.current) return authCleanupRef.current;
+    const scope = authSession.capture();
+    if (!scope.user || scope.user !== currentUser) return;
+    const user = scope.user;
+    stopFeedbackSound();
+    setNotificationOwner(null);
+    setHarvestReward(null);
+    // Invalidate before waiting for the server, native cleanup, or an old device write.
+    const cleared = authSession.invalidate(scope);
+    setLoading(true);
+    const task = (async () => {
+      const cleanup = await Promise.allSettled([
+        cancelDailyReminder(), clearDueNotifications(user.userId), cleared,
+        user.refreshToken ? fetchWithTimeout(`${API_URL}/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: user.refreshToken }) }).catch(() => undefined) : Promise.resolve(),
+      ]);
+      if (cleanup.some(result => result.status === 'rejected')) {
+        showAuthFeedback('Çıkış yapıldı; cihazı kontrol edin', 'Bu ekranda oturumunuz kapatıldı, ancak bu cihazdaki bazı bilgiler veya hatırlatmalar tamamen temizlenemedi. Kalan bildirimleri telefonunuzun Ayarlar > Bildirimler > Çaylık bölümünden kapatabilirsiniz. Sorun sürerse cihaz ayarlarından Çaylık uygulama verilerini temizleyebilirsiniz.', 'info');
+      }
+    })();
+    authCleanupRef.current = task;
+    try { await task; }
+    finally { if (authCleanupRef.current === task) { authCleanupRef.current = null; setLoading(false); } }
   };
 
   const handleDeleteAccount = async () => {
+    const scope = authSession.capture();
+    if (!scope.user || scope.user !== currentUser || authCleanupRef.current) throw new Error('Oturum değişti.');
+    stopFeedbackSound();
+    setHarvestReward(null);
+    const userId = scope.user.userId;
     try {
       const response = await authFetch(`${API_URL}/users/me`, { method: 'DELETE', headers: getAuthHeaders() });
       const data = await response.json().catch(() => ({}));
+      if (!authSession.isCurrent(scope)) throw new Error('Oturum değişti.');
       if (!response.ok) throw new Error(data?.error || 'Hesap silinemedi.');
-      if (currentUser?.userId) await Promise.all([clearOfflineData(currentUser.userId), clearDueNotifications(currentUser.userId)]);
-      await clearSession();
-      setCurrentUser(null);
-      Alert.alert('Hesap Silindi', 'Hesabınız ve ilişkili kayıtlarınız silindi.');
     } catch (error: any) { Alert.alert('Hesap Silme', error?.message || 'Hesap silinemedi.'); throw error; }
+    setNotificationOwner(null);
+    const cleared = authSession.invalidate(scope);
+    setLoading(true);
+    // The server has confirmed deletion. Local cleanup cannot turn that into a failure
+    // or leave the deleted account active while unrelated cleanup is still pending.
+    const task = (async () => {
+    const cleanup = await Promise.allSettled([
+      cancelDailyReminder(),
+      userId ? clearOfflineData(userId) : Promise.resolve(),
+      userId ? clearDueNotifications(userId) : Promise.resolve(),
+      cleared,
+    ]);
+    if (cleanup.some(result => result.status === 'rejected')) {
+      showAuthFeedback('Hesap silindi; cihaz temizliği tamamlanamadı', 'Hesabınız ve ilişkili kayıtlarınız sunucudan silindi, bu ekranda oturumunuz kapatıldı. Bu cihazdaki bazı bilgiler veya hatırlatmalar temizlenemedi. Kalan bildirimleri telefonunuzun Ayarlar > Bildirimler > Çaylık bölümünden kapatabilirsiniz. Cihazda kalan bilgileri kaldırmak için Çaylık uygulama verilerini temizleyebilir veya uygulamayı kaldırabilirsiniz.', 'info');
+    } else {
+      showAuthFeedback('Hesap Silindi', 'Hesabınız ve ilişkili kayıtlarınız silindi.', 'info');
+    }
+    })();
+    authCleanupRef.current = task;
+    try { await task; }
+    finally { if (authCleanupRef.current === task) { authCleanupRef.current = null; setLoading(false); } }
   };
 
   const handleChangePin = async (currentPin: string, newPin: string) => {
-    if (!currentUser) throw new Error('Oturum bulunamadı.');
-    const response = await authFetch(`${API_URL}/users/me/pin`, {
+    if (!currentUser || authSession.capture().user !== currentUser) throw new Error('Oturum bulunamadı.');
+    const { response, scope } = await authFetchScoped(`${API_URL}/users/me/pin`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify({ currentPin, newPin })
     });
     const data = await response.json().catch(() => ({}));
+    if (!authSession.isCurrent(scope, true) || !scope.user) throw new Error('Oturum değişti.');
     if (!response.ok || !data?.token) throw new Error(data?.error || 'Giriş şifresi güncellenemedi.');
     const refreshedUser: UserSession = {
-      ...currentUser,
+      ...scope.user,
       token: data.token,
-      refreshToken: data.refreshToken || currentUser.refreshToken,
-      name: data.name || currentUser.name,
-      phone: normalizePhone(data.phone || currentUser.phone),
-      role: data.role === 'admin' ? 'admin' : 'user'
+      refreshToken: data.refreshToken || scope.user.refreshToken,
+      name: data.name || scope.user.name,
+      phone: normalizePhone(data.phone || scope.user.phone),
+      role: data.role === 'admin' ? 'admin' : data.role === 'manager' ? 'manager' : 'user',
+      adminPermissions: Array.isArray(data.adminPermissions) ? data.adminPermissions : []
     };
-    setCurrentUser(refreshedUser);
-    await saveSession(refreshedUser);
+    if (!await authSession.replace(refreshedUser, scope, true)) throw new Error('Oturum değişti.');
   };
 
   const handleExportData = async () => {
@@ -510,6 +608,9 @@ export default function App() {
     setAdTrackingPromptBusy(true);
     try {
       await requestAdTrackingConsent();
+    } catch {
+      // Tracking is optional: a permission/SDK failure must never block the app.
+      console.warn('Reklam ölçümü izni uygulanamadı; uygulama kullanılmaya devam edebilir.');
     } finally {
       setAdTrackingPromptBusy(false);
       setAdTrackingPromptVisible(false);
@@ -670,6 +771,7 @@ export default function App() {
 
   // Hasat Kaydetme
   const handleSaveHarvest = async () => {
+    if (harvestSavingRef.current) return;
     const producerName = hForm.producer.trim() || currentUser?.name || 'Üretici';
     const tarih = toServerDate(hForm.date);
     const vadeTarihi = hForm.isVadeli ? toServerDate(hForm.vadeTarihi) : '';
@@ -685,6 +787,7 @@ export default function App() {
       showOperationFeedback('Tahsilat Hatası', `Tahsilat net alacaktan fazla olamaz. Net alacak: ${formatTL(amounts.netTutar)}`, 'error');
       return;
     }
+    harvestSavingRef.current = true;
     setLoading(true);
     try {
       const payload = {
@@ -695,6 +798,7 @@ export default function App() {
         kg: parseMoney(hForm.kg),
         weight: parseMoney(hForm.kg),
         firma: hForm.firma ? hForm.firma.trim() : '',
+        quotaPlanId: hForm.quotaPlanId,
         fiyat: parseMoney(hForm.fiyat),
         brutTutar: amounts.brutTutar,
         gelirVergisiOrani: amounts.gelirVergisiOrani,
@@ -712,17 +816,21 @@ export default function App() {
       if (result.queued) {
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setReceiptNotice('');
-        setHForm({ date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
+        setHForm({ quotaPlanId: '', date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
         setActiveTab('dashboard');
         return;
       }
       const res = result.response;
 
       if (res.ok) {
-        showOperationFeedback('Başarılı', 'Hasat kaydı eklendi.', 'success');
+        setOperationFeedback(null);
+        Keyboard.dismiss();
+        if (currentUser) void playFeedbackSound('harvest', currentUser.userId);
+        if (currentUser) setHarvestReward({ id: Date.now(), userId: currentUser.userId, kind: 'harvest', value: `${payload.kg.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} KG` });
         setReceiptNotice('');
         // Form Temizleme Mantığı Düzeltildi (Madde 5)
         setHForm({
+          quotaPlanId: '',
           date: todayDisplayDate(),
           surum: '1. Sürüm',
           producer: '',
@@ -746,6 +854,7 @@ export default function App() {
     } catch (e: any) {
       showOperationFeedback('Bağlantı Hatası', e.message || 'Sunucuya ulaşılamadı.', 'error');
     } finally {
+      harvestSavingRef.current = false;
       setLoading(false);
     }
   };
@@ -797,7 +906,10 @@ export default function App() {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showOperationFeedback('Başarılı', 'Tahsilat başarıyla kaydedildi ve satıştan düşüldü.', 'success');
+        setOperationFeedback(null);
+        Keyboard.dismiss();
+        if (currentUser) void playFeedbackSound('payment', currentUser.userId);
+        if (currentUser) setHarvestReward({ id: Date.now(), userId: currentUser.userId, kind: 'payment', value: formatTL(amount) });
         setPayHarvestId('');
         setPayAmount('');
         setPayDesc('');
@@ -960,6 +1072,7 @@ export default function App() {
   const openHarvestEditModal = (harvestItem: HarvestRecord) => {
     setEditingHarvest(harvestItem);
     setEditHarvestForm({
+      quotaPlanId: harvestItem.quotaPlanId || '',
       date: formatDisplayDate(harvestItem.tarih),
       surum: harvestItem.surum || '1. Sürüm',
       producer: harvestItem.producerName || harvestItem.uretici || currentUser?.name || '',
@@ -1004,6 +1117,7 @@ export default function App() {
         body: JSON.stringify({
           tarih, surum: editHarvestForm.surum, uretici: producerName, producerName,
           kg, weight: kg, firma: editHarvestForm.firma.trim(), fiyat, tahsilat,
+          quotaPlanId: editHarvestForm.quotaPlanId,
           brutTutar: amounts.brutTutar, gelirVergisiOrani: amounts.gelirVergisiOrani,
           gelirVergisiKesintisi: amounts.gelirVergisiKesintisi, kesintiTutar: amounts.kesintiTutar,
           aciklama: editHarvestForm.aciklama.trim(), bahce: editHarvestForm.garden.trim(),
@@ -1176,12 +1290,11 @@ export default function App() {
           <View style={[styles.appMain, { backgroundColor: paperTheme.colors.background }]}>
 
         {/* HEADER */}
+        {isDesktop ? (
         <View style={[styles.header, !isDesktop && { backgroundColor: paperTheme.colors.background, borderBottomColor: paperTheme.colors.outlineVariant }, isDesktop && styles.desktopHeader]}>
-          {!isDesktop && <><View pointerEvents="none" style={styles.headerDecorLarge} /><View pointerEvents="none" style={styles.headerDecorSmall} /></>}
           <View style={styles.headerBrandRow}>
-            {!isDesktop && <View style={styles.headerBrandMark}><Image source={require('../../assets/caylik-icon-v1.png')} style={styles.headerBrandImage} /></View>}
             <View style={{ flex: 1 }}>
-              <Text style={[styles.headerEyebrow, !isDesktop && { color: paperTheme.colors.primary }, isDesktop && styles.desktopHeaderSubtitle]}>{isDesktop ? 'ÇAYLIK YÖNETİM' : 'ÇAYLIK · ÜRETİCİ TAKİBİ'}</Text>
+              {isDesktop ? <Text style={styles.desktopHeaderSubtitle}>ÇAYLIK YÖNETİM</Text> : <TeaWordmark compact />}
               <Text style={[styles.headerTitle, !isDesktop && { color: paperTheme.colors.onBackground }, isDesktop && styles.desktopHeaderTitle]}>{isDesktop ? activeDesktopMenu?.label || 'Çaylık' : `Merhaba, ${currentUser.name.split(' ')[0] || currentUser.name}`}</Text>
               <Text style={[styles.headerSubtitle, !isDesktop && { color: paperTheme.colors.onSurfaceVariant }, isDesktop && styles.desktopHeaderSubtitle]}>
                 {isDesktop ? `${activeDesktopMenu?.helper || 'Çay üretimi takibi'} · ${currentUser.name}` : isAdmin ? 'Yönetici hesabı' : 'Sezon verilerin güncel'}
@@ -1200,12 +1313,13 @@ export default function App() {
             )}
           </View>
           </View>
-          <TouchableOpacity style={[styles.logoutBtn, !isDesktop && { backgroundColor: paperTheme.colors.surfaceVariant, borderColor: paperTheme.colors.outlineVariant }, isDesktop && styles.desktopLogoutBtn]} onPress={handleLogout}>
-            <AppIcon name="logout-variant" size={20} color={isDesktop ? '#FFFFFF' : paperTheme.colors.onSurface} />
-            <Text style={[styles.logoutBtnText, !isDesktop && { color: paperTheme.colors.onSurface }]}>Çıkış</Text>
-          </TouchableOpacity>
         </View>
+        ) : <MobileBrandHeader name={currentUser.name} home={activeTab === 'dashboard'} onBack={() => setActiveTab('dashboard')}>
+          {pendingSyncCount > 0 && <Text style={{ color: paperTheme.colors.onSurfaceVariant }}>{pendingSyncCount} kayıt senkronizasyon bekliyor</Text>}
+          {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={{ color: paperTheme.colors.error }}>{failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
+        </MobileBrandHeader>}
 
+        {harvestReward?.userId === currentUser.userId && <HarvestReward key={harvestReward.id} userId={currentUser.userId} kind={harvestReward.kind} value={harvestReward.value} />}
         {operationFeedback && (
           <TouchableOpacity
             accessibilityRole="button"
@@ -1229,6 +1343,9 @@ export default function App() {
           <View style={[styles.content, isDesktop && styles.desktopScroll, { padding: 0, backgroundColor: paperTheme.colors.background }]}>
             {activeTab === 'history' && (
             <HarvestHistoryScreen
+              payments={payments}
+              expenses={expenses}
+              onAskAboutHarvest={(item) => { setAssistantDraft({ userId: currentUser.userId, text: `${formatDisplayDate(item.tarih)} tarihli ${item.firma || ''} teslimatımı (${item.kg ?? item.weight ?? 0} kg, ${item.fiyat || 0} TL/kg) bu sezondaki kayıtlarımla karşılaştır. Eksik bilgi varsa belirt.` }); setActiveTab('assistant'); }}
               harvests={harvests}
               openHarvestEditModal={openHarvestEditModal}
               openPaymentForHarvest={openPaymentForHarvest}
@@ -1274,6 +1391,9 @@ export default function App() {
         >
           {activeTab === 'dashboard' && (
             <DashboardScreen
+              key={currentUser.userId}
+              authFetch={authFetch}
+              pendingSyncCount={pendingSyncCount}
               ads={ads}
               harvests={harvests}
               userName={currentUser.name}
@@ -1293,13 +1413,14 @@ export default function App() {
 
           {activeTab === 'assistant' && (
             <AssistantScreen
+              initialQuestion={assistantDraft?.userId === currentUser.userId ? assistantDraft.text : ''}
               messages={aiAssistant.messages}
               credits={aiAssistant.credits}
               transactions={aiAssistant.transactions}
               busy={aiAssistant.busy}
               transcribing={aiAssistant.transcribing}
               error={aiAssistant.error}
-              onAsk={aiAssistant.ask}
+              onAsk={async (message) => { const result = await aiAssistant.ask(message); if (result) setAssistantDraft(null); return result; }}
               onTranscribe={aiAssistant.transcribeVoice}
               onClear={aiAssistant.clearConversation}
               onOpenStore={() => setActiveTab('creditStore')}
@@ -1307,6 +1428,10 @@ export default function App() {
           )}
           {activeTab === 'creditStore' && (
             <CreditStoreScreen
+              key={currentUser.userId}
+              userId={currentUser.userId}
+              onReload={() => void storePurchases.reload()}
+              authFetch={authFetch}
               credits={aiAssistant.credits}
               onBack={() => setActiveTab('assistant')}
               onPurchase={(productId) => void storePurchases.purchase(productId)}
@@ -1318,8 +1443,12 @@ export default function App() {
               onRewardedAdEarned={handleRewardedAdEarned}
             />
           )}
+
+          {activeTab === 'quota' && <QuotaScreen authFetch={authFetch} />}
           {activeTab === 'advertise' && (
             <AdvertiseScreen
+              key={currentUser.userId}
+              userId={currentUser.userId}
               token={currentUser.token}
               credits={aiAssistant.credits}
               onBuyCredits={() => setActiveTab('creditStore')}
@@ -1329,9 +1458,12 @@ export default function App() {
           {/* HASAT EKLE TABI */}
           {activeTab === 'harvest' && (
             <HarvestScreen
+              harvests={harvests.filter(item => item.userId === currentUser.userId)}
+              authFetch={authFetch}
               currentUser={currentUser}
               hForm={hForm}
               handleSaveHarvest={handleSaveHarvest}
+              saving={loading}
               setHForm={setHForm}
               onPickReceipt={handlePickReceipt}
               receiptBusy={receiptBusy}
@@ -1367,6 +1499,7 @@ export default function App() {
             <ReceivablesScreen
               getReceivablesByMonth={getReceivablesByMonth}
               totalReceivables={totalReceivables}
+              onPayment={openPaymentForHarvest}
             />
           )}
 
@@ -1398,18 +1531,22 @@ export default function App() {
 
           {activeTab === 'settings' && (
             <SettingsScreen
+              policyRequest={policyRequest}
               currentUser={currentUser}
               onChangePin={handleChangePin}
+              onLogout={handleLogout}
               onDeleteAccount={handleDeleteAccount}
               lastSyncAt={lastSyncAt}
               onExportData={handleExportData}
               onSendFeedback={handleSendFeedback}
+              onDueSoundChange={() => syncDueNotifications(currentUser.userId, harvests, true)}
             />
           )}
 
           {/* ADMIN PANELİ TABI */}
           {activeTab === 'admin' && isAdmin && (
             <AdminScreen
+              policyRequest={policyRequest}
               adForm={adForm}
               ads={ads}
               handleDelete={handleDelete}
@@ -1437,21 +1574,21 @@ export default function App() {
           <View style={[styles.mobileBottomNav, { backgroundColor: paperTheme.colors.surface, borderTopColor: paperTheme.colors.outline }]}>
             {mobileNavItems.map((item) => {
               const active = activeTab === item.tab;
-              const centerAction = item.tab === 'harvest';
+              const centerAction = false;
               return (
                 <TouchableOpacity
                   key={item.tab}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={item.label}
-                  style={[styles.mobileBottomNavItem, centerAction && styles.mobileBottomNavCenterItem]}
+                  style={[styles.mobileBottomNavItem, { borderRadius: 16, paddingVertical: 6, backgroundColor: active ? paperTheme.colors.primaryContainer : 'transparent' }, centerAction && styles.mobileBottomNavCenterItem]}
                   onPress={() => setActiveTab(item.tab)}
                 >
                   <View style={[
                     styles.mobileBottomNavIcon,
                     centerAction && styles.mobileBottomNavCenterButton,
                     active && !centerAction && styles.mobileBottomNavIconActive,
-                    active && !centerAction && { backgroundColor: paperTheme.colors.primaryContainer },
+                    active && !centerAction && { backgroundColor: 'transparent' },
                     centerAction && { backgroundColor: paperTheme.colors.primary, borderColor: paperTheme.colors.surface },
                   ]}>
                     <AppIcon name={item.icon} size={centerAction ? 27 : 23} color={centerAction ? paperTheme.colors.onPrimary : active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant} />
@@ -1570,6 +1707,7 @@ export default function App() {
                 <TextInput style={styles.input} value={editHarvestForm.kg} onChangeText={(kg) => setEditHarvestForm({ ...editHarvestForm, kg })} placeholder="Örn: 1000" keyboardType="decimal-pad" />
                 <Text style={styles.label}>Firma / Alıcı</Text>
                 <TextInput style={styles.input} value={editHarvestForm.firma} onChangeText={(firma) => setEditHarvestForm({ ...editHarvestForm, firma })} placeholder="ÇAYKUR veya özel fabrika" />
+                <QuotaPlanPicker key={editingHarvest?._id} authFetch={authFetch} firma={editHarvestForm.firma} season={editHarvestForm.surum} date={toServerDate(editHarvestForm.date)} value={editHarvestForm.quotaPlanId} onChange={(quotaPlanId) => setEditHarvestForm({ ...editHarvestForm, quotaPlanId })} />
                 <Text style={styles.label}>Brüt Birim Fiyat (TL)</Text>
                 <TextInput style={styles.input} value={editHarvestForm.fiyat} onChangeText={(fiyat) => setEditHarvestForm({ ...editHarvestForm, fiyat })} placeholder="Örn: 35,00" keyboardType="decimal-pad" />
                 <Text style={styles.formHelp}>%2 kesinti: {formatTL(calculateAgriculturalDeductions(editHarvestForm.kg, editHarvestForm.fiyat).gelirVergisiKesintisi)} · Net alacak: {formatTL(calculateAgriculturalDeductions(editHarvestForm.kg, editHarvestForm.fiyat).netTutar)}</Text>

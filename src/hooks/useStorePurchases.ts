@@ -13,7 +13,8 @@ export const useStorePurchases = (
   prices: {} as Partial<Record<StoreProductId, string>>,
   purchasingProductId: null as StoreProductId | null,
   restoring: false,
-  status: 'Satın alma yalnızca iPhone ve iPad uygulamasında kullanılabilir.',
+  status: 'Satın alma iOS ve Android mağaza uygulamalarında kullanılabilir.',
   purchase: async (_productId: StoreProductId) => undefined,
   restore: async () => undefined,
+  reload: async () => undefined,
 }), []);

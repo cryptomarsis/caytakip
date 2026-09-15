@@ -51,32 +51,23 @@ export type MonthlyChartPoint = { label: string; value: number };
 
 export function DashboardMonthlyChart({ data, unit = 'KG' }: { data: MonthlyChartPoint[]; unit?: string }) {
   const theme = useTheme();
-  const maximum = Math.max(1, ...data.map((point) => point.value));
-  return (
-    <View style={[ui.chartCard, caylikDesign.shadow.soft, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant, shadowColor: theme.colors.shadow }]}>
-      <View style={ui.chartTopRow}>
-        <View style={[ui.chartIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="chart-bar" size={21} color={theme.colors.primary} /></View>
-        <Text style={[ui.chartHint, { color: theme.colors.onSurfaceVariant }]}>Çubuk yüksekliği aylık toplamı gösterir</Text>
+  const maximum = Math.max(1, ...data.map(point => point.value));
+  return <View style={{ flexDirection: 'row', paddingTop: 12, paddingBottom: 8 }}>
+    <View style={{ width: 44, height: 148, justifyContent: 'space-between', paddingBottom: 16 }}>
+      {[1, .75, .5, .25, 0].map(ratio => <Text key={ratio} style={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}>{Math.round(maximum * ratio).toLocaleString('tr-TR')}</Text>)}
+    </View>
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 132, justifyContent: 'space-between' }}>
+        {[0, 1, 2, 3, 4].map(line => <View key={line} style={{ borderTopWidth: 1, borderColor: theme.colors.outlineVariant, opacity: .6 }} />)}
       </View>
-      <View style={ui.chartPlot}>
-        {data.map((point) => {
-          const height = point.value > 0 ? Math.max(8, Math.round((point.value / maximum) * 128)) : 4;
-          return (
-            <View key={point.label} accessible accessibilityLabel={`${point.label}: ${point.value.toLocaleString('tr-TR')} ${unit}`} style={ui.chartColumn}>
-              <View style={[ui.chartTrack, { backgroundColor: theme.colors.surfaceVariant }]}>
-                <View style={[ui.chartBar, { height, backgroundColor: theme.colors.primary }]} />
-              </View>
-              <Text style={[ui.chartLabel, { color: theme.colors.onSurfaceVariant }]}>{point.label}</Text>
-            </View>
-          );
-        })}
-      </View>
-      <View style={[ui.chartFooter, { borderTopColor: theme.colors.outlineVariant }]}>
-        <Text style={[ui.chartFooterLabel, { color: theme.colors.onSurfaceVariant }]}>En yüksek ay</Text>
-        <Text style={[ui.chartFooterValue, { color: theme.colors.onSurface }]}>{data.reduce((best, point) => point.value > best.value ? point : best, data[0] || { label: '-', value: 0 }).label} · {maximum === 1 && data.every((point) => point.value === 0) ? '0' : maximum.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} {unit}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 154 }}>
+        {data.map(point => <View key={point.label} accessible accessibilityLabel={`${point.label}: ${point.value.toLocaleString('tr-TR')} ${unit}`} style={ui.chartColumn}>
+          <View style={[ui.chartTrack, { backgroundColor: 'transparent' }]}><View style={[ui.chartBar, { height: Math.max(0, point.value) / maximum * 132, backgroundColor: theme.colors.primary }]} /></View>
+          <Text style={[ui.chartLabel, { color: theme.colors.onSurfaceVariant }]}>{point.label.slice(0, 1)}</Text>
+        </View>)}
       </View>
     </View>
-  );
+  </View>;
 }
 
 export function DashboardListRow({ icon, title, detail, value, status, tone = 'neutral', onPress, accessibilityLabel }: { icon: AppIconName; title: string; detail: string; value: string; status?: string; tone?: Tone; onPress?: () => void; accessibilityLabel: string }) {
@@ -114,7 +105,7 @@ export function DashboardEmptyState({ icon, text }: { icon: AppIconName; text: s
 const ui = StyleSheet.create({
   sectionHeader: { marginTop: caylikDesign.spacing.xl, marginBottom: caylikDesign.spacing.sm, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: caylikDesign.spacing.sm },
   sectionCopy: { flex: 1 },
-  sectionTitle: { fontSize: caylikDesign.type.title, fontWeight: '900', letterSpacing: -0.35 },
+  sectionTitle: { fontSize: caylikDesign.type.title, fontFamily: caylikDesign.font.editorial, fontWeight: '700', letterSpacing: -0.35 },
   sectionDetail: { marginTop: 3, fontSize: caylikDesign.type.caption, lineHeight: 17, fontWeight: '600' },
   sectionAction: { minHeight: caylikDesign.touchTarget, paddingLeft: caylikDesign.spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   sectionActionText: { fontSize: caylikDesign.type.body, fontWeight: '800' },
@@ -129,9 +120,9 @@ const ui = StyleSheet.create({
   chartHint: { flex: 1, fontSize: caylikDesign.type.caption, lineHeight: 17, fontWeight: '600' },
   chartPlot: { width: '100%', height: 170, paddingHorizontal: 6, paddingTop: caylikDesign.spacing.lg, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   chartColumn: { flex: 1, minWidth: 0, alignItems: 'center' },
-  chartTrack: { width: '46%', minWidth: 5, maxWidth: 13, height: 132, borderRadius: caylikDesign.radius.pill, justifyContent: 'flex-end', overflow: 'hidden' },
-  chartBar: { width: '100%', borderRadius: caylikDesign.radius.pill },
-  chartLabel: { marginTop: caylikDesign.spacing.xs, fontSize: 8, fontWeight: '800' },
+  chartTrack: { width: '60%', minWidth: 5, maxWidth: 22, height: 132, borderRadius: 3, justifyContent: 'flex-end', overflow: 'hidden' },
+  chartBar: { width: '100%', borderRadius: 3 },
+  chartLabel: { marginTop: caylikDesign.spacing.xs, fontSize: 10, fontWeight: '500' },
   chartFooter: { marginTop: caylikDesign.spacing.md, paddingHorizontal: caylikDesign.spacing.md, paddingTop: caylikDesign.spacing.sm, borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   chartFooterLabel: { fontSize: caylikDesign.type.caption, fontWeight: '700' },
   chartFooterValue: { fontSize: caylikDesign.type.body, fontWeight: '900' },

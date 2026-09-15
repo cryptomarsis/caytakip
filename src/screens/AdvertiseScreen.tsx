@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
@@ -6,16 +6,21 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { AppIcon } from '../components/app-icon';
 import { CaylikScreenHeader } from '../components/caylik-ui';
 import { API_URL, fetchWithTimeout } from '../services/api';
+import { readPendingAd, sendAdApplication } from '../services/pendingAdApplication';
 
 const PACKAGES = [{ days: 7, credits: 500 }, { days: 14, credits: 900 }, { days: 30, credits: 1500 }];
 const statusText: Record<string, string> = { pending: 'İnceleniyor', approved: 'Yayında', rejected: 'Reddedildi', ended: 'Sona erdi' };
 
-export default function AdvertiseScreen({ token, credits, onBuyCredits, onCreditsChanged }: { token: string; credits: number | null; onBuyCredits: () => void; onCreditsChanged: () => void }) {
+export default function AdvertiseScreen({ userId, token, credits, onBuyCredits, onCreditsChanged }: { userId: string; token: string; credits: number | null; onBuyCredits: () => void; onCreditsChanged: () => void }) {
   const theme = useTheme();
   const [form, setForm] = useState({ firma: '', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', durationDays: 7 });
   const [applications, setApplications] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const submitLock = useRef(false);
+  const [hasPending, setHasPending] = useState(false);
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const [acceptedRules, setAcceptedRules] = useState(false);
   const selected = PACKAGES.find((item) => item.days === form.durationDays)!;
 
@@ -23,12 +28,16 @@ export default function AdvertiseScreen({ token, credits, onBuyCredits, onCredit
     setLoading(true);
     try {
       const response = await fetchWithTimeout(`${API_URL}/ad-applications/mine`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Başvurular alınamadı.');
-      setApplications(Array.isArray(data.items) ? data.items : []);
-    } catch (error: any) { Alert.alert('Reklam Başvuruları', error.message); }
-    finally { setLoading(false); }
-  }, [token]);
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data?.items)) throw new Error(data?.error || 'Başvurular alınamadı.');
+      if (live.current) setApplications(data.items);
+    } catch (error: any) { if (live.current) Alert.alert('Reklam Başvuruları', error.message); }
+    finally {
+      try { const pending = await readPendingAd(userId); if (live.current) setHasPending(Boolean(pending)); }
+      catch { if (live.current) setHasPending(true); }
+      if (live.current) setLoading(false);
+    }
+  }, [token, userId]);
 
   useEffect(() => {
     const timer = setTimeout(() => { void load(); }, 0);
@@ -45,24 +54,42 @@ export default function AdvertiseScreen({ token, credits, onBuyCredits, onCredit
   };
 
   const submit = async () => {
+    if (submitLock.current) return;
     if (!form.firma.trim() || !form.baslik.trim()) return Alert.alert('Eksik bilgi', 'Firma ve reklam başlığını yazın.');
     if (!form.aciklama.trim() && !form.gorselUrl) return Alert.alert('Eksik içerik', 'Bir açıklama veya reklam görseli ekleyin.');
     if ((credits ?? 0) < selected.credits) return Alert.alert('Yetersiz kredi', `${selected.days} günlük reklam için ${selected.credits} kredi gerekiyor.`, [{ text: 'Vazgeç', style: 'cancel' }, { text: 'Kredi Al', onPress: onBuyCredits }]);
+    submitLock.current = true;
     setSending(true);
     try {
       if (!acceptedRules) return Alert.alert('Reklam kuralları', 'Başvuru göndermek için reklam yayın kurallarını kabul edin.');
-      const response = await fetchWithTimeout(`${API_URL}/ad-applications`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...form, acceptedRules: true }) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Başvuru gönderilemedi.');
+      const payload = JSON.stringify({ ...form, acceptedRules: true });
+      await sendAdApplication(userId, token, payload);
+      if (!live.current) return;
+      setHasPending(false);
       setForm({ firma: '', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', durationDays: 7 });
       setAcceptedRules(false);
       await Promise.all([load(), onCreditsChanged()]);
-      Alert.alert('Başvuru alındı', 'Reklamınız yönetici onayına gönderildi. Onaylanınca otomatik olarak yayınlanacak. Reddedilirse krediniz iade edilir.');
-    } catch (error: any) { Alert.alert('Reklam verilemedi', error.message); }
-    finally { setSending(false); }
+      if (live.current) Alert.alert('Başvuru alındı', 'Reklamınız yönetici onayına gönderildi. Onaylanınca otomatik olarak yayınlanacak. Reddedilirse krediniz iade edilir.');
+    } catch (error: any) { if (live.current) { setHasPending(true); Alert.alert('Reklam verilemedi', error.message); } }
+    finally { submitLock.current = false; if (live.current) { setSending(false); void load(); } }
+  };
+
+  const resume = async () => {
+    if (submitLock.current) return;
+    submitLock.current = true; setSending(true);
+    try {
+      await sendAdApplication(userId, token);
+      if (!live.current) return;
+      setForm({ firma: '', baslik: '', aciklama: '', telefon: '', link: '', gorselUrl: '', durationDays: 7 });
+      setAcceptedRules(false);
+      await Promise.all([load(), onCreditsChanged()]);
+      if (live.current) Alert.alert('Başvuru doğrulandı', 'Başvurunuz alındı. Aynı başvuru için tekrar kredi düşülmedi.');
+    } catch (error: any) { if (live.current) Alert.alert('Başvuru kontrolü', error.message); }
+    finally { submitLock.current = false; if (live.current) { setSending(false); void load(); } }
   };
 
   return <View>
+    {hasPending && <TouchableOpacity accessibilityRole="button" disabled={sending} onPress={() => void resume()} style={[styles.submit, { backgroundColor: theme.colors.primaryContainer }]}><Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: '700', padding: 12 }}>Bekleyen başvuruyu kontrol et</Text></TouchableOpacity>}
     <CaylikScreenHeader icon="bullhorn-outline" eyebrow="ÇAYLIK REKLAM" title="Reklam Ver" description="Çay üreticilerine markanızı ve hizmetinizi tanıtın." />
     <View style={[styles.creditCard, { backgroundColor: theme.colors.primaryContainer }]}><View><Text style={[styles.creditLabel, { color: theme.colors.onSurfaceVariant }]}>Kullanılabilir krediniz</Text><Text style={[styles.creditValue, { color: theme.colors.primary }]}>{credits ?? 0} kredi</Text></View><TouchableOpacity style={[styles.buyButton, { backgroundColor: theme.colors.primary }]} onPress={onBuyCredits}><Text style={{ color: theme.colors.onPrimary, fontWeight: '900' }}>Kredi Al</Text></TouchableOpacity></View>
 

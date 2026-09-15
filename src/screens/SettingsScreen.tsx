@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SegmentedButtons, useTheme } from 'react-native-paper';
-import { type ThemePreference, useAppTheme } from '../context/app-theme';
+import { caylikDesign, type ThemePreference, useAppTheme } from '../context/app-theme';
+import { AppIcon } from '../components/app-icon';
 import { API_ORIGIN, API_URL, fetchWithTimeout } from '../services/api';
 import { styles } from '../styles/styles';
 import { CaylikScreenHeader } from '../components/caylik-ui';
+import DailyReminderPreference from '../components/DailyReminderPreference';
+import { type SeasonPolicyRequest } from '../services/seasonReminderPolicy';
+import { HarvestRewardPreference } from '../components/HarvestReward';
+import SoundPreferencesCard from '../components/SoundPreferencesCard';
 import {
   disableAdTracking,
   getAdTrackingState,
@@ -13,15 +18,18 @@ import {
 } from '../services/adTracking';
 
 type Props = {
-  currentUser: { token?: string } | null;
+  policyRequest: SeasonPolicyRequest;
+  currentUser: { token?: string; userId?: string } | null;
   onChangePin: (currentPin: string, newPin: string) => Promise<void>;
   onDeleteAccount: () => Promise<void>;
+  onLogout: () => Promise<void>;
   lastSyncAt?: string | null;
   onExportData?: () => Promise<void>;
   onSendFeedback?: (subject: string, message: string) => Promise<void>;
+  onDueSoundChange?: () => Promise<void>;
 };
 
-export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccount, lastSyncAt, onExportData, onSendFeedback }: Props) {
+export default function SettingsScreen({ currentUser, policyRequest, onChangePin, onDeleteAccount, onLogout, lastSyncAt, onExportData, onSendFeedback, onDueSoundChange }: Props) {
   const theme = useTheme();
   const { preference, setPreference } = useAppTheme();
   const [privacy, setPrivacy] = useState<any>(null);
@@ -35,6 +43,7 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [adTrackingState, setAdTrackingState] = useState<AdTrackingState>('disabled');
   const [updatingAdTracking, setUpdatingAdTracking] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     fetchWithTimeout(`${API_URL}/legal/privacy`)
@@ -59,7 +68,7 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
       if (nextState === 'granted') {
         Alert.alert('Reklam ölçümü', 'Reklam kampanyalarının performans ölçümüne izin verildi.');
       } else if (nextState === 'denied') {
-        Alert.alert('Reklam ölçümü', 'İzin cihaz ayarlarından kapatılmış. Dilerseniz Ayarlar uygulamasından değiştirebilirsiniz.');
+        Alert.alert('Reklam ölçümü', 'Takip izni kapalı. Çaylık’ı tüm temel özellikleriyle kullanmaya devam edebilirsiniz.');
       } else if (nextState === 'disabled') {
         Alert.alert('Reklam ölçümü', 'Reklam ve kampanya ölçümü tercihiniz kaydedildi.');
       }
@@ -113,7 +122,30 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
   };
 
   return <View>
-    <CaylikScreenHeader icon="cog-outline" eyebrow="HESAP VE UYGULAMA" title="Ayarlar ve Gizlilik" description="Görünüm, veri güvenliği ve hesap seçeneklerinizi yönetin." />
+    <CaylikScreenHeader icon="cog-outline" eyebrow="HESAP VE UYGULAMA" title="Ayarlar ve Gizlilik" description="Görünüm, bildirim tercihleri ve hesap seçeneklerinizi yönetin." />
+    {!!currentUser && <View style={[styles.formCard, themeStyles.card]}>
+      <Text style={[styles.formTitle, themeStyles.title]}>Oturum</Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Çıkış yap"
+        accessibilityHint="Bu cihazdaki oturumunuzu kapatır ve giriş ekranına döner."
+        accessibilityState={{ disabled: loggingOut, busy: loggingOut }}
+        disabled={loggingOut}
+        style={[styles.secondaryBtn, { minHeight: caylikDesign.touchTarget, marginTop: caylikDesign.spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: caylikDesign.spacing.xs, backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.primary }]}
+        onPress={async () => {
+          setLoggingOut(true);
+          try { await onLogout(); }
+          catch { Alert.alert('Çıkış yapılamadı', 'Lütfen tekrar deneyin.'); }
+          finally { setLoggingOut(false); }
+        }}
+      >
+        <AppIcon name="logout-variant" size={20} color={theme.colors.primary} />
+        <Text style={[styles.secondaryBtnText, { color: theme.colors.primary }]}>{loggingOut ? 'Çıkış yapılıyor…' : 'Çıkış yap'}</Text>
+      </TouchableOpacity>
+    </View>}
+    {!!currentUser?.userId && <SoundPreferencesCard userId={currentUser.userId} onDueSoundChange={onDueSoundChange} />}
+    {!!currentUser?.userId && <HarvestRewardPreference userId={currentUser.userId} />}
+    {!!currentUser?.userId && !!currentUser.token && <DailyReminderPreference userId={currentUser.userId} token={currentUser.token} request={policyRequest} />}
     <View style={[styles.formCard, themeStyles.card]}>
       <Text style={[styles.formTitle, themeStyles.title]}>Görünüm</Text>
       <Text style={[styles.formHelp, themeStyles.body]}>Uygulamanın renk düzenini seçin.</Text>
@@ -147,7 +179,7 @@ export default function SettingsScreen({ currentUser, onChangePin, onDeleteAccou
               ? 'GÜNCELLENİYOR...'
               : adTrackingState === 'granted'
                 ? 'ÖLÇÜM İZNİNİ KAPAT'
-                : 'ÖLÇÜM İZNİ VER'}
+                : 'ÖLÇÜM TERCİHİNİ DÜZENLE'}
           </Text>
         </TouchableOpacity>
       )}

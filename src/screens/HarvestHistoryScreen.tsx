@@ -4,11 +4,15 @@ import { useTheme } from 'react-native-paper';
 
 import { styles } from '../styles/styles';
 import { deductionTotalOf, formatDisplayDate, formatTL, grossTotalOf, netTotalOf, remainingTotalOf } from '../utils/format';
-import { HarvestRecord } from '../types';
-import { CaylikScreenHeader } from '../components/caylik-ui';
+import { ExpenseRecord, HarvestRecord, PaymentRecord } from '../types';
+import { CaylikButton, CaylikScreenHeader } from '../components/caylik-ui';
+import TransactionTimeline from '../components/TransactionTimeline';
 import { AppIcon } from '../components/app-icon';
 
 type Props = {
+  payments?: PaymentRecord[];
+  expenses?: ExpenseRecord[];
+  onAskAboutHarvest?: (item: HarvestRecord) => void;
   harvests: HarvestRecord[];
   openHarvestEditModal: (harvest: HarvestRecord) => void;
   openPaymentForHarvest: (harvest: HarvestRecord) => void;
@@ -38,6 +42,7 @@ const harvestDateValue = (value: unknown) => {
 };
 
 export default function HarvestHistoryScreen({
+  payments = [], expenses = [], onAskAboutHarvest,
   harvests,
   openHarvestEditModal,
   openPaymentForHarvest,
@@ -48,6 +53,7 @@ export default function HarvestHistoryScreen({
 }: Props) {
   const theme = useTheme();
   const [query, setQuery] = useState('');
+  const [timeline, setTimeline] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'open' | 'paid'>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
@@ -69,6 +75,7 @@ export default function HarvestHistoryScreen({
   const header = (
     <View>
       <CaylikScreenHeader icon="timeline-clock-outline" eyebrow="KAYIT ARŞİVİ" title="Hasat Geçmişi" description="Firma, bahçe, tarih veya kilo ile kayıtlarınızı hızla bulun." />
+      <CaylikButton icon="timeline-clock-outline" mode="outlined" onPress={() => setTimeline(true)}>Tüm işlem geçmişi</CaylikButton>
       <TextInput
         style={[styles.input, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.outline, color: theme.colors.onSurface }]}
         value={query}
@@ -106,6 +113,7 @@ export default function HarvestHistoryScreen({
     </View>
   );
 
+  if (timeline) return <TransactionTimeline harvests={harvests} payments={payments} expenses={expenses} onBack={() => setTimeline(false)} onRefresh={onRefresh} refreshing={refreshing} />;
   return (
     <FlatList
       data={filtered}
@@ -133,6 +141,7 @@ export default function HarvestHistoryScreen({
               <Text style={[styles.historyRemaining, { color: remaining > 0.01 ? theme.colors.error : theme.colors.primary }]}>
                 {remaining > 0.01 ? 'Kalan alacak: ' + formatTL(remaining) : 'Ödeme tamamlandı'}
               </Text>
+              {!!onAskAboutHarvest && <CaylikButton icon="robot-happy-outline" mode="text" onPress={() => onAskAboutHarvest(harvest)}>Asistan’la yorumla</CaylikButton>}
             </View>
             <View style={styles.historyActions}>
               <TouchableOpacity accessibilityLabel="Hasadı düzenle" style={styles.editBtn} onPress={() => openHarvestEditModal(harvest)}><AppIcon name="pencil-outline" size={18} color="#FFFFFF" /></TouchableOpacity>

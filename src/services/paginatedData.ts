@@ -23,23 +23,29 @@ export const fetchCursorCollection = async <T extends { _id?: string }>(
   maxPages = 100,
 ): Promise<CollectionFetchResult<T>> => {
   const records: T[] = [];
+  const seen = new Set<string>();
   let before = '';
 
   for (let page = 0; page < maxPages; page += 1) {
     const response = await authFetch(withQuery(url, { limit: pageSize, before }), options);
     if (!response.ok) return { ok: false, status: response.status, data: records };
 
-    const payload = await response.json().catch(() => []);
-    const rows = Array.isArray(payload) ? payload as T[] : [];
+    const payload = await response.json().catch(() => null);
+    if (!Array.isArray(payload) || payload.some(row => !row || typeof row !== 'object' || typeof row._id !== 'string' || !row._id)) return { ok: false, status: 502, data: [] };
+    const rows = payload as T[];
+    for (const row of rows) {
+      if (seen.has(row._id!)) return { ok: false, status: 502, data: [] };
+      seen.add(row._id!);
+    }
     records.push(...rows);
 
     if (rows.length < pageSize) return { ok: true, status: response.status, data: records };
     const nextBefore = String(rows[rows.length - 1]?._id || '');
-    if (!nextBefore || nextBefore === before) return { ok: true, status: response.status, data: records };
+    if (!nextBefore || nextBefore === before) return { ok: false, status: 502, data: [] };
     before = nextBefore;
   }
 
-  return { ok: true, status: 200, data: records };
+  return { ok: false, status: 502, data: [] };
 };
 
 export const fetchArrayCollection = async <T>(
@@ -49,6 +55,6 @@ export const fetchArrayCollection = async <T>(
 ): Promise<CollectionFetchResult<T>> => {
   const response = await authFetch(url, options);
   if (!response.ok) return { ok: false, status: response.status, data: [] };
-  const payload = await response.json().catch(() => []);
-  return { ok: true, status: response.status, data: Array.isArray(payload) ? payload as T[] : [] };
+  const payload = await response.json().catch(() => null);
+  return Array.isArray(payload) && payload.every(row => row && typeof row === 'object' && !Array.isArray(row) && typeof row._id === 'string' && row._id) ? { ok: true, status: response.status, data: payload as T[] } : { ok: false, status: 502, data: [] };
 };

@@ -2,20 +2,26 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeAd, NativeAdView, NativeAsset, NativeAssetType, TestIds } from 'react-native-google-mobile-ads';
 import { useTheme } from 'react-native-paper';
+import { useAdsPrivacy } from '../context/ads-privacy';
 
 const productionIds = { ios: 'ca-app-pub-4870931624363029/5664845432', android: 'ca-app-pub-4870931624363029/1721730996' };
 
 export default function AdMobNativeCard() {
+  const privacy = useAdsPrivacy();
+  return privacy.ready ? <ReadyNativeCard key={String(privacy.personalized)} personalized={privacy.personalized} /> : null;
+}
+
+function ReadyNativeCard({ personalized }: { personalized: boolean }) {
   const theme = useTheme();
   const [ad, setAd] = useState<NativeAd | null>(null);
   const adRef = useRef<NativeAd | null>(null);
   useEffect(() => {
     let active = true;
-    NativeAd.createForAdRequest(__DEV__ ? TestIds.NATIVE : productionIds[Platform.OS as 'ios' | 'android'], { requestNonPersonalizedAdsOnly: false })
+    NativeAd.createForAdRequest(__DEV__ ? TestIds.NATIVE : productionIds[Platform.OS as 'ios' | 'android'], { requestNonPersonalizedAdsOnly: !personalized })
       .then((loaded) => { if (active) { adRef.current = loaded; setAd(loaded); } else loaded.destroy(); })
       .catch(() => undefined);
     return () => { active = false; adRef.current?.destroy(); adRef.current = null; };
-  }, []);
+  }, [personalized]);
   if (!ad) return null;
   return <NativeAdView nativeAd={ad} style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
     <Text style={[styles.sponsored, { color: theme.colors.onSurfaceVariant }]}>REKLAM</Text>

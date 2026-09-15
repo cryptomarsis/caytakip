@@ -79,7 +79,6 @@ const todayServerDate = () => {
 const ADMIN_PHONE = normalizePhone(ADMIN_PHONE_RAW);
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_MAX_FAILED_ATTEMPTS = 5;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'development-only-change-me');
@@ -353,6 +352,7 @@ const HarvestSchema = new mongoose.Schema({
   kg: Number,
   weight: Number,
   firma: String,
+  quotaPlanId: { type: String, default: '' },
   fiyat: Number,
   brutTutar: Number,       // kg * brüt birim fiyat
   gelirVergisiOrani: Number,
@@ -528,7 +528,9 @@ const IdempotencySchema = new mongoose.Schema({
   path: { type: String, required: true },
   status: { type: Number, required: true },
   body: { type: mongoose.Schema.Types.Mixed, required: true },
-  expiresAt: { type: Date, required: true, expires: 0 }
+  expiresAt: { type: Date, required: false, expires: 0 },
+  requestHash: String,
+  completed: Boolean
 }, { timestamps: true });
 IdempotencySchema.index({ userId: 1, key: 1, method: 1, path: 1 }, { unique: true });
 const IdempotencyRecord = mongoose.model('IdempotencyRecord', IdempotencySchema);
@@ -664,30 +666,7 @@ const calculateHarvestAmounts = (kg, fiyat) => {
   };
 };
 
-const idempotencyMiddleware = async (req, res, next) => {
-  const key = String(req.headers['idempotency-key'] || '').trim();
-  if (!key || !req.auth?.userId) return next();
-  const identity = { userId: req.auth.userId, key, method: req.method, path: req.path };
-  try {
-    const existing = await IdempotencyRecord.findOne(identity).lean();
-    if (existing) return res.status(existing.status).json(existing.body);
-    const originalJson = res.json.bind(res);
-    res.json = (body) => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        IdempotencyRecord.create({
-          ...identity,
-          status: res.statusCode,
-          body,
-          expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS)
-        }).catch((error) => console.error('Idempotency kaydı yazılamadı:', error.message));
-      }
-      return originalJson(body);
-    };
-    next();
-  } catch (error) {
-    next(error);
-  }
-};
+const idempotencyMiddleware = require('./server/idempotency')(IdempotencyRecord);
 
 const buildUserFilter = (req) => {
   const auth = getAuthUser(req);
@@ -1366,26 +1345,15 @@ app.post('/api/webhooks/revenuecat', async (req, res) => {
   }
 });
 
-app.post('/api/ai/rewarded-ad', requireAuth, async (req, res) => {
+require('./server/adRewardRoutes')(app, { mongoose, UserProfile, AiCreditTransaction, requireAuth, limitPublicUsage });
+
+app.get('/api/iap/status', requireAuth, async (req, res) => {
   try {
-    const userId = req.auth.userId;
-    const now = new Date();
-    const dayKey = now.toISOString().slice(0, 10);
-    const todayStart = new Date(`${dayKey}T00:00:00.000Z`);
-    const dailyCount = await AiCreditTransaction.countDocuments({ userId, type: 'rewarded_ad', status: 'completed', createdAt: { $gte: todayStart } });
-    if (dailyCount >= 3) return res.status(429).json({ error: 'Bugünkü ücretsiz reklam kredisi sınırına ulaştınız.', code: 'DAILY_REWARD_LIMIT' });
-    const requestId = `rewarded-ad:${userId}:${dayKey}:${dailyCount + 1}`;
-    const existing = await AiCreditTransaction.findOne({ userId, requestId }).lean();
-    if (existing) return res.json({ credits: Number(existing.balanceAfter || 0), creditsGranted: 0, replayed: true });
-    const profile = await UserProfile.findOneAndUpdate({ userId }, { $inc: { aiCredits: 10 } }, { returnDocument: 'after' }).select('aiCredits').lean();
-    if (!profile) return res.status(404).json({ error: 'Üretici profili bulunamadı.' });
-    await AiCreditTransaction.create({ userId, requestId, type: 'rewarded_ad', status: 'completed', amount: 10, balanceAfter: Number(profile.aiCredits || 0), description: 'Ödüllü reklam kredisi' });
-    res.json({ credits: Number(profile.aiCredits || 0), creditsGranted: 10 });
-  } catch (error) {
-    if (error?.code === 11000) return res.status(409).json({ error: 'Bu reklam ödülü daha önce işlendi.' });
-    console.error('REWARDED AD CREDIT ERROR:', error.message);
-    res.status(500).json({ error: 'Reklam kredisi hesaba eklenemedi.' });
-  }
+    const transactionId = String(req.query.transactionId || '').trim();
+    if (!transactionId || transactionId.length > 250) return res.status(400).json({ error: 'İşlem kimliği gerekli.' });
+    const purchase = await InAppPurchase.findOne({ userId: req.auth.userId, transactionId }).lean();
+    res.json({ recorded: purchase?.status === 'completed', creditsGranted: Number(purchase?.creditsGranted || 0), sandbox: String(purchase?.environment || '').toLowerCase() === 'sandbox' });
+  } catch { res.status(503).json({ error: 'Satın alma durumu alınamadı.' }); }
 });
 
 app.post('/api/iap/apple/verify', requireAuth, limitPublicUsage('iap-verify', 30, 60 * 60 * 1000), async (req, res) => {
@@ -1778,6 +1746,7 @@ const detectHarvestQualityFlags = ({ kg, price, total }) => {
 };
 
 app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { userId, userPhone } = getUserIdentifier(req);
 
@@ -1840,27 +1809,26 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       odemeDurumu: durum
     };
 
-    const newHarvest = new Harvest(payload);
-    await newHarvest.save();
+    payload.quotaPlanId = await require('./server/harvestQuota')(UserProfile, req.auth.userId, payload, req.body.quotaPlanId);
+    let newHarvest;
+    await session.withTransaction(async () => {
+    newHarvest = new Harvest(payload);
+    await newHarvest.save({ session });
 
     // Eski uygulama sürümleri hasat oluştururken ilk tahsilatı aynı formdan
     // girebiliyordu. Bu tutarı ayrıca geçmişe yazarak sonradan düzenlenebilir
     // olmasını sağlıyoruz.
     if (tahsilatVal > 0) {
-      try {
-        await Payment.create({
+        await Payment.create([{
           userId: req.auth.userId,
           userPhone: req.auth.phone,
           harvestId: newHarvest._id,
           tarih,
           tutar: tahsilatVal,
           aciklama: 'Hasat eklenirken girilen ilk tahsilat.'
-        });
-      } catch (paymentError) {
-        await Harvest.deleteOne({ _id: newHarvest._id });
-        throw paymentError;
-      }
+        }], { session });
     }
+    });
     res.status(201).json(newHarvest);
   } catch (err) {
     console.error('Hasat Ekleme Hatası:', err);
@@ -1868,7 +1836,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
       return res.status(409).json({ error: 'Bu fiş daha önce hasat kaydı olarak eklenmiş.', code: 'DUPLICATE_RECEIPT' });
     }
     res.status(400).json({ error: err.message });
-  }
+  } finally { await session.endSession(); }
 });
 
 app.put('/api/harvests/:id', requireAuth, async (req, res) => {
@@ -1925,6 +1893,9 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
       odemeDurumu: durum
     };
 
+    try {
+      updatePayload.quotaPlanId = await require('./server/harvestQuota')(UserProfile, existing.userId || req.auth.userId, { ...updatePayload, _id: String(existing._id) }, req.body.quotaPlanId === undefined ? existing.quotaPlanId : req.body.quotaPlanId);
+    } catch (error) { return res.status(400).json({ error: error.message }); }
     const updated = await Harvest.findByIdAndUpdate(req.params.id, updatePayload, { returnDocument: 'after' });
     res.json(updated);
   } catch (err) {
@@ -1970,9 +1941,11 @@ app.get('/api/payments', requireAuth, async (req, res) => {
 
 // 1. Belirli satışa tahsilat ekle
 app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { userId, userPhone } = getUserIdentifier(req);
     const { harvestId, tutar, tarih, aciklama } = req.body;
+    if (tarih && !normalizeCalendarDate(tarih)) return res.status(400).json({ error: 'Geçerli bir tahsilat tarihi girin.' });
 
     if (!harvestId) return res.status(400).json({ error: 'Tahsilat yapılacak satış seçilmedi.' });
     if (!mongoose.Types.ObjectId.isValid(harvestId)) {
@@ -1984,15 +1957,17 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
       return res.status(400).json({ error: 'Geçerli ve 0’dan büyük bir tahsilat tutarı girin.' });
     }
 
-    const harvest = await Harvest.findById(harvestId);
-    if (!harvest) return res.status(404).json({ error: 'Seçilen satış kaydı bulunamadı.' });
+    let result;
+    await session.withTransaction(async () => {
+    const harvest = await Harvest.findById(harvestId).session(session);
+    if (!harvest) throw Object.assign(new Error('Seçilen satış kaydı bulunamadı.'), { status: 404 });
 
     // Kullanıcının başka bir kaydına ödeme yazılmasını engelle
     if (harvest.userId && harvest.userId !== req.auth.userId) {
-      return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
+      throw Object.assign(new Error('Bu satış kaydına erişim yetkiniz yok.'), { status: 403 });
     }
     if (harvest.userPhone && harvest.userPhone !== req.auth.phone) {
-      return res.status(403).json({ error: 'Bu satış kaydına erişim yetkiniz yok.' });
+      throw Object.assign(new Error('Bu satış kaydına erişim yetkiniz yok.'), { status: 403 });
     }
 
     const amounts = calculateHarvestAmounts(harvest.kg || harvest.weight, harvest.fiyat);
@@ -2000,9 +1975,9 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
     const mevcutTahsilat = Number(harvest.tahsilat) || 0;
     const kalan = toplam - mevcutTahsilat;
 
-    if (kalan <= 0) return res.status(400).json({ error: 'Bu satışın borcu zaten kapanmış.' });
+    if (kalan <= 0) throw Object.assign(new Error('Bu satışın borcu zaten kapanmış.'), { status: 400 });
     if (ödemeTutar > kalan + 0.01) {
-      return res.status(400).json({ error: `Tahsilat kalan borçtan fazla olamaz. Kalan: ${kalan.toFixed(2)} TL` });
+      throw Object.assign(new Error(`Tahsilat kalan borçtan fazla olamaz. Kalan: ${kalan.toFixed(2)} TL`), { status: 400 });
     }
 
     const yeniTahsilat = roundedMoney(mevcutTahsilat + ödemeTutar);
@@ -2014,30 +1989,19 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
     harvest.toplamTutar = toplam;
     harvest.kalanBakiye = Math.max(0, roundedMoney(toplam - yeniTahsilat));
     harvest.odemeDurumu = harvest.kalanBakiye <= 0.01 ? 'Ödendi' : 'Kısmi Ödendi';
-    await harvest.save();
+    await harvest.save({ session });
 
-    try {
-      const newPayment = await Payment.create({
-        userId: req.auth.userId,
-        userPhone: req.auth.phone,
-        harvestId,
-        tarih: tarih || new Date().toISOString().split('T')[0],
-        tutar: ödemeTutar,
-        aciklama: aciklama || ''
-      });
-      return res.status(201).json({ message: 'Tahsilat başarıyla kaydedildi.', harvest, payment: newPayment });
-    } catch (paymentError) {
-      // Tahsilat geçmişi yazılamazsa satış bakiyesini geri al
-      harvest.tahsilat = mevcutTahsilat;
-      harvest.kalanBakiye = kalan;
-      harvest.odemeDurumu = mevcutTahsilat > 0 ? 'Kısmi Ödendi' : 'Bekliyor';
-      await harvest.save();
-      throw paymentError;
-    }
+    const [newPayment] = await Payment.create([{
+      userId: req.auth.userId, userPhone: req.auth.phone, harvestId,
+      tarih: normalizeCalendarDate(tarih) || todayServerDate(), tutar: ödemeTutar, aciklama: aciklama || ''
+    }], { session });
+    result = { message: 'Tahsilat başarıyla kaydedildi.', harvest, payment: newPayment };
+    });
+    return res.status(201).json(result);
   } catch (err) {
     console.error('Tahsilat Kaydetme Hatası:', err);
-    res.status(500).json({ error: `Tahsilat kaydedilemedi: ${err.message}` });
-  }
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Tahsilat kaydedilemedi. Tekrar deneyin.' });
+  } finally { await session.endSession(); }
 });
 
 // Eski sürümde yalnızca hasat toplamına yazılmış tahsilatı, düzenlenebilir bir
@@ -2356,7 +2320,7 @@ app.get('/api/ad-applications/mine', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/ad-applications', requireAuth, async (req, res) => {
+app.post('/api/ad-applications', requireAuth, idempotencyMiddleware, async (req, res) => {
   const durationDays = Number(req.body.durationDays);
   const creditsRequired = getAdCampaignCredits(durationDays);
   const firma = String(req.body.firma || '').trim();
@@ -2369,42 +2333,34 @@ app.post('/api/ad-applications', requireAuth, async (req, res) => {
   if (!aciklama && !gorselUrl) return res.status(400).json({ error: 'Açıklama veya reklam görselinden en az birini ekleyin.' });
   if (!isAdContentAllowed(firma, baslik, aciklama)) return res.status(400).json({ error: 'Bu reklam içeriği Çaylık yayın kurallarına uygun değil.' });
 
-  let charged = false;
-  let createdApplicationId = null;
+  const session = await mongoose.startSession();
   try {
+    let result;
+    await session.withTransaction(async () => {
     const wallet = await UserProfile.findOneAndUpdate(
       { userId: req.auth.userId, aiCredits: { $gte: creditsRequired } },
       { $inc: { aiCredits: -creditsRequired } },
-      { returnDocument: 'after' }
+      { returnDocument: 'after', session }
     ).select('aiCredits').lean();
     if (!wallet) {
-      const current = await UserProfile.findOne({ userId: req.auth.userId }).select('aiCredits').lean();
-      return res.status(402).json({ error: `Bu paket için ${creditsRequired} kredi gerekiyor.`, code: 'INSUFFICIENT_CREDITS', credits: Number(current?.aiCredits || 0), requiredCredits: creditsRequired });
+      throw Object.assign(new Error(`Bu paket için ${creditsRequired} kredi gerekiyor.`), { status: 402 });
     }
-    charged = true;
-    const item = await AdApplication.create({
+    const [item] = await AdApplication.create([{
       userId: req.auth.userId, userPhone: req.auth.phone,
       firma, baslik, aciklama,
       telefon: String(req.body.telefon || '').trim(), link: String(req.body.link || '').trim(), gorselUrl,
       durationDays, creditsCharged: creditsRequired, status: 'pending', slot: 'dashboard_top'
-    });
-    createdApplicationId = item._id;
-    await AiCreditTransaction.create({
+    }], { session });
+    await AiCreditTransaction.create([{
       userId: req.auth.userId, requestId: `ad-application:${item._id}`, type: 'ad_campaign', status: 'completed',
       amount: -creditsRequired, balanceAfter: Number(wallet.aiCredits || 0), description: `${durationDays} günlük reklam başvurusu`
+    }], { session });
+    result = { item, credits: Number(wallet.aiCredits || 0) };
     });
-    res.status(201).json({ item, credits: Number(wallet.aiCredits || 0) });
+    res.status(201).json(result);
   } catch (err) {
-    if (createdApplicationId) await AdApplication.deleteOne({ _id: createdApplicationId }).catch(() => undefined);
-    if (charged) {
-      const wallet = await UserProfile.findOneAndUpdate({ userId: req.auth.userId }, { $inc: { aiCredits: creditsRequired } }, { returnDocument: 'after' }).select('aiCredits').lean().catch(() => null);
-      await AiCreditTransaction.create({
-        userId: req.auth.userId, requestId: `ad-create-refund:${createdApplicationId || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type: 'refund', status: 'completed',
-        amount: creditsRequired, balanceAfter: Number(wallet?.aiCredits || 0), description: 'Oluşturulamayan reklam başvurusu kredi iadesi'
-      }).catch(() => undefined);
-    }
-    res.status(400).json({ error: err.message || 'Reklam başvurusu oluşturulamadı.' });
-  }
+    res.status(err.status || 400).json({ error: err.message || 'Reklam başvurusu oluşturulamadı.' });
+  } finally { await session.endSession(); }
 });
 
 app.get('/api/admin/ad-applications', requireAuth, requireAdmin, async (req, res) => {
@@ -2417,40 +2373,47 @@ app.get('/api/admin/ad-applications', requireAuth, requireAdmin, async (req, res
 });
 
 app.patch('/api/admin/ad-applications/:id', requireAuth, requireAdmin, async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const decision = String(req.body.status || '').trim();
     if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'Onay veya ret kararı seçin.' });
-    const application = await AdApplication.findById(req.params.id);
-    if (!application) return res.status(404).json({ error: 'Reklam başvurusu bulunamadı.' });
-    if (application.status !== 'pending') return res.status(409).json({ error: 'Bu başvuru daha önce sonuçlandırılmış.' });
+    let result;
+    await session.withTransaction(async () => {
+    const application = await AdApplication.findById(req.params.id).session(session);
+    if (!application) throw Object.assign(new Error('Reklam başvurusu bulunamadı.'), { status: 404 });
+    if (application.status !== 'pending') throw Object.assign(new Error('Bu başvuru daha önce sonuçlandırılmış.'), { status: 409 });
 
     if (decision === 'approved') {
       const start = new Date();
       const end = new Date(start.getTime() + application.durationDays * 86400000);
-      const ad = await Ad.create({
+      const [ad] = await Ad.create([{
         slot: application.slot, firma: application.firma, baslik: application.baslik,
         aciklama: application.aciklama, telefon: application.telefon, link: application.link,
         gorselUrl: application.gorselUrl, aktif: true,
         baslangic: start.toISOString(), bitis: end.toISOString(),
         userId: application.userId, userPhone: application.userPhone
-      });
+      }], { session });
       application.publishedAdId = ad._id;
     } else {
       const wallet = await UserProfile.findOneAndUpdate(
-        { userId: application.userId }, { $inc: { aiCredits: application.creditsCharged } }, { returnDocument: 'after' }
+        { userId: application.userId }, { $inc: { aiCredits: application.creditsCharged } }, { returnDocument: 'after', session }
       ).select('aiCredits').lean();
-      await AiCreditTransaction.create({
+      if (!wallet) throw new Error('İade edilecek kullanıcı bulunamadı; karar kaydedilmedi.');
+      await AiCreditTransaction.create([{
         userId: application.userId, requestId: `ad-refund:${application._id}`, type: 'refund', status: 'completed',
         amount: application.creditsCharged, balanceAfter: Number(wallet?.aiCredits || 0), description: 'Reddedilen reklam başvurusu kredi iadesi'
-      });
+      }], { session });
     }
     application.status = decision;
     application.adminNote = String(req.body.adminNote || '').trim();
     application.reviewedBy = req.auth.userId;
     application.reviewedAt = new Date();
-    await application.save();
-    res.json({ item: application });
-  } catch (err) { res.status(400).json({ error: err.message || 'Başvuru sonuçlandırılamadı.' }); }
+    await application.save({ session });
+    result = application;
+    });
+    res.json({ item: result });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message || 'Başvuru sonuçlandırılamadı.' }); }
+  finally { await session.endSession(); }
 });
 
 // EXPENSE ROUTES
@@ -2766,29 +2729,19 @@ app.patch('/api/admin/users/:id/admin-access', requireAuth, requireAdmin, async 
 
 app.get('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases] = await Promise.all([
-      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AdApplication.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
-    ]);
-    res.json({ version: 'V19', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases });
+    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase };
+    res.json(await require('./server/backupRestore').readBackup(models, mongoose));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const body = req.body || {};
-    const models = [
-      [UserProfile, body.users], [Harvest, body.harvests], [Payment, body.payments], [Expense, body.expenses], [Garden, body.gardens], [FactoryPrice, body.factoryPrices], [Ad, body.ads], [AdApplication, body.adApplications], [AiCreditTransaction, body.aiCreditTransactions], [InAppPurchase, body.inAppPurchases]
-    ];
-    let restored = 0;
-    for (const [Model, rows] of models) {
-      if (!Array.isArray(rows)) continue;
-      for (const row of rows) {
-        const copy = { ...row }; delete copy._id; delete copy.__v;
-        try { await Model.create(copy); restored++; } catch {}
-      }
-    }
-    res.json({ ok: true, restored });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase };
+    const { validateBackup, restoreBackup } = require('./server/backupRestore');
+    const count = validateBackup(req.body, Object.keys(models));
+    if (req.body.confirmRestore !== true) return res.json({ preview: true, records: count, message: 'Kayıt kimlikleri korunacak. Yalnızca boş veri koleksiyonlarına aktarılır; onay için confirmRestore: true gerekir.' });
+    res.json(await restoreBackup(req.body, models, mongoose));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
@@ -2807,10 +2760,8 @@ app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
 
 const runAutomaticBackup = async () => {
   try {
-    const [users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases] = await Promise.all([
-      UserProfile.find().lean(), Harvest.find().lean(), Payment.find().lean(), Expense.find().lean(), Garden.find().lean(), FactoryPrice.find().lean(), Ad.find().lean(), AdApplication.find().lean(), AiCreditTransaction.find().lean(), InAppPurchase.find().lean()
-    ]);
-    const payload = { version: 'V19', exportedAt: new Date().toISOString(), users, harvests, payments, expenses, gardens, factoryPrices, ads, adApplications, aiCreditTransactions, inAppPurchases };
+    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase };
+    const payload = await require('./server/backupRestore').readBackup(models, mongoose);
     if (BACKUP_WEBHOOK_URL) {
       const encrypted = createEncryptedBackup(payload);
       if (!encrypted) throw new Error('Dış yedek için BACKUP_ENCRYPTION_KEY zorunludur.');

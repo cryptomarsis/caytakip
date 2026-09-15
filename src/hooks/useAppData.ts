@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { fetchArrayCollection, fetchCursorCollection } from '../services/paginatedData';
@@ -8,6 +8,7 @@ import { API_URL } from '../services/api';
 import { AdRecord, ExpenseRecord, FactoryPriceRecord, GardenRecord, HarvestRecord, PaymentRecord, UserSession } from '../types';
 
 const LAST_SYNC_STORAGE_PREFIX = '@caylik_last_sync_at';
+const EMPTY: never[] = [];
 
 type AuthFetch = (url: string, options?: RequestInit, timeout?: number) => Promise<Response>;
 type Feedback = (title: string, message: string, type?: 'error' | 'success' | 'info') => void;
@@ -33,9 +34,16 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
   const [factoryPrices, setFactoryPrices] = useState<FactoryPriceRecord[]>([]);
   const [ads, setAds] = useState<AdRecord[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [dataOwner, setDataOwner] = useState<string | null>(null);
+  const account = useRef(currentUser?.userId);
+  const generation = useRef(0);
+  useEffect(() => { account.current = currentUser?.userId; generation.current++; }, [currentUser?.userId]);
+  const ownData = dataOwner === currentUser?.userId;
 
   const fetchData = useCallback(async () => {
     if (!currentUser?.token) return;
+    const requestGeneration = ++generation.current;
+    const valid = () => account.current === currentUser.userId && generation.current === requestGeneration;
     setLoading(true);
     try {
       const headers = getAuthHeaders();
@@ -47,6 +55,7 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
         fetchArrayCollection<FactoryPriceRecord>(authFetch, `${API_URL}/factory-prices`, { headers }),
         fetchArrayCollection<AdRecord>(authFetch, `${API_URL}/ads`, { headers }),
       ]);
+      if (!valid()) return;
 
       const parse = <T,>(result: PromiseSettledResult<{ ok: boolean; data: T[] }>) =>
         result.status === 'fulfilled' && result.value.ok ? result.value.data : null;
@@ -64,7 +73,9 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
 
       if (allRequestsFailed) {
         const snapshot = await getDataSnapshot(currentUser.userId);
+        if (!valid()) return;
         if (snapshot) {
+          setDataOwner(currentUser.userId);
           setHarvests(snapshot.harvests as HarvestRecord[]);
           setPayments((snapshot.payments || []) as PaymentRecord[]);
           setExpenses(snapshot.expenses as ExpenseRecord[]);
@@ -76,12 +87,13 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
         }
       }
 
-      const nextHarvests = rawH ?? harvests;
-      const nextPayments = rawPayments ?? payments;
-      const nextExpenses = rawE ?? expenses;
-      const nextGardens = rawG ?? gardens;
-      const nextFactoryPrices = rawP ?? factoryPrices;
-      const nextAds = rawA ?? ads;
+      const nextHarvests = rawH ?? (ownData ? harvests : EMPTY);
+      const nextPayments = rawPayments ?? (ownData ? payments : EMPTY);
+      const nextExpenses = rawE ?? (ownData ? expenses : EMPTY);
+      const nextGardens = rawG ?? (ownData ? gardens : EMPTY);
+      const nextFactoryPrices = rawP ?? (ownData ? factoryPrices : EMPTY);
+      const nextAds = rawA ?? (ownData ? ads : EMPTY);
+      setDataOwner(currentUser.userId);
       setHarvests(nextHarvests);
       setPayments(nextPayments);
       setExpenses(nextExpenses);
@@ -98,6 +110,7 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
           factoryPrices: nextFactoryPrices,
           ads: nextAds,
         });
+        if (!valid()) return;
         const syncedAt = new Date().toISOString();
         setLastSyncAt(syncedAt);
         await AsyncStorage.setItem(`${LAST_SYNC_STORAGE_PREFIX}:${currentUser.userId}`, syncedAt);
@@ -113,11 +126,11 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
       }
       if (allRequestsFailed) onFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error');
     } catch (error: unknown) {
-      onFeedback('Bağlantı Kurulamadı', error instanceof Error ? error.message : 'Sunucuya ulaşılamadı.', 'error');
+      if (valid()) onFeedback('Bağlantı Kurulamadı', error instanceof Error ? error.message : 'Sunucuya ulaşılamadı.', 'error');
     } finally {
-      setLoading(false);
+      if (valid()) setLoading(false);
     }
-  }, [ads, authFetch, currentUser, expenses, factoryPrices, gardens, getAuthHeaders, harvests, onFeedback, payments, setLoading]);
+  }, [ads, authFetch, currentUser, expenses, factoryPrices, gardens, getAuthHeaders, harvests, onFeedback, payments, setLoading, ownData]);
 
   useEffect(() => {
     const userId = currentUser?.userId;
@@ -135,13 +148,13 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
   }, [currentUser?.userId]);
 
   return {
-    harvests, setHarvests,
-    payments, setPayments,
-    expenses, setExpenses,
-    gardens, setGardens,
-    factoryPrices, setFactoryPrices,
-    ads, setAds,
-    lastSyncAt,
+    harvests: ownData ? harvests : EMPTY, setHarvests,
+    payments: ownData ? payments : EMPTY, setPayments,
+    expenses: ownData ? expenses : EMPTY, setExpenses,
+    gardens: ownData ? gardens : EMPTY, setGardens,
+    factoryPrices: ownData ? factoryPrices : EMPTY, setFactoryPrices,
+    ads: ownData ? ads : EMPTY, setAds,
+    lastSyncAt: ownData ? lastSyncAt : null,
     fetchData,
   };
 }

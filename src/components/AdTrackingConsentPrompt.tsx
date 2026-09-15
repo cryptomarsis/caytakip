@@ -1,5 +1,5 @@
-import React from 'react';
-import { ActivityIndicator, Modal, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { ActivityIndicator, AppState, Modal, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import { AppIcon } from './app-icon';
 
@@ -12,6 +12,33 @@ type Props = {
 
 export default function AdTrackingConsentPrompt({ visible, busy = false, onAllow, onDismiss }: Props) {
   const theme = useTheme();
+  const requestRef = useRef(onAllow);
+  const requestedRef = useRef(false);
+  useEffect(() => { requestRef.current = onAllow; }, [onAllow]);
+
+  // iOS presents only Apple's ATT dialog, without a persuasive or dismissible pre-prompt.
+  // Wait for the onboarding modal to close and the app to be active before requesting.
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !visible) {
+      requestedRef.current = false;
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      if (AppState.currentState !== 'active' || requestedRef.current) return;
+      timer = setTimeout(() => {
+        if (AppState.currentState !== 'active' || requestedRef.current) return;
+        requestedRef.current = true;
+        requestRef.current();
+      }, 600);
+    };
+    const subscription = AppState.addEventListener('change', schedule);
+    schedule();
+    return () => { if (timer) clearTimeout(timer); subscription.remove(); };
+  }, [visible]);
+
+  if (Platform.OS === 'ios') return null;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={busy ? undefined : onDismiss}>

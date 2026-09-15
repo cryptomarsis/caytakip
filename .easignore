@@ -19,6 +19,7 @@ backups/
 .env.*
 !.env.example
 /*.png
+/*.gif
 *.db
 *.db-journal
 *.db-wal

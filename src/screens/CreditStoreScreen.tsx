@@ -7,6 +7,7 @@ import { CaylikButton, CaylikSurface } from '../components/caylik-ui';
 import { API_ORIGIN } from '../services/api';
 import type { StoreProductId } from '../services/inAppPurchases';
 import RewardedAdButton from '../components/RewardedAdButton';
+import type { AuthFetch } from '../services/aiAssistant';
 
 export type CreditProductId = StoreProductId;
 
@@ -19,13 +20,16 @@ const products: {
   popular?: boolean;
   subscription?: boolean;
 }[] = [
-  { id: 'caylik_credits_250', title: 'Başlangıç', credits: '250 kredi', price: '39,99 TL', detail: 'Kredilerinizin kullanım süresi yoktur.' },
-  { id: 'caylik_credits_750', title: 'Avantajlı', credits: '750 kredi', price: '89,99 TL', detail: 'En çok tercih edilen kredi paketi.', popular: true },
-  { id: 'caylik_credits_2000', title: 'Büyük Paket', credits: '2.000 kredi', price: '199,99 TL', detail: 'Kredi başına en avantajlı tek seferlik paket.' },
-  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', price: '119,99 TL / ay', detail: 'Asistanı düzenli kullananlar için her ay otomatik kredi yenileme kolaylığı.', subscription: true },
+  { id: 'caylik_credits_250', title: 'Başlangıç', credits: '250 kredi', price: '39,99 TL', detail: 'Hasat ve alacak kayıtlarınızı Asistan’la yorumlamak için.' },
+  { id: 'caylik_credits_750', title: 'Standart', credits: '750 kredi', price: '89,99 TL', detail: 'Çay üretimiyle ilgili sorularınızı Asistan’a daha sık danışmak için.' },
+  { id: 'caylik_credits_2000', title: 'Büyük Paket', credits: '2.000 kredi', price: '199,99 TL', detail: 'Asistan’da kullanın veya markanızı çay üreticilerine tanıtmak için reklam başvurusu yapın.' },
+  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', price: '119,99 TL / ay', detail: 'Asistan kullanımı ve reklam başvuruları için aylık kredi aboneliği.', subscription: true },
 ];
 
 type Props = {
+  userId: string;
+  onReload?: () => void;
+  authFetch?: AuthFetch;
   credits: number | null;
   onBack: () => void;
   onPurchase: (productId: CreditProductId) => void;
@@ -37,7 +41,7 @@ type Props = {
   onRewardedAdEarned?: () => Promise<void> | void;
 };
 
-export default function CreditStoreScreen({ credits, onBack, onPurchase, onRestore, prices = {}, purchasingProductId = null, restoring = false, storeStatus = '', onRewardedAdEarned }: Props) {
+export default function CreditStoreScreen({ userId, onReload, authFetch, credits, onBack, onPurchase, onRestore, prices = {}, purchasingProductId = null, restoring = false, storeStatus = '', onRewardedAdEarned }: Props) {
   const theme = useTheme();
 
   return (
@@ -48,7 +52,7 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={[local.title, { color: theme.colors.onSurface }]}>Kredi Yükle</Text>
-          <Text style={[local.subtitle, { color: theme.colors.onSurfaceVariant }]}>Çaylık Asistan için size uygun paketi seçin.</Text>
+          <Text style={[local.subtitle, { color: theme.colors.onSurfaceVariant }]}>Asistan ve reklam için tek kredi bakiyesi.</Text>
         </View>
         <View style={[local.balance, { backgroundColor: theme.colors.primaryContainer }]}>
           <Text style={[local.balanceValue, { color: theme.colors.onPrimaryContainer }]}>{credits ?? '…'}</Text>
@@ -61,25 +65,26 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
           <View style={[local.giftIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="gift-outline" size={24} color={theme.colors.primary} /></View>
           <View style={{ flex: 1 }}>
             <Text style={[local.freeTitle, { color: theme.colors.onSurface }]}>Başlangıç hediyesi: 50 kredi</Text>
-            <Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Yeni hesaplara ücretsiz tanımlanır. Kredi yalnızca başarılı yanıt üretildiğinde düşer.</Text>
+            <Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Yeni hesaplara ücretsiz tanımlanır. Asistan’da yazılı yanıt ve sesin yazıya çevrilmesi ayrı kredilidir; başarısız işlemde kredi iade edilir.</Text>
           </View>
         </View>
       </CaylikSurface>
 
-      {!!onRewardedAdEarned && <CaylikSurface style={local.rewardCard}><View style={local.rewardInner}><View style={{ flex: 1 }}><Text style={[local.freeTitle, { color: theme.colors.onSurface }]}>Ücretsiz kredi kazan</Text><Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Kısa bir reklamı sonuna kadar izleyerek 10 asistan kredisi kazanın.</Text></View><RewardedAdButton onEarned={onRewardedAdEarned} /></View></CaylikSurface>}
+      {!!onRewardedAdEarned && <CaylikSurface style={local.rewardCard}><View style={local.rewardInner}><View style={{ flex: 1 }}><Text style={[local.freeTitle, { color: theme.colors.onSurface }]}>Ücretsiz kredi kazan</Text><Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Reklamı tamamlayın; ödül işlemi onaylandığında 10 kredi eklenir. Günde en fazla 3 ödül.</Text></View><RewardedAdButton userId={userId} authFetch={authFetch} onEarned={onRewardedAdEarned} /></View></CaylikSurface>}
 
       <CaylikSurface style={local.proInfoCard}>
         <View style={local.proInfoHeader}>
           <View style={[local.proIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="crown-outline" size={25} color="#9A6416" /></View>
           <View style={{ flex: 1 }}>
             <Text style={[local.proInfoTitle, { color: theme.colors.onSurface }]}>Çaylık Pro ne sağlar?</Text>
-            <Text style={[local.proInfoLead, { color: theme.colors.onSurfaceVariant }]}>Her ay 1.500 asistan kredisi hesabınıza otomatik eklenir. Düzenli kullananlar için avantajlıdır; istediğiniz zaman iptal edebilirsiniz.</Text>
+            <Text style={[local.proInfoLead, { color: theme.colors.onSurfaceVariant }]}>İlk satın alımda ve her başarılı aylık yenilemede 1.500 kredi eklenir. Yenilemeyi mağaza hesabınızdan iptal edebilirsiniz.</Text>
           </View>
         </View>
-        <Text style={[local.proNote, { color: theme.colors.onSurfaceVariant, borderTopColor: theme.colors.outlineVariant }]}>Pro sınırsız kullanım değildir; kullanıma göre kredi düşer.</Text>
+        <Text style={[local.proNote, { color: theme.colors.onSurfaceVariant, borderTopColor: theme.colors.outlineVariant }]}>Pro sınırsız değildir; reklam kredisi başvuruda düşer, yönetici reddederse iade edilir.</Text>
       </CaylikSurface>
 
       <View style={local.grid}>
+        {!!onReload && <CaylikButton mode="text" icon="refresh" disabled={Boolean(purchasingProductId) || restoring} onPress={onReload}>Mağazayı ve ödeme durumunu yenile</CaylikButton>}
         {products.map((product) => (
           <CaylikSurface key={product.id} style={[local.productCard, product.popular && { borderColor: theme.colors.primary, borderWidth: 2 }]}>
             <View style={local.productInner}>
@@ -92,10 +97,10 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
                 {product.subscription && <AppIcon name="crown-outline" size={25} color="#B7791F" />}
               </View>
               <Text style={[local.detail, { color: theme.colors.onSurfaceVariant }]}>{product.detail}</Text>
-              <Text style={[local.price, { color: theme.colors.onSurface }]}>{prices[product.id] || product.price}</Text>
+              <Text style={[local.price, { color: theme.colors.onSurface }]}>{prices[product.id] || 'Mağaza fiyatı bekleniyor…'}</Text>
               <CaylikButton
                 icon={product.subscription ? 'crown-outline' : 'cart-outline'}
-                disabled={Boolean(purchasingProductId) || restoring}
+                disabled={!prices[product.id] || Boolean(purchasingProductId) || restoring}
                 onPress={() => onPurchase(product.id)}
               >
                 {purchasingProductId === product.id ? 'İşleniyor…' : product.subscription ? 'Pro’ya Geç' : 'Satın Al'}
@@ -107,7 +112,7 @@ export default function CreditStoreScreen({ credits, onBack, onPurchase, onResto
 
       <CaylikButton icon="restore" mode="text" disabled={Boolean(purchasingProductId) || restoring} onPress={onRestore}>{restoring ? 'Kontrol Ediliyor…' : 'Satın Alımları Geri Yükle'}</CaylikButton>
       {!!storeStatus && <Text accessibilityLiveRegion="polite" style={[local.status, { color: theme.colors.onSurfaceVariant }]}>{storeStatus}</Text>}
-      <Text style={[local.legal, { color: theme.colors.onSurfaceVariant }]}>Ödeme iPhone ve iPad’de Apple App Store hesabınız üzerinden güvenli biçimde alınır. Satın alma onaylanmadan kredi eklenmez. Mağazanın gösterdiği yerel fiyat geçerlidir. Tek seferlik kredi paketlerinin kullanım süresi yoktur.</Text>
+      <Text style={[local.legal, { color: theme.colors.onSurfaceVariant }]}>Ödeme iOS’ta App Store, Android’de Google Play hesabınız üzerinden alınır; mağazanın gösterdiği yerel fiyat geçerlidir. Kredi, satın alma doğrulanınca eklenir. Tek seferlik paketlerin kullanım süresi yoktur.</Text>
       <View style={local.legalLinks}>
         <TouchableOpacity accessibilityRole="link" onPress={() => void Linking.openURL(`${API_ORIGIN}/privacy`)}><Text style={[local.legalLink, { color: theme.colors.primary }]}>Gizlilik Politikası</Text></TouchableOpacity>
         <Text style={{ color: theme.colors.onSurfaceVariant }}>·</Text>

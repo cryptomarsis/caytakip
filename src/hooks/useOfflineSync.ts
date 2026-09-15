@@ -37,9 +37,9 @@ export function useOfflineSync({ currentUser, authFetch, getAuthHeaders }: Optio
     setFailedCount(failed);
   }, [currentUser]);
 
-  const queueRequest = useCallback(async (endpoint: string, body: Record<string, unknown>) => {
+  const queueRequest = useCallback(async (endpoint: string, body: Record<string, unknown>, id?: string) => {
     if (!currentUser?.userId) throw new Error('Oturum bulunamadı.');
-    await enqueueOfflineRequest({ userId: currentUser.userId, endpoint, method: 'POST', body });
+    await enqueueOfflineRequest({ id, userId: currentUser.userId, endpoint, method: 'POST', body });
     await refreshCounts();
   }, [currentUser, refreshCounts]);
 
