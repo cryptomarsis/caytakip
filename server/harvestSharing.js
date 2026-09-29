@@ -1,4 +1,5 @@
 const { deliveryInput, deliveryMessage, deliveryChanges } = require('../shared/sharecropping');
+const { assertCollectionsFit } = require('../shared/shareLedger');
 const fail = message => Object.assign(Error(message), { httpCode: 409 });
 
 // Called inside the SAME transaction as the harvest mutation. Never creates a
@@ -15,7 +16,9 @@ module.exports = ({ ShareLink, ShareDelivery, ShareEvent, UserProfile }) => asyn
   if (!link || !await UserProfile.exists({ userId: link.ownerId, active: { $ne: false } }).session(session)) throw fail('Paylaşılacak anlaşma aktif değil veya müstahsil onayı yok.');
   if (!await UserProfile.exists({ userId: harvest.userId, active: { $ne: false } }).session(session)) throw fail('Aktif hesap gerekli.');
   if (deleted && !prior) throw fail('Bağlı teslimat bulunamadı; kayıt silinmedi.');
+  if (deleted && Number(harvest.tahsilat) > 0 && prior?.legacyAllocation?.state !== 'applied') throw fail('Eski tahsilatı önce Pay Takibi üzerinden onaylı olarak aktarın.');
   const data = deleted ? prior.data : deliveryInput({ kg: harvest.kg, price: harvest.fiyat, factory: harvest.firma, date: harvest.tarih, dueDate: harvest.isVadeli ? harvest.vadeTarihi : '' }, prior?.data.denominator || link.denominator);
+  if (prior) assertCollectionsFit(prior.toObject ? prior.toObject() : prior, data, deleted);
   if (prior && !deleted && JSON.stringify(data) === JSON.stringify(prior.data)) return;
   if (prior && prior.history.length >= 100) throw fail('Paylaşılan kaydın düzeltme sınırına ulaşıldı.');
   let row;

@@ -10,6 +10,18 @@ export interface HarvestRecord {
   firma?: string;
   quotaPlanId?: string;
   shareLinkId?: string;
+  sharedDeliveryId?: string;
+  sourceHarvestId?: string;
+  sharedRole?: 'cropper' | 'owner';
+  sharedVoided?: boolean;
+  sharedPartner?: string;
+  sharedLabel?: string;
+  shareDenominator?: number;
+  sharedNetCents?: number;
+  sharedSaleNetCents?: number;
+  legacySharedCollection?: number;
+  legacyAllocation?: { proposalId: string; state: 'pending' | 'applied'; sourceCents: number; cropperCents: number; ownerCents: number };
+  sharedPayments?: PaymentRecord[];
   fiyat?: number | string;
   brutTutar?: number | string;
   kesintiTutar?: number | string;
@@ -27,6 +39,8 @@ export interface HarvestRecord {
 
 export interface PaymentRecord {
   _id: string;
+  sharedDeliveryId?: string;
+  revision?: number;
   harvestId?: string | Pick<HarvestRecord, '_id' | 'firma' | 'tarih' | 'surum' | 'kg' | 'weight' | 'bahce' | 'garden' | 'uretici' | 'producerName'> | null;
   tarih?: string;
   tutar?: number | string;

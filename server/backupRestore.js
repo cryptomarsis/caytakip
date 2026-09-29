@@ -28,6 +28,13 @@ function validateBackup(body, names) {
   for (const delivery of body.shareDeliveries || []) {
     const link = links.get(String(delivery.linkId));
     if (!link || link.cropperId !== delivery.cropperId || link.ownerId !== delivery.ownerId || link.denominator !== delivery.data?.denominator) throw Error('Ortak teslimatın bağlantısı geçersiz.');
+    const paymentIds = new Set(), requestIds = new Set();
+    for (const payment of delivery.collections || []) {
+      if (!idPattern.test(String(payment._id)) || paymentIds.has(String(payment._id)) || ![delivery.cropperId, delivery.ownerId].includes(payment.userId) || !Number.isSafeInteger(payment.amountCents) || payment.amountCents <= 0) throw Error('Pay tahsilatı geçersiz.');
+      paymentIds.add(String(payment._id));
+      if (payment.requestId) { const key = payment.userId + ':' + payment.requestId; if (requestIds.has(key)) throw Error('Tekrarlı pay tahsilatı.'); requestIds.add(key); }
+    }
+    require('../shared/shareLedger').assertCollectionsFit(delivery, delivery.data, delivery.voided);
     if (delivery.harvestId) {
       const id = String(delivery.harvestId), harvest = harvests.get(id);
       if (linkedHarvests.has(id)) throw Error('Bir hasat birden fazla teslimata bağlanamaz.');

@@ -15,7 +15,7 @@ export function ReceivableCard({ item, days, onPayment }: { item: HarvestRecord;
   const details = [
     ['Brüt satış', formatTL(grossTotalOf(item))],
     ['Kesinti', formatTL(deductionTotalOf(item))],
-    ['Net alacak', formatTL(netTotalOf(item))],
+    [item.sharedDeliveryId ? 'Net satıştan payınız' : 'Net alacak', formatTL(netTotalOf(item))],
     ['Tahsil edilen', formatTL(Number(item.tahsilat) || 0)],
   ];
   return <View style={[ui.card, { borderTopColor: theme.colors.outlineVariant }]}>
@@ -31,12 +31,14 @@ export function ReceivableCard({ item, days, onPayment }: { item: HarvestRecord;
       <Text style={[ui.amount, { color: theme.colors.primary }]}>{formatTL(remainingTotalOf(item))}</Text>
       <Text style={[ui.caption, { color: days !== null && days < 0 ? theme.colors.error : theme.colors.secondary }]}>{status}</Text>
     </View>
+    {item.sharedDeliveryId && <Text style={[ui.caption, { color: theme.colors.onSurfaceVariant }]}>{item.sharedPartner} · Kendi payınızın kalan alacağı</Text>}
+    {!!item.legacySharedCollection && <Text style={[ui.caption, { color: theme.colors.error }]}>Eski tahsilatın aktarımı Pay Takibi’nde onay bekliyor.</Text>}
     {expanded && <View style={[ui.details, { backgroundColor: theme.colors.surfaceVariant }]}>
       <Text style={[ui.caption, { color: theme.colors.onSurfaceVariant }]}>Teslimat: {formatDisplayDate(item.tarih)} · {item.kg || item.weight || 0} KG · {formatTL(Number(item.fiyat) || 0)} / KG</Text>
       {details.map(([label, value]) => <View key={label} style={ui.detailRow}><Text style={[ui.caption, ui.copy, { color: theme.colors.onSurfaceVariant }]}>{label}</Text><Text style={[ui.caption, { color: theme.colors.onSurface }]}>{value}</Text></View>)}
       {!!item.aciklama && <Text style={[ui.caption, { color: theme.colors.onSurfaceVariant }]}>{item.aciklama}</Text>}
     </View>}
-    {!!onPayment && <CaylikButton mode="outlined" icon="hand-coin-outline" onPress={() => onPayment(item)} style={ui.payment}>Ödeme al</CaylikButton>}
+    {!!onPayment && <CaylikButton mode="outlined" icon="hand-coin-outline" disabled={Boolean(item.legacySharedCollection)} onPress={() => onPayment(item)} style={ui.payment}>Ödeme al</CaylikButton>}
   </View>;
 }
 

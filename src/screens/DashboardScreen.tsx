@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import AdMobNativeCard from '../components/AdMobNativeCard';
 import { useAdAccess } from '../context/ad-access';
 import DashboardStatus from '../components/DashboardStatus';
-import ShareOverviewCard from '../components/ShareOverviewCard';
 import type { AuthFetch } from '../services/aiAssistant';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
@@ -192,6 +191,8 @@ export default function DashboardScreen({
 
       <SeasonSummary kg={totalKg} sales={totalSales} paid={totalPay} remaining={pendingCollection} />
       <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>Özet, tüm kayıtlarınızı kapsar.</Text>
+      {harvests.some(row => row.sharedDeliveryId) && <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>Paylaşımlı teslimatlarda KG tamamını, tutarlar yalnızca sizin payınızı gösterir.</Text>}
+      {harvests.some(row => Number(row.legacySharedCollection) > 0) && <Text accessibilityRole="alert" style={{ color: theme.colors.error, fontSize: 12 }}>Eski ortak tahsilatlar için Pay Takibi’nde onay gerekiyor. Bu tutarlar henüz alacaklardan düşülmedi.</Text>}
       {authFetch ? <DashboardStatus authFetch={authFetch} harvests={harvests} pending={pendingSyncCount} onQuota={() => onNavigate('quota')} /> : <CaylikButton icon="leaf-circle-outline" mode="outlined" onPress={() => onNavigate('quota')}>Çaykur Kota Takip · Kalan kotam</CaylikButton>}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: caylikDesign.spacing.sm, marginVertical: caylikDesign.spacing.md }}>
@@ -200,7 +201,6 @@ export default function DashboardScreen({
       </View>
 
       <AssistantEntry credits={assistantCredits} onPress={() => onNavigate('assistant')} />
-      {authFetch && <ShareOverviewCard authFetch={authFetch} refreshKey={harvests} onOpen={() => onNavigate('sharecropping')} />}
 
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reklam ver" activeOpacity={0.82} onPress={() => onNavigate('advertise')} style={[local.advertiseCard, { backgroundColor: theme.colors.secondaryContainer, borderColor: theme.colors.secondary }]}>
         <View style={[local.advertiseIcon, { backgroundColor: theme.colors.secondary }]}><AppIcon name="bullhorn-outline" size={24} color={theme.colors.onSecondary} /></View>
@@ -216,7 +216,7 @@ export default function DashboardScreen({
       <DashboardSectionHeader title="Son teslimatlar" actionLabel="Tümünü gör" onAction={() => onNavigate('history')} />
       {recentHarvests.length === 0 ? <DashboardEmptyState icon="leaf-off" text="Henüz teslimat kaydı bulunmuyor." /> : recentHarvests.map((item, index) => {
         const company = String(item.firma || item.uretici || item.producerName || 'Firma belirtilmedi'); const kg = Number(item.kg ?? item.weight) || 0;
-        return <DashboardListRow key={item._id || index} icon="basket-outline" title={company} detail={`${formatDisplayDate(item.tarih)} · ${kg.toLocaleString('tr-TR')} kg`} value={formatTL(netTotalOf(item))} tone={remainingTotalOf(item) > 0.01 ? 'warning' : 'primary'} onPress={() => openHarvestEditModal(item)} accessibilityLabel={`${company}, ${kg.toLocaleString('tr-TR')} kilogram`} />;
+        return <DashboardListRow key={item._id || index} icon="basket-outline" title={company} detail={`${formatDisplayDate(item.tarih)} · ${kg.toLocaleString('tr-TR')} kg${item.sharedDeliveryId ? ` · ${item.sharedPartner} · Payınız` : ''}`} value={formatTL(netTotalOf(item))} tone={remainingTotalOf(item) > 0.01 ? 'warning' : 'primary'} onPress={() => openHarvestEditModal(item)} accessibilityLabel={`${company}, ${kg.toLocaleString('tr-TR')} kilogram`} />;
       })}
 
       <AdMobNativeCard />

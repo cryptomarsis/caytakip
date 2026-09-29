@@ -47,7 +47,9 @@ export const deductionTotalOf = (record: any) => {
 };
 
 export const netTotalOf = (record: any) =>
-  Math.max(0, grossTotalOf(record) - deductionTotalOf(record));
+  record?.sharedDeliveryId && Number.isSafeInteger(record.sharedNetCents)
+    ? Math.max(0, record.sharedNetCents / 100)
+    : Math.max(0, grossTotalOf(record) - deductionTotalOf(record));
 
 export const remainingTotalOf = (record: any) =>
   Math.max(0, netTotalOf(record) - parseMoney(record?.tahsilat ?? 0));

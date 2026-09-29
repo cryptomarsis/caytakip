@@ -1787,6 +1787,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     if (!Number.isFinite(kgVal) || kgVal <= 0) return res.status(400).json({ error: 'KG 0’dan büyük olmalıdır.' });
     if (!Number.isFinite(fiyatVal) || fiyatVal < 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin.' });
     if (!Number.isFinite(tahsilatVal) || tahsilatVal < 0) return res.status(400).json({ error: 'Geçerli bir tahsilat girin.' });
+    if (req.body.shareLinkId && tahsilatVal > 0) return res.status(400).json({ error: 'Paylaşımlı hasadı önce kaydedin; kendi payınızın tahsilatını Ödeme Al ekranından girin.' });
     if (!tarih) return res.status(400).json({ error: 'Tarih GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (isVadeli && !vadeTarihi) return res.status(400).json({ error: 'Vade tarihi GG.AA.YYYY biçiminde geçerli olmalıdır.' });
     if (receiptFingerprint) {
@@ -1995,6 +1996,7 @@ app.post('/api/payments', requireAuth, idempotencyMiddleware, async (req, res) =
     await session.withTransaction(async () => {
     const harvest = await Harvest.findById(harvestId).session(session);
     if (!harvest) throw Object.assign(new Error('Seçilen satış kaydı bulunamadı.'), { status: 404 });
+    if (harvest.shareLinkId) throw Object.assign(new Error('Paylaşımlı hasadın tahsilatını güncel uygulamada kendi payınız üzerinden girin.'), { status: 409 });
 
     // Kullanıcının başka bir kaydına ödeme yazılmasını engelle
     if (harvest.userId && harvest.userId !== req.auth.userId) {
@@ -2086,6 +2088,7 @@ app.put('/api/payments/:id', requireAuth, async (req, res) => {
 
     const harvest = await Harvest.findOne({ _id: payment.harvestId, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!harvest) return res.status(404).json({ error: 'Bağlı hasat kaydı bulunamadı.' });
+    if (harvest.shareLinkId) return res.status(409).json({ error: 'Eski ortak tahsilat korunuyor. Pay Takibi’nde onaylı aktarımı tamamlayın; düzeltmeyi kendi pay tahsilatınızda yapın.' });
 
     const amounts = calculateHarvestAmounts(harvest.kg || harvest.weight, harvest.fiyat);
     const currentPaid = Number(harvest.tahsilat) || 0;
@@ -2138,6 +2141,7 @@ app.delete('/api/payments/:id', requireAuth, async (req, res) => {
 
     const harvest = await Harvest.findOne({ _id: payment.harvestId, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!harvest) return res.status(404).json({ error: 'Bağlı hasat kaydı bulunamadı.' });
+    if (harvest.shareLinkId) return res.status(409).json({ error: 'Eski ortak tahsilat korunuyor. Pay Takibi’nde onaylı aktarımı tamamlayın; düzeltmeyi kendi pay tahsilatınızda yapın.' });
 
     const amounts = calculateHarvestAmounts(harvest.kg || harvest.weight, harvest.fiyat);
     const previousHarvest = {
@@ -2666,6 +2670,7 @@ const getAdminSummary = async () => {
 };
 require('./server/quotaRoutes')(app, { requireAuth, UserProfile, Harvest });
 require('./server/sharecroppingRoutes')(app, { requireAuth, limitPublicUsage, mongoose, UserProfile, ShareLink, ShareDelivery, ShareEvent });
+require('./server/shareLedgerRoutes')(app, { requireAuth, mongoose, UserProfile, ShareLink, ShareDelivery, Harvest });
 require('./server/sharecroppingPush')(app, { requireAuth, mongoose, UserProfile, Session, ShareLink, ShareEvent, SharePushDevice });
 require('./server/seasonReminderRoutes')(app, { requireAuth, UserProfile, SeasonReminderPolicy });
 require('./server/activityExportRoutes')(app, { requireAuth, UserProfile, Harvest, Payment, Expense, Garden });

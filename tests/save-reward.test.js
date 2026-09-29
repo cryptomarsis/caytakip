@@ -23,6 +23,7 @@ function handlers(result, sharing = null) {
     exports, currentUser: { userId: 'u1', name: 'Test' }, harvestSavingRef: { current: false },
     harvestShareLinkId: sharing ? 'a'.repeat(24) : '', setHarvestShareLinkId: noop,
     policyRequest: noop, shareRequest: async () => sharing,
+    collectionEndpoint: row => row.sharedDeliveryId ? `/shared-ledger/${row.sharedDeliveryId}/payments` : '/payments',
     hForm: { producer: '', kg: '125', firma: 'ÇAYKUR', fiyat: '35', tahsilat: '0', date: '15.09.2026' },
     payHarvestId: 'h1', payAmount: '100', payDate: '15.09.2026', payDesc: '', harvests: [{ _id: 'h1' }],
     toServerDate: () => '2026-09-15', todayDisplayDate: () => '15.09.2026', parseMoney: Number,

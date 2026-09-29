@@ -91,6 +91,8 @@ export default function CollectionsScreen(props: any) {
   return (
     <View>
       <CaylikScreenHeader icon="hand-coin-outline" eyebrow="TAHSİLAT YÖNETİMİ" title="Ödeme Al" description="Bekleyen hasadı seçin ve alınan ödemeyi güvenle kaydedin." />
+      {selected?.sharedDeliveryId && <Text style={{ color: theme.colors.primary, marginBottom: 12 }}>Paylaşımlı teslimat · {selected.sharedPartner}. Yalnızca kendi payınıza aldığınız ödemeyi girin.</Text>}
+      {Number(selected?.legacySharedCollection) > 0 && <Text style={{ color: theme.colors.error, marginBottom: 12 }}>Eski toplam tahsilat paylara ayrılmayı bekliyor. Önce Pay Takibi’nde bu teslimatı inceleyin.</Text>}
       <View style={[styles.formCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
         <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant, display: showHarvestPicker ? 'flex' : 'none' }]}>
           Her kart bir hasat kaydıdır. Doğru hasadı bulmak için kartları sağa-sola kaydırın veya Önceki / Sonraki düğmelerini kullanın.
@@ -172,7 +174,7 @@ export default function CollectionsScreen(props: any) {
 
                     <View style={{ backgroundColor: active ? 'rgba(0,0,0,0.16)' : theme.colors.primaryContainer, borderRadius: 12, padding: 11, marginTop: 13 }}>
                       <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: active ? 0.86 : 1, fontSize: 12 }}>Brüt {formatTL(gross)} · %2 kesinti {formatTL(deduction)}</Text>
-                      <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.primary, fontWeight: '800', marginTop: 3 }}>Net alacak: {formatTL(net)}</Text>
+                      <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.primary, fontWeight: '800', marginTop: 3 }}>{harvest.sharedDeliveryId ? 'Net satıştan sizin payınız' : 'Net alacak'}: {formatTL(net)}</Text>
                       <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.primary, fontWeight: '800', marginTop: 3 }}>Kalan ödeme: {formatTL(remaining)}</Text>
                     </View>
                     <Text style={{ color: active ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, opacity: 0.72, fontSize: 11, marginTop: 10 }}>Kayıt kodu: {String(harvest._id || '').slice(-8).toUpperCase()} · Ödenen: {formatTL(paid)}</Text>

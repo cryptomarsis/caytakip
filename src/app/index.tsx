@@ -63,6 +63,7 @@ import AdMobNativeCard from '../components/AdMobNativeCard';
 import { AdAccessContext } from '../context/ad-access';
 import SharecroppingScreen from '../screens/SharecroppingScreen';
 import { shareRequest, type ShareLink } from '../services/sharecropping';
+import { collectionEndpoint, paymentEndpoint } from '../services/shareLedger';
 import { useSharecroppingPush } from '../hooks/useSharecroppingPush';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
@@ -112,6 +113,7 @@ export default function App() {
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [shareFocus, setShareFocus] = useState({ userId: '', linkId: '' });
   const [bannerHeight, setBannerHeight] = useState(0);
   const [assistantDraft, setAssistantDraft] = useState<{ userId: string; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -274,6 +276,23 @@ export default function App() {
   useEffect(() => {
     backgroundActionsRef.current = { fetchData, refreshPendingSyncCount, syncOfflineQueue };
   }, [fetchData, refreshPendingSyncCount, syncOfflineQueue]);
+
+  useEffect(() => {
+    if (!currentUser?.userId) return;
+    const listener = AppState.addEventListener('change', state => {
+      if (state === 'active') void backgroundActionsRef.current.fetchData(true);
+    });
+    return () => listener.remove();
+  }, [currentUser?.userId]);
+
+  const lastAccountTab = useRef(activeTab);
+  useEffect(() => {
+    const changed = lastAccountTab.current !== activeTab;
+    lastAccountTab.current = activeTab;
+    if (changed && currentUser?.userId && ['dashboard', 'collections', 'receivables', 'sharecropping', 'history', 'reports'].includes(activeTab)) {
+      void backgroundActionsRef.current.fetchData(true);
+    }
+  }, [activeTab, currentUser?.userId]);
 
   useEffect(() => {
     if (activeTab === 'assistant' && currentUser?.userId) void refreshAssistantWallet();
@@ -663,6 +682,16 @@ export default function App() {
   // Silme onayı React Native'in kendi penceresiyle gösterilir. Böylece Android,
   // web ve masaüstünde aynı şekilde çalışır.
   const handleDelete = (endpoint: string, id: string, title: string) => {
+    if (endpoint === 'harvests') {
+      const row = harvests.find(item => item._id === id);
+      if (row?.sharedDeliveryId) {
+        if (row.sharedRole !== 'cropper' || !row.sourceHarvestId) {
+          showOperationFeedback('Paylaşılan teslimat', 'Bu teslimat yalnızca yarıcı tarafından Pay Takibi üzerinden değiştirilebilir.', 'info');
+          return;
+        }
+        id = row.sourceHarvestId;
+      }
+    }
     if (!id) {
       showOperationFeedback('Kayıt Bulunamadı', 'Silinecek kayıt bilgisi eksik. Sayfayı yenileyip tekrar deneyin.', 'error');
       return;
@@ -676,9 +705,12 @@ export default function App() {
     setDeleteConfirmation({ ...target, status: 'deleting' });
     setLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/${target.endpoint}/${target.id}`, {
+      const payment = target.endpoint === 'payments' ? payments.find(item => item._id === target.id) : undefined;
+      const path = payment ? paymentEndpoint(payment) : `/${target.endpoint}/${target.id}`;
+      const res = await authFetch(`${API_URL}${path}`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        ...(payment?.sharedDeliveryId ? { body: JSON.stringify({ revision: payment.revision || 0 }) } : {}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || data?.message || 'Silme işlemi gerçekleşmedi.');
@@ -920,7 +952,7 @@ export default function App() {
 
     setLoading(true);
     try {
-      const result = await postOrQueue('/payments', {
+      const result = await postOrQueue(collectionEndpoint(selected), {
         harvestId: payHarvestId,
         tutar: amount,
         aciklama: payDesc.trim(),
@@ -993,10 +1025,10 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const response = await authFetch(`${API_URL}/payments/${editingPayment._id}`, {
+      const response = await authFetch(`${API_URL}${paymentEndpoint(editingPayment)}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ tarih, tutar, aciklama: editPaymentForm.description.trim() })
+        body: JSON.stringify({ tarih, tutar, aciklama: editPaymentForm.description.trim(), revision: editingPayment.revision || 0 })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Tahsilat güncellenemedi.');
@@ -1099,6 +1131,22 @@ export default function App() {
   };
 
   const openHarvestEditModal = (harvestItem: HarvestRecord) => {
+    if (harvestItem.sharedDeliveryId) {
+      if (harvestItem.sharedRole !== 'cropper' || !harvestItem.sourceHarvestId) {
+        setShareFocus({ userId: currentUser?.userId || '', linkId: harvestItem.shareLinkId || '' });
+        setActiveTab('sharecropping');
+        return;
+      }
+      void (async () => {
+        try {
+          const response = await policyRequest(`${API_URL}/harvests/${harvestItem.sourceHarvestId}`);
+          const source = await response.json();
+          if (!response.ok) throw Error(source.error || 'Hasat açılamadı.');
+          openHarvestEditModal(source);
+        } catch (error) { showOperationFeedback('Hasat açılamadı', error instanceof Error ? error.message : 'Yeniden deneyin.', 'error'); }
+      })();
+      return;
+    }
     setEditingHarvest(harvestItem);
     setEditHarvestForm({
       quotaPlanId: harvestItem.quotaPlanId || '',
@@ -1538,7 +1586,10 @@ export default function App() {
           )}
 
           {activeTab === 'more' && <MoreScreen isAdmin={Boolean(isAdmin)} onNavigate={navigateTab} />}
-          {activeTab === 'sharecropping' && <SharecroppingScreen key={currentUser.userId} userId={currentUser.userId} authFetch={policyRequest} enablePush={sharecroppingPush.enable} onPageChange={resetSharecroppingScroll} refreshKey={harvests}
+          {activeTab === 'sharecropping' && <SharecroppingScreen key={`${currentUser.userId}:${shareFocus.userId === currentUser.userId ? shareFocus.linkId : ''}`} initialLinkId={shareFocus.userId === currentUser.userId ? shareFocus.linkId : ''} userId={currentUser.userId} authFetch={policyRequest} enablePush={sharecroppingPush.enable} onPageChange={resetSharecroppingScroll} refreshKey={harvests}
+            accountHarvests={harvests.filter(row => Boolean(row.sharedDeliveryId))}
+            onCollect={openPaymentForHarvest}
+            onRefreshAccount={() => { void fetchData(); }}
             onAddHarvest={id => { setHarvestShareLinkId(id); navigateTab('harvest'); }}
             onOpenHarvest={async id => {
               try { const response = await policyRequest(`${API_URL}/harvests/${id}`); const row = await response.json(); if (!response.ok) throw Error(row.error || 'Hasat bulunamadı.'); openHarvestEditModal(row); }

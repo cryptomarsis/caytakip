@@ -95,7 +95,7 @@ test('concurrent source changes and event failures cannot leave divergent balanc
   assert.equal(h.db.harvests[0].kg, 100); assert.equal(h.db.deliveries[0].data.kg, 100); assert.equal(h.db.events.length, 1);
 });
 test('deletion removes source and payments but preserves a voided shared history, even after closing', async () => {
-  const h = harness(); await h.call('POST', { ...base, tahsilat: 100 }); h.db.links[0].status = 'closed';
+  const h = harness(); await h.call('POST', base); h.db.links[0].status = 'closed';
   h.control.failEvent = true; assert.equal((await h.call('DELETE')).statusCode, 400); assert.equal(h.db.harvests.length, 1);
   h.control.failEvent = false; assert.equal((await h.call('DELETE')).statusCode, 200);
   assert.equal(h.db.harvests.length, 0); assert.equal(h.db.payments.length, 0); assert.equal(h.db.deliveries[0].voided, true); assert.match(h.db.events[1].message, /iptal edildi/);
@@ -107,4 +107,13 @@ test('backup validates canonical harvest references and allows tombstones withou
   assert.throws(() => validateBackup({ ...backup, harvests: [] }, Object.keys(backup)), /kaynağı/);
   await h.call('DELETE');
   assert.doesNotThrow(() => validateBackup({ ...backup, harvests: h.db.harvests, shareDeliveries: h.db.deliveries }, Object.keys(backup)));
+});
+
+test('shared source rejects initial whole-sale payment and paid-share erasure without changing source totals', async () => {
+  const h = harness(); assert.equal((await h.call('POST', { ...base, tahsilat: 100 })).statusCode, 400); assert.equal(h.db.harvests.length, 0);
+  await h.call('POST', base);
+  h.db.deliveries[0].collections = [{ _id: 'd'.repeat(24), userId: 'owner', amountCents: 100000 }];
+  assert.equal((await h.call('PUT', { kg: 10 })).statusCode, 409);
+  assert.equal((await h.call('DELETE')).statusCode, 409);
+  assert.equal(h.db.harvests[0].kg, 100); assert.equal(h.db.deliveries[0].voided, false);
 });

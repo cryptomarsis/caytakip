@@ -27,8 +27,10 @@ function harness(myRole = 'cropper', options = {}) {
     'react-native-paper': { useTheme: () => ({ colors: {} }) },
     '../components/caylik-ui': { CaylikButton: 'Button', CaylikSurface: 'Surface', CaylikScreenHeader: 'Header' },
     '../components/app-icon': { AppIcon: 'Icon' }, '../components/date-picker-field': 'DatePicker',
+    '../components/SharedAccountPanel': 'SharedAccountPanel',
+    '../components/SharedLegacyCollection': 'SharedLegacyCollection',
     '../../shared/sharecropping': require('../shared/sharecropping'),
-    '../utils/format': { todayDisplayDate: () => '29.09.2026', toServerDate: date => date.split('.').reverse().join('-'), formatTL: n => `${n} TL`, formatDisplayDate: date => date.split('-').reverse().join('.') },
+    '../utils/format': { todayDisplayDate: () => '29.09.2026', toServerDate: date => date.split('.').reverse().join('-'), formatTL: n => `${n} TL`, formatDisplayDate: date => date.split('-').reverse().join('.'), remainingTotalOf: row => row.sharedNetCents / 100 - Number(row.tahsilat || 0) },
     '../services/sharecropping': { shareRequest: async (_auth, route, method = 'GET', body) => {
       calls.push({ route, method, body });
       if (route === '/sharecropping') return { links: [{ ...agreement, myRole }] };
@@ -99,7 +101,7 @@ test('agreement detail leads to a separate delivery form and preserves safe save
 test('owner sees delivery totals but no delivery edit or create controls', async () => {
   const h = harness('owner'); await h.settle(); await h.openAgreement();
   assert.match(text(h.tree), /980 TL/); assert.equal(h.find(n => n.type === 'Button' && text(n) === 'Teslimat ekle'), undefined);
-  await h.button('Anlaşma detayları'); assert.match(text(h.tree), /normal hasat ve kota/);
+  await h.button('Anlaşma detayları'); assert.match(text(h.tree), /kendi payının alacağını ve tahsilatını/);
 });
 
 test('new delivery navigates to canonical harvest form without posting a separate ledger entry', async () => {
@@ -128,4 +130,21 @@ test('linked deliveries show history and open source edit, never the independent
   await h.button('Bağlı hasadı düzenle'); assert.equal(opened, 'h1');
   const owner = harness('owner', { records }); await owner.settle(); await owner.openAgreement();
   assert.equal(owner.find(n => n.type === 'Button' && text(n) === 'Bağlı hasadı düzenle'), undefined);
+});
+
+test('Pay Takibi uses the account dashboard and a selected agreement filters it without mixing other partners', async () => {
+  const accountHarvests = [{ _id: 'r1', shareLinkId: id, sharedDeliveryId: 'r1', sharedNetCents: 98000 }, { _id: 'r2', shareLinkId: 'other', sharedDeliveryId: 'r2', sharedNetCents: 20000 }];
+  const h = harness('owner', { accountHarvests }); await h.settle();
+  assert.equal(h.find(n => n.type === 'SharedAccountPanel').props.rows.length, 2);
+  assert.doesNotMatch(text(h.tree), /BİRLİKTE ÜRETİYORUZ/);
+  await h.openAgreement(); assert.equal(h.find(n => n.type === 'SharedAccountPanel').props.rows.length, 1);
+});
+
+test('owner can collect only own projected receivable from delivery detail, while source editing stays unavailable', async () => {
+  let selected;
+  const row = { _id: 'r1', shareLinkId: id, sharedDeliveryId: 'r1', sharedNetCents: 196000, tahsilat: 100 };
+  const h = harness('owner', { initialLinkId: id, accountHarvests: [row], onCollect: item => { selected = item; }, records: [{ _id: 'r1', harvestId: 'source', data: { factory: 'ÇAYKUR', date: '2026-09-29', kg: 100, netCents: 294000, cropperCents: 98000, ownerCents: 196000 } }] });
+  await h.settle(); assert.match(text(h.tree), /1860 TL/);
+  await h.button('Bu teslimattan ödeme al'); assert.equal(selected, row);
+  assert.equal(h.find(n => n.type === 'Button' && text(n) === 'Bağlı hasadı düzenle'), undefined);
 });

@@ -146,6 +146,7 @@ module.exports = function register(app, { requireAuth, limitPublicUsage, mongoos
       if (old.history.length >= 100) throw fail(409, 'Düzeltme sınırına ulaşıldı.');
       let data = old.data;
       if (req.body.voided !== true) { try { data = deliveryInput(req.body, old.data.denominator); } catch (e) { throw fail(400, e.message); } }
+      require('../shared/shareLedger').assertCollectionsFit(old.toObject ? old.toObject() : old, data, req.body.voided === true);
       const row = await ShareDelivery.findOneAndUpdate({ _id: old._id, revision: old.revision }, {
         $set: { data, voided: req.body.voided === true }, $inc: { revision: 1 },
         $push: { history: { data: old.data, revision: old.revision, at: new Date() } },

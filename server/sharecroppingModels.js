@@ -18,6 +18,13 @@ module.exports = function models(mongoose) {
     data: { type: mongoose.Schema.Types.Mixed, required: true },
     revision: { type: Number, default: 0 }, voided: { type: Boolean, default: false },
     history: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    collections: { type: [new mongoose.Schema({
+      userId: { type: String, required: true }, requestId: String, requestHash: String,
+      amountCents: { type: Number, required: true }, date: String, note: String,
+      voided: { type: Boolean, default: false }, revision: { type: Number, default: 0 },
+    }, { timestamps: true })], default: [] },
+    financeSerial: { type: Number, default: 0 },
+    legacyAllocation: mongoose.Schema.Types.Mixed,
   });
   delivery.index({ cropperId: 1, requestId: 1 }, { unique: true });
   delivery.index({ harvestId: 1 }, { unique: true, partialFilterExpression: { harvestId: { $type: 'objectId' } } });

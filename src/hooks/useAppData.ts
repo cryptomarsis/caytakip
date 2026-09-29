@@ -5,6 +5,7 @@ import { fetchArrayCollection, fetchCursorCollection } from '../services/paginat
 import { saveDataSnapshot, getDataSnapshot } from '../services/offlineQueue';
 import { syncDueNotifications } from '../services/dueNotifications';
 import { API_URL } from '../services/api';
+import { mergeShareLedger } from '../services/shareLedger';
 import { AdRecord, ExpenseRecord, FactoryPriceRecord, GardenRecord, HarvestRecord, PaymentRecord, UserSession } from '../types';
 
 const LAST_SYNC_STORAGE_PREFIX = '@caylik_last_sync_at';
@@ -40,11 +41,11 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
   useEffect(() => { account.current = currentUser?.userId; generation.current++; }, [currentUser?.userId]);
   const ownData = dataOwner === currentUser?.userId;
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (silent = false) => {
     if (!currentUser?.token) return;
     const requestGeneration = ++generation.current;
     const valid = () => account.current === currentUser.userId && generation.current === requestGeneration;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const headers = getAuthHeaders();
       const results = await Promise.allSettled([
@@ -54,6 +55,7 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
         fetchCursorCollection<GardenRecord>(authFetch, `${API_URL}/gardens`, { headers }),
         fetchArrayCollection<FactoryPriceRecord>(authFetch, `${API_URL}/factory-prices`, { headers }),
         fetchArrayCollection<AdRecord>(authFetch, `${API_URL}/ads`, { headers }),
+        fetchCursorCollection<HarvestRecord>(authFetch, `${API_URL}/shared-ledger`, { headers }),
       ]);
       if (!valid()) return;
 
@@ -65,6 +67,7 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
       const rawG = parse(results[3]) as GardenRecord[] | null;
       const rawP = parse(results[4]) as FactoryPriceRecord[] | null;
       const rawA = parse(results[5]) as AdRecord[] | null;
+      const rawShared = parse(results[6]) as HarvestRecord[] | null;
       const failed = results.map((result, index) =>
         result.status === 'rejected' || !result.value.ok ? index : -1
       ).filter((index) => index >= 0);
@@ -87,8 +90,12 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
         }
       }
 
-      const nextHarvests = rawH ?? (ownData ? harvests : EMPTY);
-      const nextPayments = rawPayments ?? (ownData ? payments : EMPTY);
+      // The three ledgers form one snapshot. Never show a fresh personal full
+      // sale beside an old shared projection or temporarily inflate balances.
+      const merged = rawH !== null && rawPayments !== null && rawShared !== null
+        ? mergeShareLedger(rawH, rawPayments, rawShared) : null;
+      const nextHarvests = merged?.harvests ?? (ownData ? harvests : EMPTY);
+      const nextPayments = merged?.payments ?? (ownData ? payments : EMPTY);
       const nextExpenses = rawE ?? (ownData ? expenses : EMPTY);
       const nextGardens = rawG ?? (ownData ? gardens : EMPTY);
       const nextFactoryPrices = rawP ?? (ownData ? factoryPrices : EMPTY);
@@ -116,8 +123,9 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
         await AsyncStorage.setItem(`${LAST_SYNC_STORAGE_PREFIX}:${currentUser.userId}`, syncedAt);
       }
 
-      if (rawH !== null) await syncDueNotifications(currentUser.userId, nextHarvests);
-      const sourceNames = ['hasatlar', 'tahsilatlar', 'giderler', 'bahçeler', 'fabrika fiyatları', 'reklamlar'];
+      if (merged) await syncDueNotifications(currentUser.userId, nextHarvests.filter(row => !row.legacySharedCollection));
+      if (!merged && !allRequestsFailed) onFeedback('Hesap güncellenemedi', 'Hasat, pay ve tahsilatlar birlikte yenilenemedi. Son güvenli hesap korunuyor; sunucu güncellemesini ve bağlantınızı kontrol edin.', 'info');
+      const sourceNames = ['hasatlar', 'tahsilatlar', 'giderler', 'bahçeler', 'fabrika fiyatları', 'reklamlar', 'pay hesapları'];
       const failedSources = failed.map((index) => sourceNames[index]);
       if (failedSources.length > 0 && !allRequestsFailed) {
         // Geçici Render gecikmeleri kullanıcıya hata olarak gösterilmez. Başarılı
