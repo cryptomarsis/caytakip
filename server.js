@@ -579,6 +579,7 @@ const FactoryPrice = mongoose.model('FactoryPrice', FactoryPriceSchema);
 const Ad = mongoose.model('Ad', AdSchema);
 const AdApplication = mongoose.model('AdApplication', AdApplicationSchema);
 const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
+const { ShareLink, ShareDelivery, ShareEvent, SharePushDevice } = require('./server/sharecroppingModels')(mongoose);
 const Feedback = mongoose.model('Feedback', FeedbackSchema);
 const SeasonReminderPolicy = mongoose.model('SeasonReminderPolicy', new mongoose.Schema({
   _id: { type: String },
@@ -869,9 +870,10 @@ app.post('/api/auth/logout', async (req, res) => {
 app.get('/api/legal/privacy', (req, res) => {
   res.json({
     title: `${APP_NAME} Gizlilik Politikası`,
-    updatedAt: '2026-08-26',
+    updatedAt: '2026-09-29',
     contactEmail: SUPPORT_EMAIL || 'Destek e-posta adresi henüz tanımlanmadı.',
     sections: [
+      { heading: 'Yarıcılık ve bildirimler', body: 'Yarıcılık daveti karşılıklı onaylandığında tarafların adları ve yalnızca bu anlaşmaya girilen teslimat, KG, fiyat, vade ve satış payları diğer tarafla paylaşılır. Telefon numarası ve diğer hesap kayıtları paylaşılmaz. Bağlantı kapatıldığında eski ortak kayıtlar korunur; taraflardan biri hesabını sildiğinde ortak kayıtlar silinir. Bildirim izni verilirse cihaz bildirim belirteci ve oturum bağlantısı, Expo/Apple/Google bildirim hizmetleri üzerinden genel bir uyarı iletmek için işlenir; kilit ekranında satış ayrıntıları gösterilmez.' },
       { heading: 'Toplanan bilgiler', body: 'Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.' },
       { heading: 'Kullanım amacı', body: 'Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği, destek talepleri ve kullanıcının isteği üzerine Çaylık Asistan yanıtları oluşturmak için kullanılır.' },
       { heading: 'Yapay zekâ hizmeti', body: 'Çaylık Asistan kullanıldığında yazdığınız soru ve soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Sesli soru özelliği kullanılırsa yalnızca kullanıcının başlattığı kısa ses kaydı metne çevrilmek üzere gönderilir ve kalıcı olarak saklanmaz. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında uzman görüşü esas alınmalıdır.' },
@@ -884,7 +886,7 @@ app.get('/api/legal/privacy', (req, res) => {
 
 app.get('/privacy', (req, res) => {
   const email = SUPPORT_EMAIL || 'uygulama içindeki Ayarlar ve Gizlilik ekranı';
-  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${APP_NAME} Gizlilik Politikası</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#183A2A;line-height:1.6}h1,h2{color:#1F513D}a{color:#246548}</style></head><body><h1>${APP_NAME} Gizlilik Politikası</h1><p>Son güncelleme: 26 Ağustos 2026</p><h2>Toplanan bilgiler</h2><p>Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.</p><h2>Kullanım amacı</h2><p>Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği, destek talepleri ve kullanıcının isteği üzerine Çaylık Asistan yanıtları oluşturmak için kullanılır. Veriler üçüncü taraflara satılmaz.</p><h2>Yapay zekâ hizmeti</h2><p>Çaylık Asistan kullanıldığında yazdığınız soru ile soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Sesli soru özelliği kullanılırsa yalnızca kullanıcının başlattığı kısa ses kaydı metne çevrilmek üzere gönderilir ve kalıcı olarak saklanmaz. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında ürün etiketi ve uzman görüşü esas alınmalıdır.</p><h2>Saklama ve güvenlik</h2><p>Oturum bilgileri cihazda güvenli depoda tutulur. Çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Hesap silindiğinde bu cihaz içi kopya ile sunucudaki ilişkili kayıtlar silinir; yasal saklama zorunluluğu varsa yalnızca gerekli süre boyunca tutulabilir.</p><h2>Veri silme ve hesap silme</h2><p>Hasat, ödeme, gider ve bahçe kayıtlarınızı hesabınızı silmeden uygulama içinden tek tek silebilirsiniz. Ayrıntılı yönergeler için <a href="/data-deletion">veri silme sayfasını</a> açın.</p><p>Hesabınızı uygulama içindeki <strong>Ayarlar ve Gizlilik</strong> ekranından kalıcı olarak silebilirsiniz. Uygulamaya erişemiyorsanız silme talebinizi ${email.includes('@') ? `<a href="mailto:${email}">${email}</a>` : email} üzerinden başlatabilirsiniz.</p></body></html>`);
+  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${APP_NAME} Gizlilik Politikası</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#183A2A;line-height:1.6}h1,h2{color:#1F513D}a{color:#246548}</style></head><body><h1>${APP_NAME} Gizlilik Politikası</h1><p>Son güncelleme: 29 Eylül 2026</p><h2>Yarıcılık ve bildirimler</h2><p>Yarıcılık daveti karşılıklı onaylandığında tarafların adları ve yalnızca bu anlaşmaya girilen teslimat, KG, fiyat, vade ve satış payları diğer tarafla paylaşılır. Telefon numarası ve diğer hesap kayıtları paylaşılmaz. Bağlantı kapatıldığında eski ortak kayıtlar korunur; taraflardan biri hesabını sildiğinde ortak kayıtlar silinir. Bildirim izni verilirse cihaz bildirim belirteci ve oturum bağlantısı, Expo/Apple/Google bildirim hizmetleri üzerinden genel bir uyarı iletmek için işlenir; kilit ekranında satış ayrıntıları gösterilmez.</p><h2>Toplanan bilgiler</h2><p>Ad Soyad, telefon numarası, hasat, ödeme, gider, bahçe ve uygulamada oluşturduğunuz kayıtlar hesabınızı sunmak için işlenir.</p><h2>Kullanım amacı</h2><p>Bilgiler hasat ve alacak takibi, raporlama, oturum güvenliği, destek talepleri ve kullanıcının isteği üzerine Çaylık Asistan yanıtları oluşturmak için kullanılır. Veriler üçüncü taraflara satılmaz.</p><h2>Yapay zekâ hizmeti</h2><p>Çaylık Asistan kullanıldığında yazdığınız soru ile soruyu yanıtlamak için gerekli sınırlı hesap özeti OpenAI API hizmetine gönderilir. Sesli soru özelliği kullanılırsa yalnızca kullanıcının başlattığı kısa ses kaydı metne çevrilmek üzere gönderilir ve kalıcı olarak saklanmaz. Yapay zekâ yanıtları hata içerebilir; tarım ilacı, kimyasal doz ve ciddi hastalık konularında ürün etiketi ve uzman görüşü esas alınmalıdır.</p><h2>Saklama ve güvenlik</h2><p>Oturum bilgileri cihazda güvenli depoda tutulur. Çevrimdışı kullanım için kayıtların geçici bir kopyası cihazda saklanabilir. Sunucu iletişimi HTTPS üzerinden yapılır. Hesap silindiğinde bu cihaz içi kopya ile sunucudaki ilişkili kayıtlar silinir; yasal saklama zorunluluğu varsa yalnızca gerekli süre boyunca tutulabilir.</p><h2>Veri silme ve hesap silme</h2><p>Hasat, ödeme, gider ve bahçe kayıtlarınızı hesabınızı silmeden uygulama içinden tek tek silebilirsiniz. Ayrıntılı yönergeler için <a href="/data-deletion">veri silme sayfasını</a> açın.</p><p>Hesabınızı uygulama içindeki <strong>Ayarlar ve Gizlilik</strong> ekranından kalıcı olarak silebilirsiniz. Uygulamaya erişemiyorsanız silme talebinizi ${email.includes('@') ? `<a href="mailto:${email}">${email}</a>` : email} üzerinden başlatabilirsiniz.</p></body></html>`);
 });
 
 app.get('/data-deletion', (req, res) => {
@@ -909,7 +911,14 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
 app.delete('/api/users/me', requireAuth, async (req, res) => {
   try {
     const auth = req.auth;
+    const sharedLinks = await ShareLink.find({ $or: [{ cropperId: auth.userId }, { ownerId: auth.userId }] }).select('_id').lean();
+    const sharedIds = sharedLinks.map(row => row._id);
+    await ShareLink.updateMany({ _id: { $in: sharedIds } }, { $set: { status: 'closed' }, $inc: { mutationSerial: 1 } });
     await Promise.all([
+      ShareDelivery.deleteMany({ linkId: { $in: sharedIds } }),
+      ShareEvent.deleteMany({ linkId: { $in: sharedIds } }),
+      ShareLink.deleteMany({ _id: { $in: sharedIds } }),
+      SharePushDevice.deleteMany({ userId: auth.userId }),
       Harvest.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
       Payment.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
       Expense.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
@@ -2631,6 +2640,8 @@ const getAdminSummary = async () => {
   return value;
 };
 require('./server/quotaRoutes')(app, { requireAuth, UserProfile, Harvest });
+require('./server/sharecroppingRoutes')(app, { requireAuth, limitPublicUsage, mongoose, UserProfile, ShareLink, ShareDelivery, ShareEvent });
+require('./server/sharecroppingPush')(app, { requireAuth, mongoose, UserProfile, Session, ShareLink, ShareEvent, SharePushDevice });
 require('./server/seasonReminderRoutes')(app, { requireAuth, UserProfile, SeasonReminderPolicy });
 require('./server/activityExportRoutes')(app, { requireAuth, UserProfile, Harvest, Payment, Expense, Garden });
 
@@ -2729,14 +2740,14 @@ app.patch('/api/admin/users/:id/admin-access', requireAuth, requireAdmin, async 
 
 app.get('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase };
+    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase, shareLinks: ShareLink, shareDeliveries: ShareDelivery };
     res.json(await require('./server/backupRestore').readBackup(models, mongoose));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase };
+    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase, shareLinks: ShareLink, shareDeliveries: ShareDelivery };
     const { validateBackup, restoreBackup } = require('./server/backupRestore');
     const count = validateBackup(req.body, Object.keys(models));
     if (req.body.confirmRestore !== true) return res.json({ preview: true, records: count, message: 'Kayıt kimlikleri korunacak. Yalnızca boş veri koleksiyonlarına aktarılır; onay için confirmRestore: true gerekir.' });
@@ -2760,7 +2771,7 @@ app.get('/api/admin/all-data', requireAuth, requireAdmin, async (req, res) => {
 
 const runAutomaticBackup = async () => {
   try {
-    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase };
+    const models = { users: UserProfile, harvests: Harvest, payments: Payment, expenses: Expense, gardens: Garden, factoryPrices: FactoryPrice, ads: Ad, adApplications: AdApplication, aiCreditTransactions: AiCreditTransaction, inAppPurchases: InAppPurchase, shareLinks: ShareLink, shareDeliveries: ShareDelivery };
     const payload = await require('./server/backupRestore').readBackup(models, mongoose);
     if (BACKUP_WEBHOOK_URL) {
       const encrypted = createEncryptedBackup(payload);

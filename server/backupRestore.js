@@ -2,6 +2,7 @@ const idPattern = /^[a-f0-9]{24}$/i;
 function validateBackup(body, names) {
   let count = 0;
   for (const name of names) {
+    if (['shareLinks', 'shareDeliveries'].includes(name) && body?.[name] === undefined) continue;
     if (!Array.isArray(body?.[name])) throw Error(`Yedekte ${name} listesi eksik.`);
     const ids = new Set();
     for (const row of body[name]) {
@@ -17,6 +18,15 @@ function validateBackup(body, names) {
   }
   for (const user of body.users) for (const plan of user.quotaPlans || []) for (const id of plan.recordIds || []) {
     if (!harvests.has(String(id))) throw Error('Kota planının bağlı olduğu hasat yedekte eksik.');
+  }
+  const users = new Set(body.users.map(row => row.userId));
+  const links = new Map((body.shareLinks || []).map(row => [String(row._id), row]));
+  for (const link of links.values()) {
+    if (!users.has(link.cropperId) || (link.ownerId && !users.has(link.ownerId)) || ![2, 3].includes(link.denominator)) throw Error('Yarıcılık bağlantısı geçersiz.');
+  }
+  for (const delivery of body.shareDeliveries || []) {
+    const link = links.get(String(delivery.linkId));
+    if (!link || link.cropperId !== delivery.cropperId || link.ownerId !== delivery.ownerId || link.denominator !== delivery.data?.denominator) throw Error('Ortak teslimatın bağlantısı geçersiz.');
   }
   return count;
 }
@@ -48,7 +58,7 @@ module.exports = { validateBackup, readBackup, restoreBackup: async (body, model
       for (const name of names.filter(name => name !== 'users')) {
         if (await models[name].exists({}).session(session)) throw Error('Hedef veritabanında kayıt var. Mevcut verilerin üzerine geri yükleme yapılmaz; ayrı kurtarma ortamı kullanın.');
       }
-      for (const name of names) for (const row of body[name]) {
+      for (const name of names) for (const row of body[name] || []) {
         if (name === 'users') {
           const existing = await models.users.findOne({ userId: row.userId }).session(session).lean();
           if (existing) {
@@ -58,6 +68,8 @@ module.exports = { validateBackup, readBackup, restoreBackup: async (body, model
           if (!row.pinHash || !row.pinSalt) throw Error('Yedek oturum doğrulama bilgilerini içermiyor. Kullanıcı hesaplarını ayrı, güvenli kurtarma süreciyle hazırlayın; eksik hesap oluşturulmadı.');
         }
         const copy = { ...row }; delete copy.__v;
+        // Invitation secrets are intentionally excluded from portable backups.
+        if (name === 'shareLinks') { delete copy.inviteHash; if (copy.status === 'pending') copy.status = 'closed'; }
         await models[name].create([copy], { session });
         restored++;
       }
