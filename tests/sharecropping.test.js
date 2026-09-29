@@ -51,6 +51,11 @@ function harness() {
     async updateOne(filter, change) { return this.findOneAndUpdate(filter, change, { new: true }); },
     async aggregate(pipeline) {
       const rows = db[key].filter(row => matches(row, pipeline[0].$match));
+      if (pipeline[1].$group._id === '$linkId') {
+        const groups = new Map();
+        for (const row of rows) { const sum = groups.get(row.linkId) || { _id: row.linkId, kg: 0, cropperCents: 0, ownerCents: 0 }; for (const field of ['kg', 'cropperCents', 'ownerCents']) sum[field] += row.data[field]; groups.set(row.linkId, sum); }
+        return [...groups.values()];
+      }
       return [rows.reduce((total, row) => { for (const field of ['kg', 'netCents', 'cropperCents', 'ownerCents']) total[field] += row.data[field]; return total; }, { kg: 0, netCents: 0, cropperCents: 0, ownerCents: 0 })];
     },
   });
@@ -126,4 +131,27 @@ test('backup accepts older format but rejects orphan shared records', () => {
   const names = [...Object.keys(body), 'shareLinks', 'shareDeliveries'];
   assert.equal(validateBackup(body, names), 0);
   assert.throws(() => validateBackup({ ...body, shareDeliveries: [{ _id: '0'.repeat(24), linkId: '1'.repeat(24) }] }, names));
+});
+
+test('summary isolates agreements and shows each members own net share without voided records', async () => {
+  const h = harness(), id = await h.pair(), route = '/api/sharecropping/:id/deliveries';
+  await h.call('POST', route, 'cropper', base, { id });
+  const cropper = await h.call('GET', '/api/sharecropping-summary', 'cropper');
+  const owner = await h.call('GET', '/api/sharecropping-summary', 'owner');
+  assert.equal(cropper.body.links[0].kg, 100); assert.equal(cropper.body.links[0].myShareCents, 98000);
+  assert.equal(owner.body.links[0].myShareCents, 196000); assert.equal(owner.body.links[0].myRole, 'owner');
+  assert.equal((await h.call('GET', '/api/sharecropping-summary', 'outsider')).body.links.length, 0);
+  h.db.records[0].voided = true;
+  assert.equal((await h.call('GET', '/api/sharecropping-summary', 'owner')).body.links[0].kg, 0);
+});
+
+test('delivery DTO exposes sanitized before-after changes; linked source cannot be edited independently', async () => {
+  const h = harness(), id = await h.pair(), route = '/api/sharecropping/:id/deliveries';
+  const record = (await h.call('POST', route, 'cropper', base, { id })).body.record;
+  await h.call('PATCH', route + '/:recordId', 'cropper', { ...base, kg: 120, revision: 0 }, { id, recordId: record._id });
+  const read = (await h.call('GET', route, 'owner', {}, { id })).body.records[0];
+  assert.deepEqual(read.changes[0].details, ['KG: 100 → 120']); assert.equal(read.requestHash, undefined); assert.equal(read.history, undefined);
+  h.db.records[0].harvestId = 'd'.repeat(24);
+  const rejected = await h.call('PATCH', route + '/:recordId', 'cropper', { ...base, revision: 1 }, { id, recordId: record._id });
+  assert.equal(rejected.code, 409); assert.match(rejected.body.error, /hasat kaydından/); assert.equal(h.db.records[0].data.kg, 120);
 });

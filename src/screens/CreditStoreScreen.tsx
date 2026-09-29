@@ -8,6 +8,7 @@ import { API_ORIGIN } from '../services/api';
 import type { StoreProductId } from '../services/inAppPurchases';
 import RewardedAdButton from '../components/RewardedAdButton';
 import type { AuthFetch } from '../services/aiAssistant';
+import { useAdAccess } from '../context/ad-access';
 
 export type CreditProductId = StoreProductId;
 
@@ -23,7 +24,7 @@ const products: {
   { id: 'caylik_credits_250', title: 'Başlangıç', credits: '250 kredi', price: '39,99 TL', detail: 'Hasat ve alacak kayıtlarınızı Asistan’la yorumlamak için.' },
   { id: 'caylik_credits_750', title: 'Standart', credits: '750 kredi', price: '89,99 TL', detail: 'Çay üretimiyle ilgili sorularınızı Asistan’a daha sık danışmak için.' },
   { id: 'caylik_credits_2000', title: 'Büyük Paket', credits: '2.000 kredi', price: '199,99 TL', detail: 'Asistan’da kullanın veya markanızı çay üreticilerine tanıtmak için reklam başvurusu yapın.' },
-  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi', price: '119,99 TL / ay', detail: 'Asistan kullanımı ve reklam başvuruları için aylık kredi aboneliği.', subscription: true },
+  { id: 'caylik_pro_monthly', title: 'Çaylık Pro', credits: 'Her ay 1.500 kredi + reklamsız kullanım', price: '119,99 TL / ay', detail: 'Aboneliğiniz aktifken reklam gösterilmez. Kredilerinizi Asistan ve reklam başvurularında kullanabilirsiniz.', subscription: true },
 ];
 
 type Props = {
@@ -43,6 +44,7 @@ type Props = {
 
 export default function CreditStoreScreen({ userId, onReload, authFetch, credits, onBack, onPurchase, onRestore, prices = {}, purchasingProductId = null, restoring = false, storeStatus = '', onRewardedAdEarned }: Props) {
   const theme = useTheme();
+  const { adsAllowed, isPro, status: proStatus } = useAdAccess();
 
   return (
     <View>
@@ -70,14 +72,15 @@ export default function CreditStoreScreen({ userId, onReload, authFetch, credits
         </View>
       </CaylikSurface>
 
-      {!!onRewardedAdEarned && <CaylikSurface style={local.rewardCard}><View style={local.rewardInner}><View style={{ flex: 1 }}><Text style={[local.freeTitle, { color: theme.colors.onSurface }]}>Ücretsiz kredi kazan</Text><Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Reklamı tamamlayın; ödül işlemi onaylandığında 10 kredi eklenir. Günde en fazla 3 ödül.</Text></View><RewardedAdButton userId={userId} authFetch={authFetch} onEarned={onRewardedAdEarned} /></View></CaylikSurface>}
+      {adsAllowed && !!onRewardedAdEarned && <CaylikSurface style={local.rewardCard}><View style={local.rewardInner}><View style={{ flex: 1 }}><Text style={[local.freeTitle, { color: theme.colors.onSurface }]}>Ücretsiz kredi kazan</Text><Text style={[local.freeText, { color: theme.colors.onSurfaceVariant }]}>Reklamı tamamlayın; ödül işlemi onaylandığında 10 kredi eklenir. Günde en fazla 3 ödül.</Text></View><RewardedAdButton userId={userId} authFetch={authFetch} onEarned={onRewardedAdEarned} /></View></CaylikSurface>}
+      {proStatus === 'unknown' && <Text style={[local.status, { color: theme.colors.onSurfaceVariant }]}>Pro durumu doğrulanana kadar reklam göstermiyoruz. Bağlantınız varsa aşağıdan mağazayı yenileyebilirsiniz.</Text>}
 
       <CaylikSurface style={local.proInfoCard}>
         <View style={local.proInfoHeader}>
           <View style={[local.proIcon, { backgroundColor: theme.colors.secondaryContainer }]}><AppIcon name="crown-outline" size={25} color="#9A6416" /></View>
           <View style={{ flex: 1 }}>
-            <Text style={[local.proInfoTitle, { color: theme.colors.onSurface }]}>Çaylık Pro ne sağlar?</Text>
-            <Text style={[local.proInfoLead, { color: theme.colors.onSurfaceVariant }]}>İlk satın alımda ve her başarılı aylık yenilemede 1.500 kredi eklenir. Yenilemeyi mağaza hesabınızdan iptal edebilirsiniz.</Text>
+            <Text style={[local.proInfoTitle, { color: theme.colors.onSurface }]}>{isPro ? 'Çaylık Pro aktif · Reklamsız' : 'Çaylık Pro ne sağlar?'}</Text>
+            <Text style={[local.proInfoLead, { color: theme.colors.onSurfaceVariant }]}>Aktif abonelik süresince reklamsız kullanın. İlk satın alımda ve her başarılı aylık yenilemede 1.500 kredi eklenir. Yenilemeyi mağaza hesabınızdan iptal edebilirsiniz.</Text>
           </View>
         </View>
         <Text style={[local.proNote, { color: theme.colors.onSurfaceVariant, borderTopColor: theme.colors.outlineVariant }]}>Pro sınırsız değildir; reklam kredisi başvuruda düşer, yönetici reddederse iade edilir.</Text>
@@ -100,10 +103,10 @@ export default function CreditStoreScreen({ userId, onReload, authFetch, credits
               <Text style={[local.price, { color: theme.colors.onSurface }]}>{prices[product.id] || 'Mağaza fiyatı bekleniyor…'}</Text>
               <CaylikButton
                 icon={product.subscription ? 'crown-outline' : 'cart-outline'}
-                disabled={!prices[product.id] || Boolean(purchasingProductId) || restoring}
+                disabled={!prices[product.id] || Boolean(purchasingProductId) || restoring || (product.subscription && isPro)}
                 onPress={() => onPurchase(product.id)}
               >
-                {purchasingProductId === product.id ? 'İşleniyor…' : product.subscription ? 'Pro’ya Geç' : 'Satın Al'}
+                {purchasingProductId === product.id ? 'İşleniyor…' : product.subscription && isPro ? 'Pro aboneliğiniz aktif' : product.subscription ? 'Pro’ya Geç' : 'Satın Al'}
               </CaylikButton>
             </View>
           </CaylikSurface>

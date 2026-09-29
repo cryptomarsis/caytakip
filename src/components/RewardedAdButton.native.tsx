@@ -4,11 +4,17 @@ import { AdEventType, RewardedAd, RewardedAdEventType, TestIds } from 'react-nat
 import { CaylikButton } from './caylik-ui';
 import { API_URL } from '../services/api';
 import type { RewardProps } from './RewardedAdButton';
+import { useAdAccess } from '../context/ad-access';
 import { clearPendingAdReward, readPendingAdReward, savePendingAdReward } from '../services/pendingAdReward';
 import { useAdsPrivacy } from '../context/ads-privacy';
 
 const ids = { ios: 'ca-app-pub-4870931624363029/7255812058', android: 'ca-app-pub-4870931624363029/3226384358' };
-export default function RewardedAdButton({ userId, onEarned, authFetch }: RewardProps) {
+export default function RewardedAdButton(props: RewardProps) {
+  const { adsAllowed } = useAdAccess();
+  return adsAllowed ? <AvailableRewardedAdButton {...props} /> : null;
+}
+
+function AvailableRewardedAdButton({ userId, onEarned, authFetch }: RewardProps) {
   const privacy = useAdsPrivacy();
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);

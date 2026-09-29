@@ -31,4 +31,8 @@ function deliveryInput(body, denominator) {
 function deliveryMessage(data) {
   return `${data.factory} · ${data.kg.toLocaleString('tr-TR')} kg çay teslim edildi.${data.dueDate ? ` Vade: ${data.dueDate.split('-').reverse().join('.')}.` : ' Vade belirtilmedi.'}`;
 }
-module.exports = { shareAmounts, deliveryInput, deliveryMessage };
+function deliveryChanges(before, after) {
+  const fields = [['kg', 'KG'], ['price', 'Birim fiyat (TL)'], ['factory', 'Fabrika'], ['date', 'Teslim tarihi'], ['dueDate', 'Vade']];
+  return fields.filter(([key]) => before[key] !== after[key]).map(([key, label]) => `${label}: ${before[key] === '' ? 'Yok' : before[key]} → ${after[key] === '' ? 'Yok' : after[key]}`);
+}
+module.exports = { shareAmounts, deliveryInput, deliveryMessage, deliveryChanges };

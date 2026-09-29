@@ -9,6 +9,7 @@ export interface HarvestRecord {
   weight?: number | string;
   firma?: string;
   quotaPlanId?: string;
+  shareLinkId?: string;
   fiyat?: number | string;
   brutTutar?: number | string;
   kesintiTutar?: number | string;

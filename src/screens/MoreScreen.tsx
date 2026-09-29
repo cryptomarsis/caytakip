@@ -4,7 +4,7 @@ import { useTheme } from 'react-native-paper';
 import { AppIcon, AppIconName } from '../components/app-icon';
 import { CaylikActionCard, CaylikScreenHeader } from '../components/caylik-ui';
 
-type Tab = 'assistant' | 'creditStore' | 'advertise' | 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'quota';
+type Tab = 'assistant' | 'creditStore' | 'advertise' | 'history' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings' | 'quota' | 'sharecropping';
 type Props = { isAdmin: boolean; onNavigate: (tab: Tab | 'admin') => void };
 type MenuItem = { tab: Tab; label: string; detail: string; icon: AppIconName; tone: string; soft: string };
 

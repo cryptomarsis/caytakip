@@ -353,6 +353,7 @@ const HarvestSchema = new mongoose.Schema({
   weight: Number,
   firma: String,
   quotaPlanId: { type: String, default: '' },
+  shareLinkId: { type: String, default: '' },
   fiyat: Number,
   brutTutar: Number,       // kg * brüt birim fiyat
   gelirVergisiOrani: Number,
@@ -580,6 +581,7 @@ const Ad = mongoose.model('Ad', AdSchema);
 const AdApplication = mongoose.model('AdApplication', AdApplicationSchema);
 const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
 const { ShareLink, ShareDelivery, ShareEvent, SharePushDevice } = require('./server/sharecroppingModels')(mongoose);
+const syncHarvestSharing = require('./server/harvestSharing')({ ShareLink, ShareDelivery, ShareEvent, UserProfile });
 const Feedback = mongoose.model('Feedback', FeedbackSchema);
 const SeasonReminderPolicy = mongoose.model('SeasonReminderPolicy', new mongoose.Schema({
   _id: { type: String },
@@ -919,6 +921,7 @@ app.delete('/api/users/me', requireAuth, async (req, res) => {
       ShareEvent.deleteMany({ linkId: { $in: sharedIds } }),
       ShareLink.deleteMany({ _id: { $in: sharedIds } }),
       SharePushDevice.deleteMany({ userId: auth.userId }),
+      Harvest.updateMany({ shareLinkId: { $in: sharedIds.map(String) } }, { $set: { shareLinkId: '' } }),
       Harvest.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
       Payment.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
       Expense.deleteMany({ $or: [{ userId: auth.userId }, { userPhone: auth.phone }] }),
@@ -1746,6 +1749,15 @@ app.get('/api/harvests', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/harvests/:id', requireAuth, async (req, res) => {
+  try {
+    if (!/^[a-f0-9]{24}$/i.test(req.params.id)) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    const row = await Harvest.findOne({ _id: req.params.id, userId: req.auth.userId }).lean();
+    if (!row) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    res.json(row);
+  } catch { res.status(500).json({ error: 'Hasat alınamadı.' }); }
+});
+
 const detectHarvestQualityFlags = ({ kg, price, total }) => {
   const flags = [];
   if (kg >= 50000) flags.push('unusually_high_kg');
@@ -1794,6 +1806,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     const payload = {
       userId: req.auth.userId,
       userPhone: req.auth.phone,
+      shareLinkId: String(req.body.shareLinkId || '').trim(),
       tarih,
       surum: String(req.body.surum || '1. Sürüm').trim(),
       uretici: String(req.body.uretici || req.body.producerName || '').trim(),
@@ -1819,10 +1832,12 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
     };
 
     payload.quotaPlanId = await require('./server/harvestQuota')(UserProfile, req.auth.userId, payload, req.body.quotaPlanId);
+    if (payload.shareLinkId && !/^[a-f0-9]{24}$/i.test(payload.shareLinkId)) return res.status(400).json({ error: 'Geçerli bir paylaşım anlaşması seçin.' });
     let newHarvest;
     await session.withTransaction(async () => {
     newHarvest = new Harvest(payload);
     await newHarvest.save({ session });
+    await syncHarvestSharing(newHarvest, session);
 
     // Eski uygulama sürümleri hasat oluştururken ilk tahsilatı aynı formdan
     // girebiliyordu. Bu tutarı ayrıca geçmişe yazarak sonradan düzenlenebilir
@@ -1849,6 +1864,7 @@ app.post('/api/harvests', requireAuth, idempotencyMiddleware, async (req, res) =
 });
 
 app.put('/api/harvests/:id', requireAuth, async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const existing = await Harvest.findOne({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
     if (!existing) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
@@ -1905,23 +1921,32 @@ app.put('/api/harvests/:id', requireAuth, async (req, res) => {
     try {
       updatePayload.quotaPlanId = await require('./server/harvestQuota')(UserProfile, existing.userId || req.auth.userId, { ...updatePayload, _id: String(existing._id) }, req.body.quotaPlanId === undefined ? existing.quotaPlanId : req.body.quotaPlanId);
     } catch (error) { return res.status(400).json({ error: error.message }); }
-    const updated = await Harvest.findByIdAndUpdate(req.params.id, updatePayload, { returnDocument: 'after' });
+    let updated;
+    await session.withTransaction(async () => {
+      // Do not overwrite a concurrent collection/edit with an old balance.
+      updated = await Harvest.findOneAndUpdate({ _id: existing._id, updatedAt: existing.updatedAt }, updatePayload, { new: true, session });
+      if (!updated) throw Object.assign(Error('Kayıt değişmiş. Listeyi yenileyip tekrar deneyin.'), { httpCode: 409 });
+      await syncHarvestSharing(updated, session);
+    });
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.status(err.httpCode || 400).json({ error: err.message });
+  } finally { await session.endSession(); }
 });
 
 app.delete('/api/harvests/:id', requireAuth, async (req, res) => {
+  const session = await mongoose.startSession();
   try {
-    const deleted = await Harvest.findOneAndDelete({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] });
-    if (!deleted) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
-    // İlişkili ödemeleri de temizle
-    await Payment.deleteMany({ harvestId: req.params.id });
+    await session.withTransaction(async () => {
+      const deleted = await Harvest.findOneAndDelete({ _id: req.params.id, $or: [{ userId: req.auth.userId }, { userPhone: req.auth.phone }] }, { session });
+      if (!deleted) throw Object.assign(Error('Kayıt bulunamadı.'), { httpCode: 404 });
+      await syncHarvestSharing(deleted, session, { deleted: true });
+      await Payment.deleteMany({ harvestId: req.params.id }, { session });
+    });
     res.json({ message: 'Hasat kaydı silindi.' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.status(err.httpCode || 400).json({ error: err.message });
+  } finally { await session.endSession(); }
 });
 
 // --- YENİ EKLENEN ÖZEL ROTALAR ---

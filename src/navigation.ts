@@ -3,7 +3,7 @@ import { AppIconName } from './components/app-icon';
 export type ActiveTab =
   | 'dashboard' | 'harvest' | 'history' | 'collections' | 'receivables'
   | 'more' | 'expense' | 'gardens' | 'prices' | 'reports' | 'settings'
-  | 'assistant' | 'creditStore' | 'advertise' | 'admin' | 'quota';
+  | 'assistant' | 'creditStore' | 'advertise' | 'admin' | 'quota' | 'sharecropping';
 
 export type DesktopMenuItem = {
   group: string;
@@ -14,6 +14,7 @@ export type DesktopMenuItem = {
 };
 
 export const getDesktopMenuItems = (isAdmin: boolean): DesktopMenuItem[] => [
+  { group: 'TAKİP', tab: 'sharecropping', icon: 'account-group-outline', label: 'Pay Takibi', helper: 'Teslimat ve satış paylarını takip et' },
   { group: 'TAKİP', tab: 'quota', icon: 'leaf-circle-outline', label: 'ÇAYKUR Kota Takip', helper: 'Toplam kota ve kalan miktar' },
   { group: 'GENEL', tab: 'dashboard', icon: 'view-dashboard-outline', label: 'Ana Sayfa', helper: 'Genel durum ve özet' },
   { group: 'GENEL', tab: 'assistant', icon: 'robot-happy-outline', label: 'Çaylık Asistan', helper: 'Çay üretimi için yapay zekâ desteği' },
@@ -37,5 +38,6 @@ export const mobileNavItems = [
   { tab: 'harvest' as const, label: 'Hasat Ekle', icon: 'leaf-circle-outline' as AppIconName },
   { tab: 'collections' as const, label: 'Ödeme Al', icon: 'hand-coin-outline' as AppIconName },
   { tab: 'receivables' as const, label: 'Alacaklar', icon: 'cash-clock' as AppIconName },
+  { tab: 'sharecropping' as const, label: 'Pay Takibi', icon: 'account-group-outline' as AppIconName },
   { tab: 'more' as const, label: 'Diğer', icon: 'view-grid-outline' as AppIconName },
 ];

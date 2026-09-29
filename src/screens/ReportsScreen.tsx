@@ -11,6 +11,7 @@ import { AppIcon } from '../components/app-icon';
 import { IconHeading } from '../components/icon-heading';
 import { useAppTheme } from '../context/app-theme';
 import { CaylikScreenHeader } from '../components/caylik-ui';
+import AdMobNativeCard from '../components/AdMobNativeCard';
 type Props = { harvests: HarvestRecord[]; expenses: ExpenseRecord[]; currentUser?: unknown };
 
 type DesktopBridge = {
@@ -235,6 +236,8 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
       <Text style={[styles.listTitle,{color:theme.colors.onSurface,marginTop:6}]}>Hasat: {changePct(totalKg, previousKg) === null ? 'Yeni sezon' : `${changePct(totalKg, previousKg)! >= 0 ? '+' : ''}${changePct(totalKg, previousKg)}%`} ({previousKg.toLocaleString('tr-TR')} KG)</Text>
       <Text style={[styles.listTitle,{color:theme.colors.onSurface,marginTop:4}]}>Net satış: {changePct(totalSales, previousSales) === null ? 'Yeni sezon' : `${changePct(totalSales, previousSales)! >= 0 ? '+' : ''}${changePct(totalSales, previousSales)}%`} ({formatTL(previousSales)})</Text>
     </View>
+
+    {(selected.length > 0 || selectedExpenses.length > 0) && <AdMobNativeCard />}
 
     <View style={[styles.formCard,{backgroundColor:theme.colors.surface,borderColor:theme.colors.outline}]}>
       <IconHeading icon="leaf" title="Sürüm Bazlı Hasat" compact />

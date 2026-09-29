@@ -24,10 +24,18 @@ function validateBackup(body, names) {
   for (const link of links.values()) {
     if (!users.has(link.cropperId) || (link.ownerId && !users.has(link.ownerId)) || ![2, 3].includes(link.denominator)) throw Error('Yarıcılık bağlantısı geçersiz.');
   }
+  const linkedHarvests = new Set();
   for (const delivery of body.shareDeliveries || []) {
     const link = links.get(String(delivery.linkId));
     if (!link || link.cropperId !== delivery.cropperId || link.ownerId !== delivery.ownerId || link.denominator !== delivery.data?.denominator) throw Error('Ortak teslimatın bağlantısı geçersiz.');
+    if (delivery.harvestId) {
+      const id = String(delivery.harvestId), harvest = harvests.get(id);
+      if (linkedHarvests.has(id)) throw Error('Bir hasat birden fazla teslimata bağlanamaz.');
+      linkedHarvests.add(id);
+      if (!delivery.voided && (!harvest || harvest.shareLinkId !== String(link._id) || harvest.userId !== link.cropperId)) throw Error('Paylaşılan hasadın kaynağı eksik veya başka hesaba ait.');
+    }
   }
+  for (const harvest of harvests.values()) if (harvest.shareLinkId && !linkedHarvests.has(String(harvest._id))) throw Error('Hasadın paylaşılan teslimatı eksik.');
   return count;
 }
 

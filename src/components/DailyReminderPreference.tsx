@@ -61,7 +61,7 @@ function ReminderPreference({ userId, token, request }: { userId: string; token:
       <Text style={[styles.formTitle, { color: theme.colors.onSurface, flex: 1, marginBottom: 0 }]}>Sezon hatırlatmalarını al</Text>
       {busy || !consentReady ? <ActivityIndicator color={theme.colors.primary} /> : <Switch accessibilityLabel="Sezon hatırlatmalarını al" value={enabled} disabled={!dailyReminderSupported} onValueChange={value => void change(value)} />}
     </View>
-    <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>Sezon tarihini ve saatini yönetici belirler. Siz yalnızca bu hatırlatmaları almak isteyip istemediğinizi seçersiniz.</Text>
+    <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>Sezon tarihini ve saatini yönetici belirler. Bildirimler yalnızca telefonunuzda bildirim izni açıksa gelir. Bu tercihi istediğiniz zaman kapatabilirsiniz.</Text>
     {settings && <Text style={[styles.formHelp, { color: theme.colors.onSurface }]}>{settings.enabled
       ? `Yönetici planı: ${settings.seasonStart.split('-').reverse().join('.')} – ${settings.seasonEnd.split('-').reverse().join('.')}, ${String(settings.hour).padStart(2, '0')}:${String(settings.minute).padStart(2, '0')}`
       : 'Şu anda etkin bir sezon planı yok.'}</Text>}

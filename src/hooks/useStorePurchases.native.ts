@@ -8,6 +8,7 @@ import type { AuthFetch } from '../services/aiAssistant';
 import { ALL_IAP_PRODUCT_IDS, type StoreProductId } from '../services/inAppPurchases';
 import { findStorePackage } from '../../shared/storeProducts';
 import { trackTikTokPurchase } from '../services/adTracking';
+import { useProAccess } from './useProAccess';
 
 const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY || 'appl_ZMzoEtiIbrAKPLWMBXJLMTGbFwx';
 const REVENUECAT_ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY || '';
@@ -27,6 +28,8 @@ export const useStorePurchases = (
   useEffect(() => { ownerRef.current = userId; }, [userId]);
   const [connected, setConnected] = useState(false);
   const [configured, setConfigured] = useState(false);
+  const [storeSession, setStoreSession] = useState<{ userId: string } | null>(null);
+  const proStatus = useProAccess(userId, storeSession);
   const [prices, setPrices] = useState<Partial<Record<StoreProductId, string>>>({});
   const [purchasingProductId, setPurchasingProductId] = useState<StoreProductId | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -98,6 +101,7 @@ export const useStorePurchases = (
 
       activeUserRef.current = userId;
       if (ownerRef.current !== userId) throw new Error('Oturum değişti.');
+      setStoreSession({ userId });
       await loadOfferings(revenueCat);
       setConnected(true);
       setConfigured(true);
@@ -126,6 +130,7 @@ export const useStorePurchases = (
       void Promise.resolve().then(() => {
         setConnected(false);
         setConfigured(false);
+        setStoreSession(null);
       });
       return;
     }
@@ -154,6 +159,7 @@ export const useStorePurchases = (
       }
       if (ownerRef.current !== userId || activeUserRef.current !== userId) throw new Error('Oturum değişti. Yeniden giriş yapın.');
       const result = await revenueCat.default.purchasePackage(selectedPackage);
+      if (ownerRef.current === userId) setStoreSession({ userId });
       const transactionId = result.transaction.transactionIdentifier;
       await savePendingPurchase(userId, transactionId);
       if (ownerRef.current !== userId) return;
@@ -185,6 +191,7 @@ export const useStorePurchases = (
     setRestoring(true);
     try {
       await revenueCat.default.restorePurchases();
+      if (userId && ownerRef.current === userId) setStoreSession({ userId });
       await refreshWallet();
       await checkPending(3);
       Alert.alert('Mağaza kontrol edildi', 'Abonelikleriniz mağazadan kontrol edildi. Tüketilen tek seferlik krediler yeniden yüklenmez; mevcut krediler Çaylık hesabınızda saklanır.');
@@ -197,5 +204,5 @@ export const useStorePurchases = (
   }, [configured, refreshWallet, userId, checkPending]);
 
   const reload = useCallback(async () => { await connectStore().catch(() => undefined); await checkPending(3); }, [connectStore, checkPending]);
-  return { connected, configured, prices, purchasingProductId, restoring, status, purchase, restore, reload };
+  return { connected, configured, prices, purchasingProductId, restoring, status, purchase, restore, reload, proStatus };
 };

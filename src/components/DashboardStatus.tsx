@@ -7,6 +7,7 @@ import { API_URL } from '../services/api';
 import type { AuthFetch } from '../services/aiAssistant';
 import { remainingTotalOf, formatTL, toServerDate, todayDisplayDate } from '../utils/format';
 import { CaylikButton, CaylikSurface } from './caylik-ui';
+import { caylikDesign } from '../context/app-theme';
 
 export default function DashboardStatus({ authFetch, harvests, pending, onQuota }: { authFetch: AuthFetch; harvests: HarvestRecord[]; pending: number; onQuota: () => void }) {
   const theme = useTheme();
@@ -37,6 +38,6 @@ export default function DashboardStatus({ authFetch, harvests, pending, onQuota 
     <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>{quota}</Text>
     <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>Önümüzdeki 7 günün vadeli alacağı: {formatTL(upcoming)}</Text>
     {pending > 0 && <View><Text style={{ color: theme.colors.secondary, marginTop: 6 }}>{pending} kayıt gönderilmeyi bekliyor; henüz toplamlara dahil değil.</Text></View>}
-    <CaylikButton mode="text" onPress={onQuota}>Çaykur Kota Takip</CaylikButton>
+    <CaylikButton mode="contained" icon="leaf-circle-outline" style={{ marginTop: caylikDesign.spacing.md }} accessibilityLabel="Çaykur Kota Takip ekranını aç" onPress={onQuota}>Çaykur Kota Takip</CaylikButton>
   </CaylikSurface>;
 }

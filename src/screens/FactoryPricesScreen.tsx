@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View, TextInput, TouchableOpacity } from 
 import { useTheme } from 'react-native-paper';
 import { AppIcon } from '../components/app-icon';
 import { CaylikScreenHeader } from '../components/caylik-ui';
+import AdMobNativeCard from '../components/AdMobNativeCard';
 import { styles } from '../styles/styles';
 import { formatTL, formatDisplayDate } from '../utils/format';
 
@@ -116,10 +117,10 @@ export default function FactoryPricesScreen(props: any) {
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 16 }}>
       {['Tümü', ...PRICE_TYPES].map(type => <TouchableOpacity key={type} accessibilityRole="button" accessibilityState={{ selected: priceFilter === type }} onPress={() => setPriceFilter(type)} style={{ minHeight: 48, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 12, backgroundColor: priceFilter === type ? theme.colors.primary : theme.colors.surfaceVariant }}><Text style={{ color: priceFilter === type ? theme.colors.onPrimary : theme.colors.onSurface }}>{type}</Text></TouchableOpacity>)}
     </ScrollView>
-    {visibleRows.length===0 ? <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>{currentRows.length ? 'Aramanıza uygun fiyat bulunamadı.' : 'Henüz fabrika fiyatı eklenmedi.'}</Text> : visibleRows.map((f:any) => {
+    {visibleRows.length===0 ? <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>{currentRows.length ? 'Aramanıza uygun fiyat bulunamadı.' : 'Henüz fabrika fiyatı eklenmedi.'}</Text> : visibleRows.map((f:any, index: number) => {
       const cashPrice = f.rows[0];
       const otherPrices = f.rows.slice(1).filter(Boolean);
-      return <View key={f.firma} style={[styles.factoryCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
+      return <React.Fragment key={f.firma}><View style={[styles.factoryCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outline }]}>
         <View style={styles.factoryCardHeader}>
           <View style={[styles.factoryIcon, { backgroundColor: theme.colors.primaryContainer }]}><AppIcon name="factory" size={22} color={theme.colors.primary} /></View>
           <Text style={[styles.factoryName, { color: theme.colors.onSurface }]}>{f.firma}</Text>
@@ -137,7 +138,9 @@ export default function FactoryPricesScreen(props: any) {
           </View>
           {isAdmin && <TouchableOpacity style={styles.compactDeleteBtn} onPress={()=>handleDelete('factory-prices', p._id, 'Fiyat')}><Text style={styles.compactDeleteText}>Sil</Text></TouchableOpacity>}
         </View>)}
-      </View>;
+      </View>
+        {!isAdmin && index === Math.min(1, visibleRows.length - 1) && <AdMobNativeCard />}
+      </React.Fragment>;
     })}
   </View>;
 }

@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import AdMobNativeCard from '../components/AdMobNativeCard';
+import { useAdAccess } from '../context/ad-access';
 import DashboardStatus from '../components/DashboardStatus';
+import ShareOverviewCard from '../components/ShareOverviewCard';
 import type { AuthFetch } from '../services/aiAssistant';
-import { Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 
 import { AppIcon } from '../components/app-icon';
@@ -19,7 +21,7 @@ import { caylikDesign } from '../context/app-theme';
 import { AdRecord, HarvestRecord } from '../types';
 import { formatDisplayDate, formatTL, netTotalOf, remainingTotalOf, toServerDate } from '../utils/format';
 
-type DashboardDestination = 'assistant' | 'advertise' | 'harvest' | 'history' | 'collections' | 'receivables' | 'expense' | 'prices' | 'reports' | 'quota';
+type DashboardDestination = 'assistant' | 'advertise' | 'harvest' | 'history' | 'collections' | 'receivables' | 'expense' | 'prices' | 'reports' | 'quota' | 'creditStore' | 'sharecropping';
 
 type DashboardProps = {
   authFetch?: AuthFetch;
@@ -155,6 +157,7 @@ export default function DashboardScreen({
   onNavigate,
 }: DashboardProps) {
   const theme = useTheme();
+  const { adsAllowed, isPro } = useAdAccess();
   const { width } = useWindowDimensions();
   const compact = width < 370;
 
@@ -185,7 +188,7 @@ export default function DashboardScreen({
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   return (
     <View style={[local.screen, { maxWidth: caylikDesign.contentMaxWidth }]}>
-      <SponsorCarousel ads={ads.filter((ad) => ad.slot === 'dashboard_top')} />
+      {adsAllowed && <SponsorCarousel ads={ads.filter((ad) => ad.slot === 'dashboard_top')} />}
 
       <SeasonSummary kg={totalKg} sales={totalSales} paid={totalPay} remaining={pendingCollection} />
       <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>Özet, tüm kayıtlarınızı kapsar.</Text>
@@ -197,6 +200,7 @@ export default function DashboardScreen({
       </View>
 
       <AssistantEntry credits={assistantCredits} onPress={() => onNavigate('assistant')} />
+      {authFetch && <ShareOverviewCard authFetch={authFetch} refreshKey={harvests} onOpen={() => onNavigate('sharecropping')} />}
 
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reklam ver" activeOpacity={0.82} onPress={() => onNavigate('advertise')} style={[local.advertiseCard, { backgroundColor: theme.colors.secondaryContainer, borderColor: theme.colors.secondary }]}>
         <View style={[local.advertiseIcon, { backgroundColor: theme.colors.secondary }]}><AppIcon name="bullhorn-outline" size={24} color={theme.colors.onSecondary} /></View>
@@ -204,13 +208,18 @@ export default function DashboardScreen({
         <View style={[local.advertiseAction, { backgroundColor: theme.colors.surface }]}><Text style={{ color: theme.colors.secondary, fontWeight: '900' }}>Başla</Text><AppIcon name="chevron-right" size={18} color={theme.colors.secondary} /></View>
       </TouchableOpacity>
 
-
-
+      {isPro && <Text style={{ color: theme.colors.primary, marginTop: 12, fontWeight: '700' }}>Çaylık Pro · Reklamsız kullanım aktif</Text>}
+      {Platform.OS !== 'web' && adsAllowed && <View style={{ marginTop: 16, marginBottom: 8 }}>
+        <CaylikButton icon="play-circle-outline" mode="outlined" onPress={() => onNavigate('creditStore')}>Reklam izle, 10 kredi kazan</CaylikButton>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, lineHeight: 18, marginTop: 6 }}>İsteğe bağlı · Ödül onaylandığında eklenir · Günde en fazla 3 ödül</Text>
+      </View>}
       <DashboardSectionHeader title="Son teslimatlar" actionLabel="Tümünü gör" onAction={() => onNavigate('history')} />
       {recentHarvests.length === 0 ? <DashboardEmptyState icon="leaf-off" text="Henüz teslimat kaydı bulunmuyor." /> : recentHarvests.map((item, index) => {
         const company = String(item.firma || item.uretici || item.producerName || 'Firma belirtilmedi'); const kg = Number(item.kg ?? item.weight) || 0;
         return <DashboardListRow key={item._id || index} icon="basket-outline" title={company} detail={`${formatDisplayDate(item.tarih)} · ${kg.toLocaleString('tr-TR')} kg`} value={formatTL(netTotalOf(item))} tone={remainingTotalOf(item) > 0.01 ? 'warning' : 'primary'} onPress={() => openHarvestEditModal(item)} accessibilityLabel={`${company}, ${kg.toLocaleString('tr-TR')} kilogram`} />;
       })}
+
+      <AdMobNativeCard />
 
       <DashboardSectionHeader title="Yaklaşan tahsilatlar" detail="Vadesi yaklaşan ve geciken kayıtlar" actionLabel="Tümünü gör" onAction={() => onNavigate('receivables')} />
       {upcomingReceivables.length === 0 ? (
@@ -241,9 +250,7 @@ export default function DashboardScreen({
 
       <Pressable accessibilityRole="button" accessibilityLabel="Yeni hasat kaydı oluştur" onPress={() => onNavigate('harvest')} style={({ pressed }) => [local.floatingAdd, caylikDesign.shadow.soft, { backgroundColor: theme.colors.primary, shadowColor: theme.colors.shadow }, pressed && local.pressed]}><AppIcon name="plus" size={24} color={theme.colors.onPrimary} /><Text style={[local.floatingAddText, { color: theme.colors.onPrimary }]}>Yeni Hasat</Text></Pressable>
 
-      <AdMobNativeCard />
-
-      <SponsorCarousel ads={ads.filter((ad) => ad.slot === 'dashboard_middle')} />
+      {adsAllowed && <SponsorCarousel ads={ads.filter((ad) => ad.slot === 'dashboard_middle')} />}
       <View style={{ height: compact ? caylikDesign.spacing.md : caylikDesign.spacing.xl }} />
     </View>
   );

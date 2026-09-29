@@ -95,14 +95,14 @@ function harness({ granted = true, canAskAgain = false, platform = 'ios', expoGo
     return api.refreshDailyReminderPolicy(userId, 'token-' + userId);
   }
   async function activate(settings = plan, userId = 'u1') {
-    await publish(settings, userId);
-    return api.saveSeasonReminderOptIn(userId, true);
+    await api.saveSeasonReminderOptIn(userId, true);
+    return publish(settings, userId);
   }
   return { api, due: load('dueNotifications'), queue: queueApi, scheduled, storage, channels, loads, state, publish, activate,
     added: () => added, requests: () => requests, nativeImports: () => nativeImports };
 }
 
-test('season reminders default off; old indefinite and personal-date preferences cannot auto-activate', async () => {
+test('season preference defaults on but old personal dates cannot activate without a valid admin policy', async () => {
   const h = harness();
   h.storage.set('@caylik_daily_reminder_v1:u1', 'true');
   h.storage.set('@caylik_season_reminder_v2:u1', JSON.stringify(plan));
@@ -111,9 +111,29 @@ test('season reminders default off; old indefinite and personal-date preferences
   assert.equal(result.settings.enabled, false);
   assert.equal(h.scheduled.size, 0); assert.equal(h.requests(), 0);
   await h.publish();
-  assert.equal((await h.api.getDailyReminderSettings('u1')).enabled, false);
-  assert.equal(await h.api.getSeasonReminderOptIn('u1'), false);
+  assert.equal((await h.api.getDailyReminderSettings('u1')).enabled, true);
+  assert.equal(await h.api.getSeasonReminderOptIn('u1'), true);
+  assert.equal(h.scheduled.size, 14);
+  assert.equal(h.requests(), 0);
+});
+
+test('default preference never bypasses OS permission, disabled admin policy or explicit user opt-out', async () => {
+  const denied = harness({ granted: false, canAskAgain: true });
+  await denied.publish();
+  assert.equal(await denied.api.getSeasonReminderOptIn('u1'), true);
+  assert.equal(denied.scheduled.size, 0);
+  assert.equal(denied.requests(), 0);
+  const h = harness();
+  await h.publish({ ...plan, enabled: false });
+  assert.equal(await h.api.getSeasonReminderOptIn('u1'), true);
   assert.equal(h.scheduled.size, 0);
+  for (const saved of ['false', 'invalid']) {
+    h.storage.set(optInKey('u1'), saved);
+    await h.publish();
+    assert.equal(await h.api.getSeasonReminderOptIn('u1'), false);
+    assert.equal(h.scheduled.size, 0);
+  }
+  assert.equal(await h.api.getSeasonReminderOptIn(''), false);
 });
 
 test('central time uses finite dates within a 14-day lease; parallel sync is idempotent', async () => {
@@ -149,7 +169,7 @@ test('account switch and logout cancel only seasonal alerts; saved opt-in stays 
   await h.activate();
   h.queue.setNotificationOwner('u2');
   await h.api.syncDailyReminder('u2'); assert.equal(h.scheduled.size, 0);
-  assert.equal(await h.api.getSeasonReminderOptIn('u2'), false);
+  assert.equal(await h.api.getSeasonReminderOptIn('u2'), true);
   h.queue.setNotificationOwner('u1');
   await h.api.syncDailyReminder('u1');
   h.scheduled.set('due-1', { identifier: 'due-1', content: { data: { type: 'vade' } } });
@@ -256,7 +276,7 @@ test('native or consent-storage failures cannot leave a partially enabled person
   for (const failure of ['native', 'storage']) {
     const h = harness();
     await h.publish();
-    if (failure === 'native') h.state.failSchedule = 2;
+    if (failure === 'native') h.state.failSchedule = h.added() + 2;
     else h.state.failPersist = true;
     await assert.rejects(h.api.saveSeasonReminderOptIn('u1', true));
     assert.equal(h.scheduled.size, 0);
@@ -399,6 +419,7 @@ test('season sound toggle moves Android alerts between audible and silent channe
   const h = harness({ platform: 'android' });
   await h.activate();
   assert(h.channels.has('caylik-season-sound-v1'));
+  assert.equal(Object.hasOwn(h.channels.get('caylik-season-sound-v1'), 'sound'), false);
   assert([...h.scheduled.values()].every(n => n.content.sound && n.trigger.channelId === 'caylik-season-sound-v1'));
   h.state.seasonAudible = false;
   await h.api.syncDailyReminder('u1');

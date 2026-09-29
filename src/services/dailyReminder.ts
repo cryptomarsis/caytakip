@@ -17,12 +17,14 @@ export const dailyReminderSupported = Platform.OS !== 'web' && Constants.executi
 type Notifications = typeof import('expo-notifications');
 export type DailyReminderResult = { settings: DailyReminderSettings; scheduledCount: number; permissionGranted: boolean; capacityLimited: boolean };
 const isOurs = (id: string) => id === legacyId || id.startsWith(prefix);
+// Only an absent preference defaults on. Saved opt-outs and invalid values stay off.
+const acceptsSeasonReminders = (value: string | null) => value === null || value === 'true';
 
 export const getDailyReminderSettings = async (userId: string): Promise<DailyReminderSettings> => {
   if (!userId) return defaultSeasonReminderSettings();
   const [raw, consent] = await Promise.all([AsyncStorage.getItem(policyKey(userId)), AsyncStorage.getItem(key(userId))]);
-  // Personal v2 dates never override the new centrally managed season; opt-in is explicit.
-  if (!raw || consent !== 'true') return defaultSeasonReminderSettings();
+  // A default-on preference never substitutes for a valid admin plan or OS permission.
+  if (!raw || !acceptsSeasonReminders(consent)) return defaultSeasonReminderSettings();
   try {
     const cached = JSON.parse(raw);
     if (!Number.isFinite(cached.fetchedAt) || cached.fetchedAt > Date.now()) return defaultSeasonReminderSettings();
@@ -36,7 +38,7 @@ export const getDailyReminderSettings = async (userId: string): Promise<DailyRem
   catch { return defaultSeasonReminderSettings(); }
 };
 
-export const getSeasonReminderOptIn = async (userId: string) => !!userId && (await AsyncStorage.getItem(key(userId))) === 'true';
+export const getSeasonReminderOptIn = async (userId: string) => !!userId && acceptsSeasonReminders(await AsyncStorage.getItem(key(userId)));
 
 export async function refreshDailyReminderPolicy(userId: string, token: string, request?: SeasonPolicyRequest) {
   if (!isNotificationOwner(userId)) return;
@@ -78,7 +80,8 @@ async function applyReminder(userId: string, settings: DailyReminderSettings, re
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(channelId, {
       name: 'Sezon hatırlatması', importance: Notifications.AndroidImportance.DEFAULT,
-      sound: audible ? 'default' : null, enableVibrate: audible,
+      // Omitted sound uses Android's system sound; null explicitly keeps a channel silent.
+      ...(audible ? {} : { sound: null }), enableVibrate: audible,
     });
   }
   let permission = await Notifications.getPermissionsAsync();

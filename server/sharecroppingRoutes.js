@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { deliveryInput, deliveryMessage } = require('../shared/sharecropping');
+const { deliveryInput, deliveryMessage, deliveryChanges } = require('../shared/sharecropping');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const oid = value => typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value);
 const member = userId => ({ $or: [{ cropperId: userId }, { ownerId: userId }] });
@@ -7,7 +7,13 @@ const publicLink = (r, userId) => ({
   _id: String(r._id), cropperName: r.cropperName, ownerName: r.ownerName, label: r.label,
   denominator: r.denominator, status: r.status, myRole: r.cropperId === userId ? 'cropper' : 'owner',
 });
-const publicDelivery = r => ({ _id: String(r._id), data: r.data, revision: r.revision, voided: r.voided });
+const publicDelivery = r => ({ _id: String(r._id), data: r.data, revision: r.revision, voided: r.voided,
+  harvestId: r.harvestId ? String(r.harvestId) : undefined,
+  changes: (r.history || []).map((entry, index, history) => ({
+    at: entry.at, revision: entry.revision + 1,
+    details: index === history.length - 1 && r.voided ? ['Teslimat iptal edildi'] : deliveryChanges(entry.data, history[index + 1]?.data || r.data),
+  })).reverse(),
+});
 module.exports = function register(app, { requireAuth, limitPublicUsage, mongoose, UserProfile, ShareLink, ShareDelivery, ShareEvent }) {
   const fail = (code, message) => Object.assign(Error(message), { httpCode: code });
   const run = fn => async (req, res) => {
@@ -43,7 +49,20 @@ module.exports = function register(app, { requireAuth, limitPublicUsage, mongoos
   app.get('/api/sharecropping', requireAuth, run(async (req, res) => {
     const rows = await ShareLink.find(member(req.auth.userId)).sort({ createdAt: -1 }).limit(201).lean();
     if (rows.length > 200) throw fail(409, 'Bağlantı listesi sınırı aşıldı; destek ile iletişime geçin.');
-    res.json({ links: rows.map(r => publicLink(r, req.auth.userId)) });
+    res.json({ links: rows.map(r => publicLink(r, req.auth.userId)), harvestSharing: true });
+  }));
+  app.get('/api/sharecropping-summary', requireAuth, run(async (req, res) => {
+    const links = await ShareLink.find(member(req.auth.userId)).sort({ createdAt: -1 }).limit(201).lean();
+    if (links.length > 200) throw fail(409, 'Bağlantı listesi sınırı aşıldı.');
+    const totals = await ShareDelivery.aggregate([
+      { $match: { linkId: { $in: links.map(link => link._id) }, voided: false } },
+      { $group: { _id: '$linkId', kg: { $sum: '$data.kg' }, cropperCents: { $sum: '$data.cropperCents' }, ownerCents: { $sum: '$data.ownerCents' } } },
+    ]);
+    const byId = new Map(totals.map(row => [String(row._id), row]));
+    res.json({ links: links.map(link => {
+      const total = byId.get(String(link._id));
+      return { ...publicLink(link, req.auth.userId), kg: total?.kg || 0, myShareCents: (link.cropperId === req.auth.userId ? total?.cropperCents : total?.ownerCents) || 0 };
+    }) });
   }));
   app.post('/api/sharecropping/invites', requireAuth, limitPublicUsage('share-invite', 20, 3600000), run(async (req, res, profile) => {
     const denominator = req.body.denominator;
@@ -123,6 +142,7 @@ module.exports = function register(app, { requireAuth, limitPublicUsage, mongoos
       if (!await ShareLink.findOneAndUpdate({ _id: link._id, status: 'active', cropperId: req.auth.userId }, { $inc: { mutationSerial: 1 } }, { session })) throw fail(409, 'Bağlantı kapalı.');
       const old = await ShareDelivery.findOne({ _id: req.params.recordId, linkId: link._id, revision: req.body.revision, voided: false }).session(session);
       if (!old) throw fail(409, 'Kayıt değişmiş veya iptal edilmiş. Listeyi yenileyin.');
+      if (old.harvestId) throw fail(409, 'Bu teslimatı bağlı hasat kaydından düzenleyin veya silin.');
       if (old.history.length >= 100) throw fail(409, 'Düzeltme sınırına ulaşıldı.');
       let data = old.data;
       if (req.body.voided !== true) { try { data = deliveryInput(req.body, old.data.denominator); } catch (e) { throw fail(400, e.message); } }
@@ -130,7 +150,7 @@ module.exports = function register(app, { requireAuth, limitPublicUsage, mongoos
         $set: { data, voided: req.body.voided === true }, $inc: { revision: 1 },
         $push: { history: { data: old.data, revision: old.revision, at: new Date() } },
       }, { new: true, session });
-      await notify(session, row, row.voided ? `Teslimat iptal edildi: ${deliveryMessage(old.data)}` : `Teslimat düzeltildi: ${deliveryMessage(data)}`);
+      await notify(session, row, row.voided ? `Teslimat iptal edildi: ${deliveryMessage(old.data)}` : `Teslimat düzeltildi: ${deliveryChanges(old.data, data).join(' · ') || 'Bilgiler yenilendi.'}`);
       return row;
     });
     res.json({ record: publicDelivery(record) });

@@ -149,5 +149,6 @@ export const clearOfflineData = async (userId: string) => {
   await Promise.all([
     updateQueue(queue => queue.filter((item) => item.userId !== userId)),
     AsyncStorage.removeItem(`${SNAPSHOT_PREFIX}${userId}`),
+    AsyncStorage.removeItem(`@caylik_shared_delivery_v1:${userId}`),
   ]);
 };

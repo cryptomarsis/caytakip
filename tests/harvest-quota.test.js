@@ -18,7 +18,7 @@ function setupHarvest(plans = [plan], existing = record) {
     constructor(payload) { Object.assign(this, payload, { _id: id }); }
     async save() { captures.saved = this; }
     static async findOne() { return existing; }
-    static async findByIdAndUpdate(key, payload) { captures.updated = { ...existing, ...payload }; return captures.updated; }
+    static async findOneAndUpdate(filter, payload, options) { assert.equal(filter._id, existing._id); assert.equal(filter.updatedAt, existing.updatedAt); assert(options.session); captures.updated = { ...existing, ...payload }; return captures.updated; }
   }
   const UserProfile = { findOne(filter) { captures.profile = filter; return { select: () => ({ lean: async () => ({ quotaPlans: plans }) }) }; } };
   const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
@@ -26,6 +26,7 @@ function setupHarvest(plans = [plan], existing = record) {
   vm.runInNewContext(code, {
     app: { post: (url, auth, idem, fn) => { routes.post = fn; }, put: (url, auth, fn) => { routes.put = fn; } },
     requireAuth() {}, idempotencyMiddleware() {}, Harvest, UserProfile,
+    syncHarvestSharing: async row => { assert(!row.shareLinkId); },
     mongoose: { startSession: async () => ({ withTransaction: async fn => fn(), endSession: async () => {} }) },
     require: name => { assert.equal(name, './server/harvestQuota'); return harvestQuota; },
     getUserIdentifier: req => ({ userId: req.auth.userId, userPhone: req.auth.phone }),

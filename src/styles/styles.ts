@@ -361,7 +361,7 @@ export const styles = StyleSheet.create({
   },
   mobileBottomNavIcon: {
     height: 38,
-    minWidth: 50,
+    minWidth: 40,
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center'
@@ -383,6 +383,7 @@ export const styles = StyleSheet.create({
     elevation: 12
   },
   mobileBottomNavText: {
+    maxWidth: '100%',
     color: '#66786C',
     fontSize: 10,
     lineHeight: 13,

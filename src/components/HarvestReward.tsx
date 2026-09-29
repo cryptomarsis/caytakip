@@ -9,12 +9,20 @@ import { styles } from '../styles/styles';
 
 const preferenceKey = (userId: string) => `@caylik_harvest_vibration:${userId}`;
 export function HarvestRewardPreference({ userId }: { userId: string }) {
+  return <RewardPreference key={userId} userId={userId} />;
+}
+
+const rewardEnabled = (value: string | null) => value === null || value === 'true';
+function RewardPreference({ userId }: { userId: string }) {
   const theme = useTheme();
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
-    AsyncStorage.getItem(preferenceKey(userId)).then((value) => { if (active) setEnabled(value === 'true'); }).catch(() => undefined);
+    AsyncStorage.getItem(preferenceKey(userId))
+      .then((value) => { if (active) { setEnabled(rewardEnabled(value)); setReady(true); } })
+      .catch(() => { if (active) setEnabled(false); });
     return () => { active = false; };
   }, [userId]);
   return <View style={[styles.formCard, { backgroundColor: theme.colors.surface }]}>
@@ -22,7 +30,7 @@ export function HarvestRewardPreference({ userId }: { userId: string }) {
     <Text style={[styles.formHelp, { color: theme.colors.onSurfaceVariant }]}>Hasat ve tahsilat kaydından sonra kısa bir onay animasyonu gösterilir. Sesleri “İşlem ve bildirim sesleri” bölümünden yönetebilirsiniz.</Text>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: caylikDesign.spacing.sm }}>
       <Text style={{ flex: 1, color: theme.colors.onSurface }}>Kutlamaya kısa titreşim ekle</Text>
-      <Switch accessibilityLabel="Başarılı hasat ve tahsilat kaydında titreşim" disabled={busy || Platform.OS === 'web'} value={enabled} onValueChange={(value) => {
+      <Switch accessibilityLabel="Başarılı hasat ve tahsilat kaydında titreşim" disabled={!ready || busy || Platform.OS === 'web'} value={enabled} onValueChange={(value) => {
         setBusy(true);
         void AsyncStorage.setItem(preferenceKey(userId), String(value)).then(() => setEnabled(value)).catch(() => undefined).finally(() => setBusy(false));
       }} />
@@ -48,7 +56,7 @@ export default function HarvestReward({ userId, kind, value }: Props) {
     // A screen-reader user dismisses explicitly, so the result doesn't disappear while read.
     void Promise.all([
       AccessibilityInfo.isReduceMotionEnabled().catch(() => true),
-      AsyncStorage.getItem(preferenceKey(userId)).catch(() => null),
+      AsyncStorage.getItem(preferenceKey(userId)).catch(() => 'false'),
       AccessibilityInfo.isScreenReaderEnabled().catch(() => true),
     ]).then(([reduced, enabled, screenReader]) => {
       if (!active) return;
@@ -59,7 +67,7 @@ export default function HarvestReward({ userId, kind, value }: Props) {
           Animated.timing(burst, { toValue: 1, duration: 1100, useNativeDriver: true }),
         ]).start();
       }
-      if (!reduced && enabled === 'true' && Platform.OS !== 'web') Vibration.vibrate(30);
+      if (!reduced && rewardEnabled(enabled) && Platform.OS !== 'web') Vibration.vibrate(30);
       if (!screenReader) timer = setTimeout(() => setVisible(false), 3500);
     }).catch(() => undefined);
     return () => { active = false; clearTimeout(timer); scale.stopAnimation(); burst.stopAnimation(); };

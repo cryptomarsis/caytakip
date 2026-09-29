@@ -6,6 +6,7 @@ import { AppIcon, AppIconName } from '../components/app-icon';
 import { CaylikButton, CaylikSurface, CaylikScreenHeader } from '../components/caylik-ui';
 import DatePickerField from '../components/date-picker-field';
 import QuotaPlanPicker from '../components/QuotaPlanPicker';
+import HarvestSharePicker from '../components/HarvestSharePicker';
 import { isCaykur } from '../../shared/quota';
 import { styles } from '../styles/styles';
 import { calculateAgriculturalDeductions, formatTL, toServerDate, todayDisplayDate } from '../utils/format';
@@ -137,7 +138,8 @@ export default function HarvestScreen(props: any) {
           </View>
         </CaylikSurface>
       )}
-      <CaylikButton icon="content-save-outline" disabled={props.saving} onPress={handleSaveHarvest} style={local.saveButton}>{props.saving ? 'Kaydediliyor…' : 'Hasadı Kaydet'}</CaylikButton>
+      <HarvestSharePicker authFetch={props.authFetch} value={props.shareLinkId || ''} onChange={props.onShareLinkChange} kg={hForm.kg} price={hForm.fiyat} disabled={props.saving} />
+      <CaylikButton icon="content-save-outline" disabled={props.saving} onPress={handleSaveHarvest} style={local.saveButton}>{props.saving ? 'Kaydediliyor…' : props.shareLinkId ? 'Hasadı kaydet ve paylaş' : 'Hasadı Kaydet'}</CaylikButton>
       <Text style={[local.saveHint, { color: theme.colors.onSurfaceVariant }]}>Kaydetmeden önce bilgileri kontrol edebilirsin.</Text>
     </View>
   );

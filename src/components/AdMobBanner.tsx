@@ -1,1 +1,2 @@
-export default function AdMobBanner() { return null; }
+export type AdMobBannerProps = { onHeightChange?: (height: number) => void };
+export default function AdMobBanner(_props: AdMobBannerProps) { return null; }

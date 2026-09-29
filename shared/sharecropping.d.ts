@@ -3,3 +3,4 @@ export type SharedDeliveryData = ShareAmounts & { kg: number; price: number; fac
 export function shareAmounts(kg: number, price: number, denominator: number): ShareAmounts;
 export function deliveryInput(body: Record<string, unknown>, denominator: number): SharedDeliveryData;
 export function deliveryMessage(data: SharedDeliveryData): string;
+export function deliveryChanges(before: SharedDeliveryData, after: SharedDeliveryData): string[];

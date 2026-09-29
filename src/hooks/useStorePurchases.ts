@@ -9,6 +9,7 @@ export const useStorePurchases = (
   _refreshWallet: () => Promise<void>,
 ) => useMemo(() => ({
   connected: false,
+  proStatus: 'unknown' as const,
   configured: false,
   prices: {} as Partial<Record<StoreProductId, string>>,
   purchasingProductId: null as StoreProductId | null,

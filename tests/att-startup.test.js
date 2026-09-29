@@ -51,8 +51,12 @@ test('denied ATT disables measurement and never initializes Meta', async () => {
   assert.equal(h.storage.get('caylik:ad-measurement-consent'), 'disabled');
 });
 test('undetermined response is not stored as an answered permission', async () => {
-  const h = setup({ result: 'undetermined' }); assert.equal(await h.api.requestAdTrackingConsent(), 'not-determined');
+  const h = setup({ result: 'undetermined' });
+  let changes = 0;
+  h.api.subscribeAdTrackingChanges(() => changes++);
+  assert.equal(await h.api.requestAdTrackingConsent(), 'not-determined');
   assert.equal(h.storage.size, 0); assert.ok(!h.calls.includes('meta-init'));
+  assert.equal(changes, 0, 'Unanswered request must not recursively trigger the startup consent listener');
 });
 test('revoked native permission overrides previously saved grant', async () => {
   const h = setup({ status: 'denied', saved: 'granted' }); assert.equal(await h.api.initializeAdTracking(), 'denied');

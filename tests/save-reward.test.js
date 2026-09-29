@@ -8,7 +8,7 @@ const ts = require('typescript');
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const transpile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
 
-function handlers(result) {
+function handlers(result, sharing = null) {
   const file = ts.createSourceFile('index.tsx', read('src/app/index.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const selected = {};
   const visit = node => {
@@ -16,16 +16,18 @@ function handlers(result) {
     ts.forEachChild(node, visit);
   };
   visit(file);
-  const state = { rewards: [], sounds: [], feedback: [], dismissed: 0 };
+  const state = { rewards: [], sounds: [], feedback: [], dismissed: 0, posts: [] };
   const noop = () => {};
   const exports = {};
   vm.runInNewContext(transpile(Object.entries(selected).map(([name, source]) => `exports.${name} = ${source};`).join('\n')), {
     exports, currentUser: { userId: 'u1', name: 'Test' }, harvestSavingRef: { current: false },
+    harvestShareLinkId: sharing ? 'a'.repeat(24) : '', setHarvestShareLinkId: noop,
+    policyRequest: noop, shareRequest: async () => sharing,
     hForm: { producer: '', kg: '125', firma: 'ÇAYKUR', fiyat: '35', tahsilat: '0', date: '15.09.2026' },
     payHarvestId: 'h1', payAmount: '100', payDate: '15.09.2026', payDesc: '', harvests: [{ _id: 'h1' }],
     toServerDate: () => '2026-09-15', todayDisplayDate: () => '15.09.2026', parseMoney: Number,
     calculateAgriculturalDeductions: () => ({ netTutar: 4287.5 }), remainingTotalOf: () => 200,
-    postOrQueue: async () => { if (result instanceof Error) throw result; return result; },
+    postOrQueue: async (endpoint, body) => { state.posts.push({ endpoint, body }); if (result instanceof Error) throw result; return result; },
     formatTL: value => `${value} TL`,
     showOperationFeedback: (...args) => state.feedback.push(args),
     setOperationFeedback: noop, Keyboard: { dismiss: () => state.dismissed++ },
@@ -57,7 +59,16 @@ test('offline queued, rejected and failed saves cannot celebrate or play success
   }
 });
 
-async function reward({ reduced = false, screenReader = false, vibration = false } = {}) {
+test('shared harvest fails closed against old server or unavailable agreement instead of silently saving unshared', async () => {
+  for (const sharing of [{ links: [] }, { harvestSharing: true, links: [] }, { harvestSharing: true, links: [{ _id: 'a'.repeat(24), myRole: 'owner', status: 'active' }] }]) {
+    const h = handlers({ response: { ok: true } }, sharing); await h.exports.handleSaveHarvest();
+    assert.equal(h.state.posts.length, 0); assert.equal(h.state.rewards.length, 0); assert.equal(h.state.feedback.length, 1);
+  }
+  const h = handlers({ response: { ok: true } }, { harvestSharing: true, links: [{ _id: 'a'.repeat(24), myRole: 'cropper', status: 'active' }] });
+  await h.exports.handleSaveHarvest(); assert.equal(h.state.posts.length, 1); assert.equal(h.state.posts[0].endpoint, '/harvests'); assert.equal(h.state.posts[0].body.shareLinkId, 'a'.repeat(24));
+});
+
+async function reward({ reduced = false, screenReader = false, vibration = null, readFails = false } = {}) {
   const effects = [], states = [], timers = new Map(), animations = [], vibrations = [], spoken = [];
   let cursor = 0;
   class Value {
@@ -81,7 +92,10 @@ async function reward({ reduced = false, screenReader = false, vibration = false
   };
   const modules = {
     react, 'react-native': native, 'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '@react-native-async-storage/async-storage': { getItem: async () => String(vibration) },
+    '@react-native-async-storage/async-storage': { getItem: async () => {
+      if (readFails) throw Error('storage unavailable');
+      return vibration === null ? null : String(vibration);
+    } },
     'react-native-paper': { useTheme: () => ({ colors: {} }) },
     './app-icon': { AppIcon: 'AppIcon' }, '../context/app-theme': { caylikDesign: { spacing: {}, radius: {}, type: {} } }, '../styles/styles': { styles: {} },
   };
@@ -114,4 +128,16 @@ test('reduced motion disables decorative animation/vibration; screen readers ret
   assert.match(h.spoken[0], /Tahsilatın kaydedildi! 100 TL/);
   h.tree.props.onRequestClose(); assert.equal(h.render(), null);
   h.cleanup();
+});
+
+test('reward vibration defaults on but respects stored opt-out and storage failures', async () => {
+  const fresh = await reward();
+  assert.deepEqual(fresh.vibrations, [30]);
+  fresh.cleanup();
+  for (const options of [{ vibration: false }, { readFails: true }]) {
+    const h = await reward(options);
+    assert.deepEqual(h.vibrations, []);
+    assert.equal(h.animations.length, 2);
+    h.cleanup();
+  }
 });

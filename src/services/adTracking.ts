@@ -94,7 +94,9 @@ let consentRequest: Promise<AdTrackingState> | null = null;
 
 export function requestAdTrackingConsent(): Promise<AdTrackingState> {
   if (!consentRequest) consentRequest = requestConsent().then(state => {
-    notifyConsentChanged();
+    // An unanswered native prompt is not a consent change. Emitting here would
+    // re-enter the startup request indefinitely while iOS remains undetermined.
+    if (state !== 'not-determined' && state !== 'unsupported') notifyConsentChanged();
     return state;
   }).finally(() => { consentRequest = null; });
   return consentRequest;

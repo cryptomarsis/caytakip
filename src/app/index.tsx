@@ -28,6 +28,7 @@ import { useAiAssistant } from '../hooks/useAiAssistant';
 import { useAppData } from '../hooks/useAppData';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { useStorePurchases } from '../hooks/useStorePurchases';
+import { useHarvestAdNavigation } from '../hooks/useHarvestAdNavigation';
 import {
   dismissAdTrackingPrompt,
   getAdTrackingState,
@@ -58,6 +59,11 @@ import AuthScreen from '../screens/AuthScreen';
 import AdTrackingConsentPrompt from '../components/AdTrackingConsentPrompt';
 import { shouldRequestTracking } from '../utils/trackingPromptPolicy';
 import AdMobBanner from '../components/AdMobBanner';
+import AdMobNativeCard from '../components/AdMobNativeCard';
+import { AdAccessContext } from '../context/ad-access';
+import SharecroppingScreen from '../screens/SharecroppingScreen';
+import { shareRequest, type ShareLink } from '../services/sharecropping';
+import { useSharecroppingPush } from '../hooks/useSharecroppingPush';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
 const ONBOARDING_STEPS = [
@@ -70,6 +76,11 @@ const ONBOARDING_STEPS = [
 // MAIN COMPONENT
 // ==========================================
 export default function App() {
+  const mainScrollRef = useRef<ScrollView>(null);
+  const resetSharecroppingScroll = useCallback(() => {
+    Keyboard.dismiss();
+    mainScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, []);
   const { width: windowWidth } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && windowWidth >= 960;
   const paperTheme = useTheme();
@@ -101,6 +112,7 @@ export default function App() {
 
   // Navigasyon ve Yüklenme State'leri
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [bannerHeight, setBannerHeight] = useState(0);
   const [assistantDraft, setAssistantDraft] = useState<{ userId: string; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
@@ -131,6 +143,9 @@ export default function App() {
     receiptFingerprint: ''
   });
   const [receiptBusy, setReceiptBusy] = useState(false);
+  const [harvestShareSelection, setHarvestShareSelection] = useState({ userId: '', id: '' });
+  const harvestShareLinkId = harvestShareSelection.userId === currentUser?.userId ? harvestShareSelection.id : '';
+  const setHarvestShareLinkId = (id: string) => setHarvestShareSelection({ userId: currentUser?.userId || '', id });
   const [receiptNotice, setReceiptNotice] = useState('');
   const [receiptDraft, setReceiptDraft] = useState<{ date?: string; company?: string; netWeightKg?: number | null; paymentTerm?: string; receiptFingerprint?: string; confidence?: number; warnings?: string[] } | null>(null);
 
@@ -241,6 +256,12 @@ export default function App() {
   const aiAssistant = useAiAssistant(currentUser?.userId, authFetch);
   const refreshAssistantWallet = aiAssistant.refreshWallet;
   const storePurchases = useStorePurchases(currentUser?.userId, authFetch, aiAssistant.refreshWallet);
+  const sharecroppingPush = useSharecroppingPush(currentUser, authFetch, () => setActiveTab('sharecropping'));
+  const navigateTab = useHarvestAdNavigation({
+    userId: currentUser?.userId, proStatus: storePurchases.proStatus, activeTab,
+    enabled: onboardingStep === null && !adTrackingPromptVisible && !loading && !storePurchases.purchasingProductId && !storePurchases.restoring,
+    onNavigate: setActiveTab,
+  });
   const handleRewardedAdEarned = async () => {
     await aiAssistant.refreshWallet();
     showOperationFeedback('10 Kredi Kazandınız', 'Reklam ödülü hesabınıza eklendi.', 'success');
@@ -790,8 +811,14 @@ export default function App() {
     harvestSavingRef.current = true;
     setLoading(true);
     try {
+      if (harvestShareLinkId) {
+        const sharing = await shareRequest<{ links: ShareLink[]; harvestSharing?: boolean }>(policyRequest, '/sharecropping');
+        if (!sharing.harvestSharing) throw Error('Paylaşım için önce sunucuyu güncelleyin. Hasat kaydedilmedi.');
+        if (!sharing.links.some(link => link._id === harvestShareLinkId && link.myRole === 'cropper' && link.status === 'active')) throw Error('Seçilen anlaşma aktif değil. Yeniden seçin.');
+      }
       const payload = {
         tarih,
+        shareLinkId: harvestShareLinkId,
         surum: hForm.surum || '1. Sürüm',
         uretici: producerName,
         producerName: producerName,
@@ -814,6 +841,7 @@ export default function App() {
 
       const result = await postOrQueue('/harvests', payload);
       if (result.queued) {
+        setHarvestShareLinkId('');
         showOperationFeedback('Çevrimdışı Kaydedildi', 'Hasat kaydı telefonda saklandı; internet gelince otomatik gönderilecek.', 'info');
         setReceiptNotice('');
         setHForm({ quotaPlanId: '', date: todayDisplayDate(), surum: '1. Sürüm', producer: '', kg: '', firma: '', fiyat: '', tahsilat: '0', aciklama: '', garden: '', isVadeli: false, vadeTarihi: '', receiptFingerprint: '' });
@@ -823,6 +851,7 @@ export default function App() {
       const res = result.response;
 
       if (res.ok) {
+        setHarvestShareLinkId('');
         setOperationFeedback(null);
         Keyboard.dismiss();
         if (currentUser) void playFeedbackSound('harvest', currentUser.userId);
@@ -1227,6 +1256,7 @@ export default function App() {
   }
 
   return (
+    <AdAccessContext.Provider value={storePurchases.proStatus}>
     <SafeAreaProvider>
       <SafeAreaView style={[styles.container, { backgroundColor: paperTheme.colors.background }]}>
         <StatusBar barStyle="light-content" backgroundColor="#1b4332" />
@@ -1253,7 +1283,7 @@ export default function App() {
                         accessibilityRole="button"
                         accessibilityState={{ selected: active }}
                         style={[styles.desktopNavItem, active && styles.desktopNavItemActive]}
-                        onPress={() => setActiveTab(item.tab)}
+                onPress={() => navigateTab(item.tab)}
                       >
                         <View style={[styles.desktopNavIcon, active && styles.desktopNavIconActive]}>
                           <AppIcon name={item.icon} size={20} color={active ? '#FFFFFF' : '#B9D5C0'} />
@@ -1384,6 +1414,7 @@ export default function App() {
           </View>
         ) : (
         <ScrollView
+          ref={mainScrollRef}
           style={[styles.content, isDesktop && styles.desktopScroll, { backgroundColor: paperTheme.colors.background }]}
           contentContainerStyle={isDesktop ? styles.desktopContent : styles.mobileContent}
           showsVerticalScrollIndicator={isDesktop}
@@ -1392,7 +1423,7 @@ export default function App() {
           {activeTab === 'dashboard' && (
             <DashboardScreen
               key={currentUser.userId}
-              authFetch={authFetch}
+              authFetch={policyRequest}
               pendingSyncCount={pendingSyncCount}
               ads={ads}
               harvests={harvests}
@@ -1407,7 +1438,7 @@ export default function App() {
               openPaymentForHarvest={openPaymentForHarvest}
               openHarvestEditModal={openHarvestEditModal}
               handleDelete={handleDelete}
-              onNavigate={setActiveTab}
+              onNavigate={navigateTab}
             />
           )}
 
@@ -1458,8 +1489,11 @@ export default function App() {
           {/* HASAT EKLE TABI */}
           {activeTab === 'harvest' && (
             <HarvestScreen
+              key={currentUser.userId}
+              shareLinkId={harvestShareLinkId}
+              onShareLinkChange={setHarvestShareLinkId}
               harvests={harvests.filter(item => item.userId === currentUser.userId)}
-              authFetch={authFetch}
+              authFetch={policyRequest}
               currentUser={currentUser}
               hForm={hForm}
               handleSaveHarvest={handleSaveHarvest}
@@ -1503,7 +1537,13 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'more' && <MoreScreen isAdmin={Boolean(isAdmin)} onNavigate={(tab) => setActiveTab(tab)} />}
+          {activeTab === 'more' && <MoreScreen isAdmin={Boolean(isAdmin)} onNavigate={navigateTab} />}
+          {activeTab === 'sharecropping' && <SharecroppingScreen key={currentUser.userId} userId={currentUser.userId} authFetch={policyRequest} enablePush={sharecroppingPush.enable} onPageChange={resetSharecroppingScroll} refreshKey={harvests}
+            onAddHarvest={id => { setHarvestShareLinkId(id); navigateTab('harvest'); }}
+            onOpenHarvest={async id => {
+              try { const response = await policyRequest(`${API_URL}/harvests/${id}`); const row = await response.json(); if (!response.ok) throw Error(row.error || 'Hasat bulunamadı.'); openHarvestEditModal(row); }
+              catch (error) { showOperationFeedback('Hasat açılamadı', error instanceof Error ? error.message : 'Yeniden deneyin.', 'error'); }
+            }} />}
 
           {/* FABRİKA FİYATLARI TABI */}
           {activeTab === 'prices' && (
@@ -1555,6 +1595,7 @@ export default function App() {
               currentUser={currentUser}
             />
           )}
+          {!isDesktop && ['history', 'receivables', 'more'].includes(activeTab) && <AdMobNativeCard key={activeTab} />}
         </ScrollView>
         )}
         {!isDesktop && activeTab !== 'assistant' && activeTab !== 'dashboard' && (
@@ -1563,13 +1604,13 @@ export default function App() {
             accessibilityLabel="Çaylık Asistanı aç"
             activeOpacity={0.86}
             onPress={() => setActiveTab('assistant')}
-            style={[styles.assistantFab, { backgroundColor: paperTheme.colors.primary }]}
+            style={[styles.assistantFab, { backgroundColor: paperTheme.colors.primary, bottom: 94 + bannerHeight }]}
           >
             <AppIcon name="robot-happy-outline" size={22} color={paperTheme.colors.onPrimary} />
             <Text style={[styles.assistantFabText, { color: paperTheme.colors.onPrimary }]}>Asistan{aiAssistant.credits !== null ? ` · ${aiAssistant.credits}` : ''}</Text>
           </TouchableOpacity>
         )}
-        {!isDesktop && activeTab !== 'assistant' && <AdMobBanner />}
+        {!isDesktop && activeTab !== 'assistant' && <AdMobBanner onHeightChange={setBannerHeight} />}
         {!isDesktop && (
           <View style={[styles.mobileBottomNav, { backgroundColor: paperTheme.colors.surface, borderTopColor: paperTheme.colors.outline }]}>
             {mobileNavItems.map((item) => {
@@ -1582,7 +1623,7 @@ export default function App() {
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={item.label}
                   style={[styles.mobileBottomNavItem, { borderRadius: 16, paddingVertical: 6, backgroundColor: active ? paperTheme.colors.primaryContainer : 'transparent' }, centerAction && styles.mobileBottomNavCenterItem]}
-                  onPress={() => setActiveTab(item.tab)}
+                  onPress={() => navigateTab(item.tab)}
                 >
                   <View style={[
                     styles.mobileBottomNavIcon,
@@ -1593,7 +1634,7 @@ export default function App() {
                   ]}>
                     <AppIcon name={item.icon} size={centerAction ? 27 : 23} color={centerAction ? paperTheme.colors.onPrimary : active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant} />
                   </View>
-                  <Text numberOfLines={1} style={[styles.mobileBottomNavText, centerAction && styles.mobileBottomNavCenterText, active && styles.mobileBottomNavTextActive, { color: active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant }]}>{item.label}</Text>
+                  <Text numberOfLines={2} style={[styles.mobileBottomNavText, centerAction && styles.mobileBottomNavCenterText, active && styles.mobileBottomNavTextActive, { color: active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant }]}>{item.label}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -1695,6 +1736,7 @@ export default function App() {
               <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 <Text style={styles.modalTitle}>Hasat Kaydını Düzenle</Text>
                 <Text style={styles.formHelp}>Yanlış girilen bilgileri düzeltip kaydedin.</Text>
+                {!!editingHarvest?.shareLinkId && <Text style={[styles.formHelp, { color: paperTheme.colors.primary }]}>Bu hasat Pay Takibi’ne bağlı. Değişiklikler karşı tarafa da yansır ve geçmişte görünür.</Text>}
 
                 <Text style={styles.label}>Tarih (GG.AA.YYYY)</Text>
                 <TextInput style={styles.input} value={editHarvestForm.date} onChangeText={(date) => setEditHarvestForm({ ...editHarvestForm, date })} placeholder="12.08.2026" />
@@ -1754,5 +1796,6 @@ export default function App() {
         </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
+    </AdAccessContext.Provider>
   );
 }

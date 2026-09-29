@@ -38,10 +38,10 @@ export const setupNotifications = async () => {
     const Notifications = await import('expo-notifications');
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => ({
-        shouldShowAlert: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: Boolean(notification.request.content.sound),
+        shouldShowAlert: notification.request.content.data?.type !== 'sharecropping' || isNotificationOwner(String(notification.request.content.data.owner)),
+        shouldShowBanner: notification.request.content.data?.type !== 'sharecropping' || isNotificationOwner(String(notification.request.content.data.owner)),
+        shouldShowList: notification.request.content.data?.type !== 'sharecropping' || isNotificationOwner(String(notification.request.content.data.owner)),
+        shouldPlaySound: Boolean(notification.request.content.sound) && (notification.request.content.data?.type !== 'sharecropping' || isNotificationOwner(String(notification.request.content.data.owner))),
         shouldSetBadge: false,
       }),
     });
