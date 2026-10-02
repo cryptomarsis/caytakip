@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import AdMobNativeCard from '../components/AdMobNativeCard';
 import { useAdAccess } from '../context/ad-access';
 import DashboardStatus from '../components/DashboardStatus';
+import SocialFollow from '../components/SocialFollow';
 import type { AuthFetch } from '../services/aiAssistant';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
@@ -207,6 +208,8 @@ export default function DashboardScreen({
         <View style={{ flex: 1 }}><Text style={[local.advertiseTitle, { color: theme.colors.onSecondaryContainer }]}>Reklam Ver</Text><Text style={[local.advertiseText, { color: theme.colors.onSurfaceVariant }]}>Markanızı Çaylık kullanıcılarına tanıtın</Text></View>
         <View style={[local.advertiseAction, { backgroundColor: theme.colors.surface }]}><Text style={{ color: theme.colors.secondary, fontWeight: '900' }}>Başla</Text><AppIcon name="chevron-right" size={18} color={theme.colors.secondary} /></View>
       </TouchableOpacity>
+
+      <SocialFollow />
 
       {isPro && <Text style={{ color: theme.colors.primary, marginTop: 12, fontWeight: '700' }}>Çaylık Pro · Reklamsız kullanım aktif</Text>}
       {Platform.OS !== 'web' && adsAllowed && <View style={{ marginTop: 16, marginBottom: 8 }}>

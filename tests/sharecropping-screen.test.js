@@ -28,6 +28,7 @@ function harness(myRole = 'cropper', options = {}) {
     '../components/caylik-ui': { CaylikButton: 'Button', CaylikSurface: 'Surface', CaylikScreenHeader: 'Header' },
     '../components/app-icon': { AppIcon: 'Icon' }, '../components/date-picker-field': 'DatePicker',
     '../components/SharedAccountPanel': 'SharedAccountPanel',
+    '../components/AdMobNativeCard': 'AdMobNativeCard',
     '../components/SharedLegacyCollection': 'SharedLegacyCollection',
     '../../shared/sharecropping': require('../shared/sharecropping'),
     '../utils/format': { todayDisplayDate: () => '29.09.2026', toServerDate: date => date.split('.').reverse().join('-'), formatTL: n => `${n} TL`, formatDisplayDate: date => date.split('-').reverse().join('.'), remainingTotalOf: row => row.sharedNetCents / 100 - Number(row.tahsilat || 0) },
@@ -35,7 +36,8 @@ function harness(myRole = 'cropper', options = {}) {
       calls.push({ route, method, body });
       if (route === '/sharecropping') return { links: [{ ...agreement, myRole }] };
       if (route === '/sharecropping-summary') return { links: [{ ...agreement, myRole, kg: 100, myShareCents: myRole === 'cropper' ? 98000 : 196000 }] };
-      if (route === '/sharecropping-events') return { events: [] };
+      if (route === '/sharecropping-events') return { events: options.events || [] };
+      if (route.endsWith('/read')) return { ok: true };
       if (route.endsWith('/preview')) return { label: 'Dere bahçesi', cropperName: 'Ali', denominator: 3 };
       if (route.endsWith('/accept')) return { link: { ...agreement, myRole: 'owner' } };
       if (route === '/sharecropping/invites') return { code: 'a'.repeat(24) };
@@ -68,6 +70,18 @@ test('overview lists agreements without role selectors, forms or long explanatio
   assert.equal(h.calls.find(c => c.method === 'POST').body.denominator, 2); assert.match(text(h.tree), /Davetiniz hazır/);
 });
 
+test('Pay Takibi primary actions share full-width sizing and secondary actions are compact', async () => {
+  const h = harness(); await h.settle();
+  const create = h.find(n => n.type === 'Button' && text(n) === 'Yeni anlaşma');
+  const join = h.find(n => n.type === 'Button' && text(n) === 'Davet koduyla katıl');
+  assert.equal(create.props.size, 'compact');
+  assert.equal(join.props.size, 'compact');
+  assert.equal(create.props.style, join.props.style);
+  assert.equal(create.props.style.width, '100%');
+  assert.ok(create.props.style.minHeight >= 48);
+  assert.equal(h.find(n => n.type === 'Button' && text(n) === 'Bildirimleri aç').props.size, 'compact');
+});
+
 test('Pay Takibi sits immediately after receivables on mobile and retains the same route on desktop', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/navigation.ts'), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -86,6 +100,19 @@ test('joining shows the real agreement and requires explicit approval', async ()
   assert.match(text(h.tree), /Sizin payınız:  2 \/ 3/); assert.match(text(h.tree), /Onaylayınca/);
   assert.equal(h.calls.filter(c => c.route.endsWith('/accept')).length, 0);
   await h.button('Anlaşmayı onayla'); assert.equal(h.calls.find(c => c.route.endsWith('/accept')).body.accept, true);
+});
+
+test('unread movement opens its agreement and acknowledges only the clicked event', async () => {
+  let refreshed = 0;
+  const h = harness('owner', { unread: 2, onEventsChanged: () => { refreshed++; }, events: [
+    { _id: 'a'.repeat(24), linkId: id, message: 'Yeni teslimat', createdAt: '2026-09-29' },
+    { _id: 'b'.repeat(24), linkId: id, message: 'Düzeltme', createdAt: '2026-09-29' },
+  ] });
+  await h.settle();
+  const event = h.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Yeni teslimat, anlaşmayı aç');
+  assert(event); event.props.onPress(); await h.settle();
+  assert.equal(h.find(n => n.type === 'Header').props.title, 'Dere bahçesi');
+  const ack = h.calls.filter(c => c.route?.endsWith('/read')); assert.equal(ack.length, 1); assert(ack[0].route.includes('a'.repeat(24))); assert.equal(refreshed, 1);
 });
 test('agreement detail leads to a separate delivery form and preserves safe save', async () => {
   const h = harness(); await h.settle(); await h.openAgreement();

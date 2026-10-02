@@ -13,10 +13,12 @@ type ButtonProps = {
   style?: StyleProp<ViewStyle>;
   icon?: AppIconName;
   accessibilityLabel?: string;
+  size?: 'regular' | 'compact';
+  selected?: boolean;
 };
 
 /** Ortak mobil buton: uygulamanın tüm ekranlarında aynı dokunma alanı ve renk dili kullanılır. */
-export function CaylikButton({ children, onPress, disabled, mode = 'contained', style, icon, accessibilityLabel }: ButtonProps) {
+export function CaylikButton({ children, onPress, disabled, mode = 'contained', style, icon, accessibilityLabel, size = 'regular', selected }: ButtonProps) {
   const theme = useTheme();
   const contained = mode === 'contained';
   const outlined = mode === 'outlined';
@@ -24,11 +26,12 @@ export function CaylikButton({ children, onPress, disabled, mode = 'contained', 
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled: Boolean(disabled) }}
+      accessibilityState={{ disabled: Boolean(disabled), ...(selected !== undefined ? { selected } : {}) }}
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
         ui.button,
+        size === 'compact' && ui.compactButton,
         contained && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
         outlined && { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary },
         mode === 'text' && ui.textButton,
@@ -38,7 +41,7 @@ export function CaylikButton({ children, onPress, disabled, mode = 'contained', 
       ]}
     >
       {!!icon && <View style={ui.buttonIcon}><AppIcon name={icon} size={22} color={contained ? theme.colors.onPrimary : theme.colors.primary} /></View>}
-      <Text style={[ui.buttonLabel, { color: contained ? theme.colors.onPrimary : theme.colors.primary }]}>{children}</Text>
+      <Text style={[ui.buttonLabel, size === 'compact' && ui.compactLabel, { color: contained ? theme.colors.onPrimary : theme.colors.primary }]}>{children}</Text>
     </Pressable>
   );
 }
@@ -108,6 +111,8 @@ const ui = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 1,
   },
+  compactButton: { minHeight: caylikDesign.touchTarget, borderRadius: caylikDesign.radius.md, paddingVertical: 10, paddingHorizontal: 14, shadowOpacity: 0, elevation: 0 },
+  compactLabel: { fontSize: caylikDesign.type.body, lineHeight: 20 },
   textButton: { borderWidth: 0, backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, paddingHorizontal: 12 },
   buttonDisabled: { opacity: 0.45, shadowOpacity: 0, elevation: 0 },
   buttonPressed: { transform: [{ scale: 0.985 }], opacity: 0.91, shadowOpacity: 0.05, elevation: 1 },

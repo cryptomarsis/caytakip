@@ -36,6 +36,8 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
   const [ads, setAds] = useState<AdRecord[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [dataOwner, setDataOwner] = useState<string | null>(null);
+  const [dataStale, setDataStale] = useState(false);
+  const freshness = useRef({ userId: '', at: 0, pending: 0 });
   const account = useRef(currentUser?.userId);
   const generation = useRef(0);
   useEffect(() => { account.current = currentUser?.userId; generation.current++; }, [currentUser?.userId]);
@@ -43,7 +45,10 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
 
   const fetchData = useCallback(async (silent = false) => {
     if (!currentUser?.token) return;
+    if (silent && freshness.current.userId === currentUser.userId &&
+      (freshness.current.pending || Date.now() - freshness.current.at < 30000)) return;
     const requestGeneration = ++generation.current;
+    freshness.current = { userId: currentUser.userId, at: freshness.current.userId === currentUser.userId ? freshness.current.at : 0, pending: requestGeneration };
     const valid = () => account.current === currentUser.userId && generation.current === requestGeneration;
     if (!silent) setLoading(true);
     try {
@@ -85,6 +90,8 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
           setGardens(snapshot.gardens as GardenRecord[]);
           setFactoryPrices(snapshot.factoryPrices as FactoryPriceRecord[]);
           setAds(snapshot.ads as AdRecord[]);
+          setDataStale(true);
+          setLastSyncAt(snapshot.savedAt);
           onFeedback('Çevrimdışı Mod', 'Son senkronize edilen veriler gösteriliyor. Yeni kayıtlar bağlantı geldiğinde gönderilecek.', 'info');
           return;
         }
@@ -92,14 +99,20 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
 
       // The three ledgers form one snapshot. Never show a fresh personal full
       // sale beside an old shared projection or temporarily inflate balances.
-      const merged = rawH !== null && rawPayments !== null && rawShared !== null
-        ? mergeShareLedger(rawH, rawPayments, rawShared) : null;
-      const nextHarvests = merged?.harvests ?? (ownData ? harvests : EMPTY);
-      const nextPayments = merged?.payments ?? (ownData ? payments : EMPTY);
-      const nextExpenses = rawE ?? (ownData ? expenses : EMPTY);
-      const nextGardens = rawG ?? (ownData ? gardens : EMPTY);
-      const nextFactoryPrices = rawP ?? (ownData ? factoryPrices : EMPTY);
-      const nextAds = rawA ?? (ownData ? ads : EMPTY);
+      let merged: ReturnType<typeof mergeShareLedger> | null = null;
+      try {
+        if (rawH !== null && rawPayments !== null && rawShared !== null) merged = mergeShareLedger(rawH, rawPayments, rawShared);
+      } catch { /* Keep the last coherent ledger if sources race or disagree. */ }
+      const cached = !ownData && (!merged || !allRequestsSucceeded) ? await getDataSnapshot(currentUser.userId) : null;
+      if (!valid()) return;
+      const nextHarvests = merged?.harvests ?? (ownData ? harvests : cached?.harvests as HarvestRecord[] ?? EMPTY);
+      const nextPayments = merged?.payments ?? (ownData ? payments : cached?.payments as PaymentRecord[] ?? EMPTY);
+      const nextExpenses = rawE ?? (ownData ? expenses : cached?.expenses as ExpenseRecord[] ?? EMPTY);
+      const nextGardens = rawG ?? (ownData ? gardens : cached?.gardens as GardenRecord[] ?? EMPTY);
+      const nextFactoryPrices = rawP ?? (ownData ? factoryPrices : cached?.factoryPrices as FactoryPriceRecord[] ?? EMPTY);
+      const nextAds = rawA ?? (ownData ? ads : cached?.ads as AdRecord[] ?? EMPTY);
+      setDataStale(!allRequestsSucceeded || !merged);
+      if (!merged && cached) setLastSyncAt(cached.savedAt);
       setDataOwner(currentUser.userId);
       setHarvests(nextHarvests);
       setPayments(nextPayments);
@@ -108,7 +121,9 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
       setFactoryPrices(nextFactoryPrices);
       setAds(nextAds);
 
-      if (allRequestsSucceeded) {
+      // Harvests, shares, collections and expenses must be coherent. Optional
+      // catalog/advertising failures must not prevent saving this fresh ledger.
+      if (merged && rawE !== null) {
         await saveDataSnapshot(currentUser.userId, {
           harvests: nextHarvests,
           payments: nextPayments,
@@ -120,6 +135,7 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
         if (!valid()) return;
         const syncedAt = new Date().toISOString();
         setLastSyncAt(syncedAt);
+        if (allRequestsSucceeded) freshness.current.at = Date.now();
         await AsyncStorage.setItem(`${LAST_SYNC_STORAGE_PREFIX}:${currentUser.userId}`, syncedAt);
       }
 
@@ -134,8 +150,9 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
       }
       if (allRequestsFailed) onFeedback('Veriler Güncellenemedi', 'Sunucuya bağlanılamadı.', 'error');
     } catch (error: unknown) {
-      if (valid()) onFeedback('Bağlantı Kurulamadı', error instanceof Error ? error.message : 'Sunucuya ulaşılamadı.', 'error');
+      if (valid()) { setDataStale(true); onFeedback('Bağlantı Kurulamadı', error instanceof Error ? error.message : 'Sunucuya ulaşılamadı.', 'error'); }
     } finally {
+      if (freshness.current.pending === requestGeneration) freshness.current.pending = 0;
       if (valid()) setLoading(false);
     }
   }, [ads, authFetch, currentUser, expenses, factoryPrices, gardens, getAuthHeaders, harvests, onFeedback, payments, setLoading, ownData]);
@@ -163,6 +180,7 @@ export function useAppData({ currentUser, authFetch, getAuthHeaders, setLoading,
     factoryPrices: ownData ? factoryPrices : EMPTY, setFactoryPrices,
     ads: ownData ? ads : EMPTY, setAds,
     lastSyncAt: ownData ? lastSyncAt : null,
+    dataStale: ownData && dataStale,
     fetchData,
   };
 }

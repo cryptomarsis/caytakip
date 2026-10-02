@@ -6,5 +6,15 @@ module.exports = defineConfig([
   expoConfig,
   {
     ignores: ["dist/*"],
-  }
+  },
+  {
+    files: ['server/**/*.js', 'shared/**/*.js', 'tests/**/*.js'],
+    languageOptions: {
+      globals: { Buffer: 'readonly' },
+    },
+  },
+  {
+    files: ['tests/app-config.test.js', 'tests/feedback-sounds.test.js'],
+    languageOptions: { globals: { __dirname: 'readonly' } },
+  },
 ]);

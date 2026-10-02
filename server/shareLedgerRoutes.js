@@ -66,6 +66,12 @@ module.exports = (app, { requireAuth, mongoose, UserProfile, ShareLink, ShareDel
         if (entries.length >= 1000) throw fail(409, 'Bu teslimatın tahsilat sınırına ulaşıldı.');
         row.collections.push({ userId, requestId, requestHash, ...data });
       } else {
+        if (mode === 'update' && (entry.history || []).length >= 100) throw fail(409, 'Tahsilat düzeltme sınırına ulaşıldı. Gerekirse iptal edip yeni kayıt oluşturun.');
+        entry.history = [...(entry.history || []), {
+          at: new Date(), action: mode,
+          before: { amountCents: entry.amountCents, date: entry.date, note: entry.note || '' },
+          after: mode === 'delete' ? { amountCents: 0, date: entry.date, note: entry.note || '' } : data,
+        }];
         if (mode === 'delete') entry.voided = true;
         else Object.assign(entry, data);
         entry.revision = (entry.revision || 0) + 1;

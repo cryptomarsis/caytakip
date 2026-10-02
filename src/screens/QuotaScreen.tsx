@@ -6,6 +6,7 @@ import { HarvestRecord } from '../types';
 import { QuotaPlan, calculateQuota, eligibleRecord, linkedRecord, isCaykur, validateQuotaPlans, totalQuotaKg, withTotalQuota } from '../../shared/quota';
 import { CaylikButton, CaylikScreenHeader, CaylikSurface } from '../components/caylik-ui';
 import DatePickerField from '../components/date-picker-field';
+import AdMobNativeCard from '../components/AdMobNativeCard';
 import { formatDisplayDate, toServerDate, todayDisplayDate } from '../utils/format';
 import { styles } from '../styles/styles';
 
@@ -156,6 +157,7 @@ export default function QuotaScreen({ authFetch }: Props) {
           <CaylikButton mode="text" disabled={busy} onPress={() => Alert.alert('Kota planı silinsin mi?', 'Yalnızca bu plan silinir. Hasat kayıtlarınız korunur.', [{ text: 'Vazgeç', style: 'cancel' }, { text: 'Planı sil', style: 'destructive', onPress: () => void persist(plans.filter((item) => item.id !== p.id)) }])}>Planı sil</CaylikButton>
         </CaylikSurface>;
       })}
+      {!!plans.length && <AdMobNativeCard />}
       {!!unassigned.length && <CaylikSurface style={local.card}>
         <Text style={[local.title, { color: theme.colors.onSurface }]}>Cüzdan eşleştirmesi gereken teslimatlar · {unassigned.length}</Text>
         <Text style={[local.body, { color: theme.colors.onSurfaceVariant }]}>Eski veya plansız kayıtlar rastgele bir cüzdandan düşülmez. Bunları bir kez eşleştirin. Önceki teslimat toplamına dahil ettiğiniz miktarları tekrar saymayın.</Text>

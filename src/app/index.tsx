@@ -65,6 +65,7 @@ import SharecroppingScreen from '../screens/SharecroppingScreen';
 import { shareRequest, type ShareLink } from '../services/sharecropping';
 import { collectionEndpoint, paymentEndpoint } from '../services/shareLedger';
 import { useSharecroppingPush } from '../hooks/useSharecroppingPush';
+import { useShareEvents } from '../hooks/useShareEvents';
 
 const ONBOARDING_STORAGE_PREFIX = '@caylik_onboarding_v1';
 const ONBOARDING_STEPS = [
@@ -244,6 +245,7 @@ export default function App() {
     factoryPrices,
     ads, setAds,
     lastSyncAt,
+    dataStale,
     fetchData,
   } = useAppData({ currentUser, authFetch, getAuthHeaders, setLoading, onFeedback: showOperationFeedback });
   const {
@@ -259,6 +261,7 @@ export default function App() {
   const refreshAssistantWallet = aiAssistant.refreshWallet;
   const storePurchases = useStorePurchases(currentUser?.userId, authFetch, aiAssistant.refreshWallet);
   const sharecroppingPush = useSharecroppingPush(currentUser, authFetch, () => setActiveTab('sharecropping'));
+  const shareEvents = useShareEvents(currentUser?.userId, authFetch);
   const navigateTab = useHarvestAdNavigation({
     userId: currentUser?.userId, proStatus: storePurchases.proStatus, activeTab,
     enabled: onboardingStep === null && !adTrackingPromptVisible && !loading && !storePurchases.purchasingProductId && !storePurchases.restoring,
@@ -1397,6 +1400,10 @@ export default function App() {
           {failedSyncCount > 0 && <TouchableOpacity onPress={manageFailedOfflineRequests}><Text style={{ color: paperTheme.colors.error }}>{failedSyncCount} kayıt için işlem gerekli</Text></TouchableOpacity>}
         </MobileBrandHeader>}
 
+        {dataStale && <TouchableOpacity accessibilityRole="button" onPress={() => void fetchData()} style={{ padding: 10, backgroundColor: paperTheme.colors.surfaceVariant }}>
+          <Text style={{ color: paperTheme.colors.onSurfaceVariant }}>Hesap güncellenemedi · {lastSyncAt ? `Son kayıt: ${new Date(lastSyncAt).toLocaleString('tr-TR')}` : 'Bağlantı bekleniyor'} · Yenile</Text>
+        </TouchableOpacity>}
+
         {harvestReward?.userId === currentUser.userId && <HarvestReward key={harvestReward.id} userId={currentUser.userId} kind={harvestReward.kind} value={harvestReward.value} />}
         {operationFeedback && (
           <TouchableOpacity
@@ -1588,6 +1595,7 @@ export default function App() {
           {activeTab === 'more' && <MoreScreen isAdmin={Boolean(isAdmin)} onNavigate={navigateTab} />}
           {activeTab === 'sharecropping' && <SharecroppingScreen key={`${currentUser.userId}:${shareFocus.userId === currentUser.userId ? shareFocus.linkId : ''}`} initialLinkId={shareFocus.userId === currentUser.userId ? shareFocus.linkId : ''} userId={currentUser.userId} authFetch={policyRequest} enablePush={sharecroppingPush.enable} onPageChange={resetSharecroppingScroll} refreshKey={harvests}
             accountHarvests={harvests.filter(row => Boolean(row.sharedDeliveryId))}
+            unread={shareEvents.unread} onEventsChanged={() => void shareEvents.refresh()}
             onCollect={openPaymentForHarvest}
             onRefreshAccount={() => { void fetchData(); }}
             onAddHarvest={id => { setHarvestShareLinkId(id); navigateTab('harvest'); }}
@@ -1672,7 +1680,7 @@ export default function App() {
                   key={item.tab}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: active }}
-                  accessibilityLabel={item.label}
+                  accessibilityLabel={item.tab === 'sharecropping' && shareEvents.unread ? `${item.label}, ${shareEvents.unread} okunmamış hareket` : item.label}
                   style={[styles.mobileBottomNavItem, { borderRadius: 16, paddingVertical: 6, backgroundColor: active ? paperTheme.colors.primaryContainer : 'transparent' }, centerAction && styles.mobileBottomNavCenterItem]}
                   onPress={() => navigateTab(item.tab)}
                 >
@@ -1684,6 +1692,7 @@ export default function App() {
                     centerAction && { backgroundColor: paperTheme.colors.primary, borderColor: paperTheme.colors.surface },
                   ]}>
                     <AppIcon name={item.icon} size={centerAction ? 27 : 23} color={centerAction ? paperTheme.colors.onPrimary : active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant} />
+                    {item.tab === 'sharecropping' && shareEvents.unread > 0 && <Text style={{ position: 'absolute', right: -12, top: -6, backgroundColor: paperTheme.colors.error, color: paperTheme.colors.onError, borderRadius: 10, minWidth: 19, textAlign: 'center', paddingHorizontal: 3, fontSize: 11 }}>{shareEvents.unread > 99 ? '99+' : shareEvents.unread}</Text>}
                   </View>
                   <Text numberOfLines={2} style={[styles.mobileBottomNavText, centerAction && styles.mobileBottomNavCenterText, active && styles.mobileBottomNavTextActive, { color: active ? paperTheme.colors.primary : paperTheme.colors.onSurfaceVariant }]}>{item.label}</Text>
                 </TouchableOpacity>

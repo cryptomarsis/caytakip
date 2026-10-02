@@ -34,7 +34,7 @@ export default function DashboardStatus({ authFetch, harvests, pending, onQuota 
   const end = new Date(`${today}T12:00:00`); end.setDate(end.getDate() + 7);
   const upcoming = harvests.filter(item => { const date = toServerDate(item.vadeTarihi || ''); return date && date >= today && new Date(`${date}T12:00:00`) <= end; }).reduce((sum, item) => sum + Math.max(0, remainingTotalOf(item)), 0);
   return <CaylikSurface style={{ padding: 16, marginVertical: 12 }}>
-    <Text style={{ color: theme.colors.onSurface, fontWeight: '700', fontSize: 16 }}>Kısa durum</Text>
+    <Text style={{ color: theme.colors.onSurface, fontWeight: '700', fontSize: 16 }}>Kota ve ödeme özeti</Text>
     <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>{quota}</Text>
     <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>Önümüzdeki 7 günün vadeli alacağı: {formatTL(upcoming)}</Text>
     {pending > 0 && <View><Text style={{ color: theme.colors.secondary, marginTop: 6 }}>{pending} kayıt gönderilmeyi bekliyor; henüz toplamlara dahil değil.</Text></View>}

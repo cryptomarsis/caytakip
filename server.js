@@ -692,6 +692,8 @@ app.get('/api/health', (req, res) => {
     ok: databaseReady,
     database: databaseReady ? 'ready' : 'unavailable',
     version: '2026-08-29-apple-iap-key-v3',
+    release: '1.0.17',
+    revision: process.env.RENDER_GIT_COMMIT || null,
     appleIap: isAppleIapConfigured() ? 'configured' : `not-configured:${APPLE_IAP_KEY_STATUS.reason || 'credentials'}`,
     service: 'cay-ureticisi-takip'
   });

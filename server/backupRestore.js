@@ -32,6 +32,13 @@ function validateBackup(body, names) {
     for (const payment of delivery.collections || []) {
       if (!idPattern.test(String(payment._id)) || paymentIds.has(String(payment._id)) || ![delivery.cropperId, delivery.ownerId].includes(payment.userId) || !Number.isSafeInteger(payment.amountCents) || payment.amountCents <= 0) throw Error('Pay tahsilatı geçersiz.');
       paymentIds.add(String(payment._id));
+      if (payment.history !== undefined) {
+        if (!Array.isArray(payment.history) || payment.history.length > 101) throw Error('Tahsilat geçmişi geçersiz.');
+        for (const change of payment.history) {
+          if (!['update', 'delete'].includes(change.action) || !Number.isFinite(Date.parse(change.at))) throw Error('Tahsilat geçmişi geçersiz.');
+          for (const value of [change.before, change.after]) if (!value || !Number.isSafeInteger(value.amountCents) || value.amountCents < 0 || typeof value.date !== 'string' || typeof value.note !== 'string' || value.note.length > 500) throw Error('Tahsilat geçmişi tutarı geçersiz.');
+        }
+      }
       if (payment.requestId) { const key = payment.userId + ':' + payment.requestId; if (requestIds.has(key)) throw Error('Tekrarlı pay tahsilatı.'); requestIds.add(key); }
     }
     require('../shared/shareLedger').assertCollectionsFit(delivery, delivery.data, delivery.voided);

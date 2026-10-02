@@ -6,7 +6,7 @@ const path = require('node:path');
 const { withBuildProperties } = require('expo-build-properties');
 const root = path.join(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
-const config = require('../app.config').expo;
+const config = require('../app.config')({ config: require('../app.json').expo });
 const plugins = config.plugins.filter(item => Array.isArray(item) && item[0] === 'expo-build-properties');
 
 test('cloud prebuild keeps Android release shrinking in the source config and preserves iOS', () => {

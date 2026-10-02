@@ -30,3 +30,12 @@ Eski kaynak hasattaki toplam tahsilat otomatik bölüştürülmez. Uygulama bu k
 İki hesapla davet/onay, üçüncü hesabın erişememesi, aynı yarıcının iki müstahsile farklı kayıtları, 1/2 ve 1/3 hesapları, bağlantı kapatma, düzeltme/iptal ve toplamlar, ağ kesilip tekrar gönderme, çıkış sonrası diğer hesabın kayıtlarının görünmemesi. 100 kg × 30 TL, 1/2 örneğinde iki tarafta 100 kg ve 1.470 TL pay olmalı. Yarıcı 100 TL tahsil edince kendi kalan payı 1.370 TL, müstahsilin kalan payı 1.470 TL kalmalı. Eski tahsilat onaysız aktarılmamalı, iki onaydan sonra bir kez aktarılmalı. İlgisiz kişisel hasatlar değişmemeli.
 
 İlk bağımsız sürüm backend'i daha önce gönderildi. Bu hasat bağlantısı/görünüm geliştirmesinde yeni sunucu dağıtımı, mağaza paketi ve gerçek cihaz bildirim testi yapılmadı.
+
+## Hesap kullanım iyileştirmeleri
+
+- CSV/Excel, teslimat brüt/kesinti/net tutarlarını kişisel net pay, pay oranı ve kişisel tahsilattan ayırır. PDF özeti kişisel tutarların anlamını açıklar. Paylaşılan tutarlar sunucunun kuruş bazlı değerlerini kullanır. Rapor metinleri HTML olarak çalıştırılmaz.
+- Pay Takibi özeti ve aylık grafik aynı yıl/sürgün filtresini kullanır. Önceki yıllardan kalan alacak ayrıca gösterilir. Her anlaşmanın ayrıntısında seçilen dönemin PDF hesap özeti paylaşılabilir; uzun listeler ek sayfalara devam eder. Diğer kişinin özel tahsilatları ve özel notlar rapora alınmaz. Eski tahsilat onayı bekleyen tutarlar kesinleşmemiş olarak işaretlenir.
+- Pay tahsilatının bundan sonraki düzeltme/iptalleri önceki tutar, tarih ve notu; yeni değerleri ve değişiklik zamanını saklar. Geçmiş yalnızca tahsilat sahibine sunulur. Önceden üzerine yazılmış eski değerler uydurulmaz. İptal edilen tahsilatın geçmişi korunur.
+- `/api/sharecropping-events` kullanıcıya ait okunmamış sayıyı ve sayfalı olayları döndürür. `/api/sharecropping-events/:eventId/read` yalnızca alıcının seçtiği olayı okundu işaretler. Sayaç uygulama ön plandayken dakikada bir ve uygulamaya dönüşte güncellenir; tüm kullanıcılar adına toplu işaretleme yapılmaz.
+- Kısmi bağlantı hatasında ilk açılışta da cihazdaki son hesap korunur; güncellik uyarısı ve elle yenileme görünür. Başarısız sonuçlar sağlam önbelleğin üzerine yazılmaz. Sekme geçişlerinin hesap yenilemeleri 30 saniyelik pencereyi paylaşır; kayıt/düzeltme sonrası ve elle yenileme bu süreyi beklemez.
+- Önce sunucu dağıtılmalı, ardından iki hesapla emülatör/gerçek cihaz testi yapılmalı. Bu bölümdeki değişiklikler yeni native bağımlılık eklemez; push özelliğini otomatik etkinleştirmez ve mağazalara kendiliğinden gönderilmez.

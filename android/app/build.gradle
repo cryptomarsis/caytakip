@@ -93,7 +93,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 9
-        versionName "1.0.13"
+        // Keep local builds aligned with the same version used by EAS Prebuild.
+        versionName new groovy.json.JsonSlurper().parse(rootProject.file('../app.json')).expo.version
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

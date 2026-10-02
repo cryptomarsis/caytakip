@@ -7,6 +7,7 @@ import { CaylikButton, CaylikScreenHeader, CaylikSurface } from '../components/c
 import { AppIcon } from '../components/app-icon';
 import DatePickerField from '../components/date-picker-field';
 import SharedAccountPanel from '../components/SharedAccountPanel';
+import AdMobNativeCard from '../components/AdMobNativeCard';
 import SharedLegacyCollection from '../components/SharedLegacyCollection';
 import type { HarvestRecord } from '../types';
 import type { AuthFetch } from '../services/aiAssistant';
@@ -14,17 +15,18 @@ import { shareRequest, type ShareLink, type ShareDelivery, type ShareSummary, ty
 import { deliveryInput, shareAmounts } from '../../shared/sharecropping';
 import { formatTL, todayDisplayDate, toServerDate, formatDisplayDate, remainingTotalOf } from '../utils/format';
 
-type Props = { userId: string; authFetch: AuthFetch; enablePush: () => Promise<string>; onPageChange?: () => void; onAddHarvest?: (linkId: string) => void; onOpenHarvest?: (id: string) => void; refreshKey?: unknown; accountHarvests?: HarvestRecord[]; onCollect?: (row: HarvestRecord) => void; onRefreshAccount?: () => void; initialLinkId?: string };
+type Props = { userId: string; authFetch: AuthFetch; enablePush: () => Promise<string>; onPageChange?: () => void; onAddHarvest?: (linkId: string) => void; onOpenHarvest?: (id: string) => void; refreshKey?: unknown; accountHarvests?: HarvestRecord[]; onCollect?: (row: HarvestRecord) => void; onRefreshAccount?: () => void; initialLinkId?: string; unread?: number; onEventsChanged?: () => void };
 const emptyDraft = () => ({ kg: '', price: '', factory: '', date: todayDisplayDate(), dueDate: '' });
 const storageKey = (id: string) => '@caylik_shared_delivery_v1:' + id;
-export default function SharecroppingScreen({ userId, authFetch, enablePush, onPageChange, onAddHarvest, onOpenHarvest, refreshKey, accountHarvests, onCollect, onRefreshAccount, initialLinkId = '' }: Props) {
+export default function SharecroppingScreen({ userId, authFetch, enablePush, onPageChange, onAddHarvest, onOpenHarvest, refreshKey, accountHarvests, onCollect, onRefreshAccount, initialLinkId = '', unread = 0, onEventsChanged }: Props) {
   const theme = useTheme();
   const [page, setPage] = useState<'overview' | 'create' | 'join' | 'detail' | 'delivery'>(initialLinkId ? 'detail' : 'overview');
-  const [showDetails, setShowDetails] = useState(false), [showEvents, setShowEvents] = useState(false);
+  const [showDetails, setShowDetails] = useState(false), [showEvents, setShowEvents] = useState(unread > 0);
   useEffect(() => { onPageChange?.(); }, [page, onPageChange]);
   const [links, setLinks] = useState<ShareLink[]>([]), [selected, setSelected] = useState(initialLinkId);
   const [records, setRecords] = useState<ShareDelivery[]>([]), [totals, setTotals] = useState<ShareSummary | null>(null), [next, setNext] = useState<string | null>(null);
   const [events, setEvents] = useState<ShareEvent[]>([]);
+  const [nextEvents, setNextEvents] = useState<string | null>(null);
   const [overview, setOverview] = useState<ShareOverview[]>([]), [historyId, setHistoryId] = useState('');
   const [label, setLabel] = useState(''), [denominator, setDenominator] = useState<2 | 3>(2), [createdCode, setCreatedCode] = useState('');
   const [code, setCode] = useState(''), [preview, setPreview] = useState<{ cropperName: string; denominator: number; label: string } | null>(null);
@@ -45,10 +47,10 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
     const version = ++readVersion.current.list;
     const [a, b, c] = await Promise.all([
       shareRequest<{ links: ShareLink[] }>(authFetch, '/sharecropping'),
-      shareRequest<{ events: ShareEvent[] }>(authFetch, '/sharecropping-events'),
+      shareRequest<{ events: ShareEvent[]; next?: string | null }>(authFetch, '/sharecropping-events'),
       shareRequest<{ links: ShareOverview[] }>(authFetch, '/sharecropping-summary').catch(() => ({ links: [] })),
     ]);
-    if (alive.current && version === readVersion.current.list) { setLinks(a.links); setEvents(b.events); setOverview(c.links); }
+    if (alive.current && version === readVersion.current.list) { setLinks(a.links); setEvents(b.events); setNextEvents(b.next || null); setOverview(c.links); }
   }, [authFetch]);
   const loadRecords = useCallback(async (id: string, before?: string) => {
     const version = ++readVersion.current.records;
@@ -69,9 +71,8 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
       }
       setStorageReady(true);
     }).catch(() => { if (!cancelled) setMessage('Bekleyen teslimat okunamadı. Yeni kayıt açmadan uygulamayı yeniden başlatın.'); });
-    void refresh().catch(e => { if (alive.current) setMessage(e.message); });
     return () => { cancelled = true; alive.current = false; versions.list++; versions.records++; };
-  }, [refresh, userId]);
+  }, [userId]);
   useEffect(() => {
     const versions = readVersion.current;
     void refresh().catch(e => { if (alive.current) setMessage(e.message); });
@@ -81,10 +82,10 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
     });
     return () => { versions.records++; listener.remove(); };
   }, [selected, loadRecords, refresh, refreshKey]);
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (fn: () => Promise<void>, refreshAccount = true) => {
     if (lock.current) return;
     lock.current = true; setBusy(true); setMessage('');
-    try { await fn(); if (alive.current) onRefreshAccount?.(); } catch (e) { if (alive.current) setMessage(e instanceof Error ? e.message : 'İşlem tamamlanamadı.'); }
+    try { await fn(); if (alive.current && refreshAccount) onRefreshAccount?.(); } catch (e) { if (alive.current) setMessage(e instanceof Error ? e.message : 'İşlem tamamlanamadı.'); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   };
   const sendPending = async (item: PendingSharedDelivery) => {
@@ -123,6 +124,20 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
   const statusLabel = (status: ShareLink['status']) => status === 'active' ? 'Aktif' : status === 'pending' ? 'Onay bekliyor' : 'Kapalı';
   const partnerName = (item: ShareLink) => item.myRole === 'cropper' ? item.ownerName || 'Davet bekleniyor' : item.cropperName;
   const accountRecord = (id: string) => accountHarvests?.find(row => row.sharedDeliveryId === id);
+  const openEvent = (event: ShareEvent) => {
+    selectLink(event.linkId);
+    if (!event.readAt) void shareRequest(authFetch, `/sharecropping-events/${event._id}/read`, 'POST', {}).then(() => {
+      if (!alive.current) return;
+      setEvents(old => old.map(e => e._id === event._id ? { ...e, readAt: new Date().toISOString() } : e));
+      onEventsChanged?.();
+    }).catch(() => { if (alive.current) setMessage('Hareket açıldı; okundu bilgisi kaydedilemedi.'); });
+  };
+  const moreEvents = () => run(async () => {
+    if (!nextEvents) return;
+    const version = readVersion.current.list;
+    const result = await shareRequest<{ events: ShareEvent[]; next: string | null }>(authFetch, `/sharecropping-events?before=${nextEvents}`);
+    if (alive.current && version === readVersion.current.list) { setEvents(old => [...old, ...result.events.filter(e => !old.some(p => p._id === e._id))]); setNextEvents(result.next); }
+  }, false);
   const openCreate = () => { setPage('create'); setMessage(''); };
   const openJoin = () => { setPage('join'); setMessage(''); };
   const inviteText = `Çaylık · ${label}\nYarıcı payım: 1/${denominator}, müstahsil payı: ${denominator - 1}/${denominator} (%2 kesinti sonrası).\nDavet kodu: ${createdCode}\nPay Takibi → Davet koduyla katıl. Onaylamadan önce adımı ve payları kontrol et.`;
@@ -133,7 +148,7 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
     <View style={s.toolbar}>
       {page !== 'overview' && <Pressable accessibilityRole="button" accessibilityLabel="Geri" disabled={busy} onPress={goBack} style={s.iconButton}><AppIcon name="arrow-left" color={theme.colors.primary} /></Pressable>}
       <View style={s.flex}><CaylikScreenHeader icon="account-group-outline" title={heading} /></View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Kayıtları yenile" disabled={busy} onPress={() => void run(async () => { await refresh(); if (selected) await loadRecords(selected); onRefreshAccount?.(); })} style={s.iconButton}><AppIcon name="refresh" color={theme.colors.primary} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Kayıtları yenile" disabled={busy} onPress={() => void run(async () => { await refresh(); if (selected) await loadRecords(selected); onEventsChanged?.(); })} style={s.iconButton}><AppIcon name="refresh" color={theme.colors.primary} /></Pressable>
     </View>
     {!!message && <Text accessibilityLiveRegion="polite" style={[s.notice, text, { backgroundColor: theme.colors.surfaceVariant }]}>{message}</Text>}
 
@@ -146,9 +161,10 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
         <View style={s.valueRow}><Text style={{ color: theme.colors.onPrimary }}>{totalKg.toLocaleString('tr-TR')} kg teslimat</Text><Text style={{ color: theme.colors.onPrimary }}>{links.filter(item => item.status === 'active').length} aktif anlaşma</Text></View>
         <Text style={[s.caption, { color: theme.colors.onPrimary, opacity: 0.8 }]}>%2 kesinti sonrası · Tahsilat değildir</Text>
       </View>}
+      {!!links.length && <AdMobNativeCard />}
       <View style={s.actions}>
-        <CaylikButton style={s.action} icon="plus" disabled={busy} onPress={openCreate}>Yeni anlaşma</CaylikButton>
-        <CaylikButton style={s.action} mode="outlined" disabled={busy} onPress={openJoin}>Davet koduyla katıl</CaylikButton>
+        <CaylikButton size="compact" style={s.action} icon="plus" disabled={busy} onPress={openCreate}>Yeni anlaşma</CaylikButton>
+        <CaylikButton size="compact" style={s.action} mode="outlined" disabled={busy} onPress={openJoin}>Davet koduyla katıl</CaylikButton>
       </View>
       {!links.length ? <CaylikSurface style={s.empty}>
         <AppIcon name="sprout-outline" size={36} color={theme.colors.primary} />
@@ -165,10 +181,11 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
           <AppIcon name="chevron-right" color={theme.colors.onSurfaceVariant} />
         </Pressable>)}
       </>}
-      <CaylikButton mode="text" icon="bell-outline" disabled={busy} onPress={() => void run(async () => { setMessage(await enablePush()); })}>Bildirimleri aç</CaylikButton>
+      <CaylikButton size="compact" mode="text" icon="bell-outline" disabled={busy} onPress={() => void run(async () => { setMessage(await enablePush()); })}>Bildirimleri aç</CaylikButton>
       {!!events.length && <>
-        <CaylikButton mode="text" onPress={() => setShowEvents(value => !value)}>{showEvents ? 'Son hareketleri gizle' : 'Son hareketler'}</CaylikButton>
-        {showEvents && <CaylikSurface style={s.card}>{events.map(event => <Pressable key={event._id} accessibilityRole="button" accessibilityLabel={event.message + ', anlaşmayı aç'} disabled={busy} onPress={() => selectLink(event.linkId)} style={s.event}><Text style={[text, s.flex]}>{event.message}</Text><AppIcon name="chevron-right" color={theme.colors.onSurfaceVariant} /></Pressable>)}</CaylikSurface>}
+        <CaylikButton size="compact" mode="text" onPress={() => setShowEvents(value => !value)}>{showEvents ? 'Son hareketleri gizle' : `Son hareketler${unread ? ` · ${unread} yeni` : ''}`}</CaylikButton>
+        {showEvents && <CaylikSurface style={s.card}>{events.map(event => <Pressable key={event._id} accessibilityRole="button" accessibilityLabel={event.message + ', anlaşmayı aç'} disabled={busy} onPress={() => openEvent(event)} style={s.event}><Text style={[text, s.flex, !event.readAt && { fontWeight: '800' }]}>{!event.readAt ? '● ' : ''}{event.message}</Text><AppIcon name="chevron-right" color={theme.colors.onSurfaceVariant} /></Pressable>)}</CaylikSurface>}
+        {showEvents && nextEvents && <CaylikButton mode="text" disabled={busy} onPress={() => void moreEvents()}>Önceki hareketler</CaylikButton>}
       </>}
     </>}
 
@@ -228,7 +245,7 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
 
     {page === 'detail' && link && <>
       <Text style={[s.partner, muted]}>{partnerName(link)} · {statusLabel(link.status)}</Text>
-      {accountHarvests && <SharedAccountPanel rows={accountHarvests.filter(row => row.shareLinkId === link._id)} onCollect={onCollect} />}
+      {accountHarvests && <SharedAccountPanel key={link._id} rows={accountHarvests.filter(row => row.shareLinkId === link._id)} onCollect={onCollect} reportTitle={`${link.label} · ${partnerName(link)} · ${link.myRole === 'cropper' ? 'Yarıcı hesabı' : 'Müstahsil hesabı'}`} />}
       {!accountHarvests && totals && <CaylikSurface style={s.card}>
         <Text style={muted}>Toplam teslimat</Text>
         <Text style={[s.heroNumber, { color: theme.colors.primary }]}>{totals.kg.toLocaleString('tr-TR')} <Text style={s.unit}>KG</Text></Text>
@@ -241,7 +258,7 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
       </CaylikSurface>}
       {link.status === 'pending' && <Text style={muted}>Müstahsil daveti onayladığında teslimat ekleyebilirsiniz.</Text>}
       {link.myRole === 'cropper' && link.status === 'active' && <CaylikButton icon="plus" disabled={busy || !!pending} onPress={() => { if (onAddHarvest) { onAddHarvest(link._id); return; } setEdit(null); setDraft(emptyDraft()); setMessage(''); setPage('delivery'); }}>Teslimat ekle</CaylikButton>}
-      <View style={s.sectionHeader}><Text style={[s.title, text]}>Teslimatlar</Text><CaylikButton mode="text" onPress={() => setShowDetails(value => !value)}>{showDetails ? 'Detayları gizle' : 'Anlaşma detayları'}</CaylikButton></View>
+      <View style={s.sectionHeader}><Text style={[s.title, text]}>Teslimatlar</Text><CaylikButton size="compact" mode="text" onPress={() => setShowDetails(value => !value)}>{showDetails ? 'Detayları gizle' : 'Anlaşma detayları'}</CaylikButton></View>
       {showDetails && <CaylikSurface style={s.card}>
         <Text style={muted}>Teslimatlar iki tarafın hesabına yansır. Herkes kendi payının alacağını ve tahsilatını yönetir. Yalnızca bu anlaşmanın kayıtları paylaşılır.</Text>
         {link.status !== 'closed' && <CaylikButton mode="text" disabled={busy} onPress={() => setCloseConfirm(true)}>Anlaşmayı kapat</CaylikButton>}
@@ -267,17 +284,17 @@ export default function SharecroppingScreen({ userId, authFetch, enablePush, onP
         </View>
         {accountRecord(record._id) && <>
           <Text style={muted}>Kendi tahsilatınız: {formatTL(Number(accountRecord(record._id)!.tahsilat || 0))} · Kalan payınız: {formatTL(remainingTotalOf(accountRecord(record._id)))}</Text>
-          {remainingTotalOf(accountRecord(record._id)) > 0.01 && <CaylikButton mode="outlined" disabled={Number(accountRecord(record._id)!.legacySharedCollection) > 0} onPress={() => onCollect?.(accountRecord(record._id)!)}>Bu teslimattan ödeme al</CaylikButton>}
+          {remainingTotalOf(accountRecord(record._id)) > 0.01 && <CaylikButton size="compact" mode="outlined" disabled={Number(accountRecord(record._id)!.legacySharedCollection) > 0} onPress={() => onCollect?.(accountRecord(record._id)!)}>Bu teslimattan ödeme al</CaylikButton>}
         </>}
         {!!record.changes?.length && <>
-          <CaylikButton mode="text" onPress={() => setHistoryId(historyId === record._id ? '' : record._id)}>{historyId === record._id ? 'Geçmişi gizle' : `Değişiklik geçmişi · ${record.changes.length}`}</CaylikButton>
+          <CaylikButton size="compact" mode="text" onPress={() => setHistoryId(historyId === record._id ? '' : record._id)}>{historyId === record._id ? 'Geçmişi gizle' : `Değişiklik geçmişi · ${record.changes.length}`}</CaylikButton>
           {historyId === record._id && <View style={[s.history, { borderColor: theme.colors.outlineVariant }]}>{record.changes.map(change => <View key={change.revision} style={s.historyEntry}><Text style={[s.caption, muted]}>{new Date(change.at).toLocaleString('tr-TR')} · #{change.revision}</Text>{change.details.map((detail, index) => <Text key={index} style={text}>{detail}</Text>)}</View>)}</View>}
         </>}
-        {link.myRole === 'cropper' && record.harvestId && !record.voided && <CaylikButton mode="outlined" onPress={() => onOpenHarvest?.(record.harvestId!)}>Bağlı hasadı düzenle</CaylikButton>}
+        {link.myRole === 'cropper' && record.harvestId && !record.voided && <CaylikButton size="compact" mode="outlined" onPress={() => onOpenHarvest?.(record.harvestId!)}>Bağlı hasadı düzenle</CaylikButton>}
         {link.myRole === 'cropper' && !record.harvestId && link.status === 'active' && !record.voided && <>
           <View style={s.row}>
-            <CaylikButton mode="text" disabled={busy || !!pending} onPress={() => { setEdit(record); setDraft({ kg: String(record.data.kg), price: String(record.data.price), factory: record.data.factory, date: formatDisplayDate(record.data.date), dueDate: record.data.dueDate ? formatDisplayDate(record.data.dueDate) : '' }); setMessage(''); setPage('delivery'); }}>Düzenle</CaylikButton>
-            <CaylikButton mode="text" disabled={busy || !!pending} onPress={() => setConfirmVoid(record._id)}>İptal et</CaylikButton>
+            <CaylikButton size="compact" style={s.inlineAction} mode="outlined" disabled={busy || !!pending} onPress={() => { setEdit(record); setDraft({ kg: String(record.data.kg), price: String(record.data.price), factory: record.data.factory, date: formatDisplayDate(record.data.date), dueDate: record.data.dueDate ? formatDisplayDate(record.data.dueDate) : '' }); setMessage(''); setPage('delivery'); }}>Düzenle</CaylikButton>
+            <CaylikButton size="compact" style={s.inlineAction} mode="outlined" disabled={busy || !!pending} onPress={() => setConfirmVoid(record._id)}>İptal et</CaylikButton>
           </View>
           {confirmVoid === record._id && <>
             <Text style={text}>Teslimat toplamdan çıkarılsın mı?</Text>
@@ -319,14 +336,15 @@ const s = StyleSheet.create({
   center: { textAlign: 'center', lineHeight: 22 }, title: { fontSize: 17, fontWeight: '700', lineHeight: 24 },
   sectionLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 1, marginTop: 12 },
   field: { gap: 8 }, row: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  actions: { gap: 10 }, action: { minHeight: 52 },
+  actions: { gap: 10 }, action: { minHeight: 52, width: '100%' },
+  inlineAction: { flexGrow: 1, flexBasis: 120, minWidth: 120 },
   input: { borderWidth: 1, borderRadius: 14, padding: 12, minHeight: 50, fontSize: 16 },
   notice: { padding: 14, borderRadius: 14, fontSize: 14, lineHeight: 21 },
   agreement: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12, borderWidth: 1, borderRadius: 22 },
   agreementIcon: { width: 48, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   partner: { fontSize: 15, marginTop: 4 }, status: { fontSize: 12, marginTop: 8, fontWeight: '600' }, pressed: { opacity: 0.8 },
-  shareOption: { flex: 1, minWidth: 110, alignItems: 'center', gap: 5, padding: 20, borderWidth: 1, borderRadius: 18 },
-  shareFraction: { fontSize: 32, fontWeight: '700' }, code: { fontSize: 18, fontWeight: '600', padding: 16, borderRadius: 14, textAlign: 'center' },
+  shareOption: { flex: 1, minWidth: 110, alignItems: 'center', gap: 4, padding: 16, borderWidth: 1, borderRadius: 16 },
+  shareFraction: { fontSize: 26, fontWeight: '700' }, code: { fontSize: 18, fontWeight: '600', padding: 16, borderRadius: 14, textAlign: 'center' },
   summary: { padding: 14, borderRadius: 14, gap: 10 }, heroNumber: { fontSize: 38, fontWeight: '800' }, unit: { fontSize: 18, fontWeight: '500' },
   summaryDivider: { borderTopWidth: 1, marginVertical: 2 }, metric: { flex: 1, minWidth: 120, gap: 6 },
   amount: { fontSize: 18, fontWeight: '700' }, caption: { fontSize: 12, lineHeight: 18 },

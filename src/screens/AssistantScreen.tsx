@@ -10,6 +10,7 @@ import { caylikDesign } from '../context/app-theme';
 import { CaylikButton, CaylikSurface } from '../components/caylik-ui';
 import { AiChatMessage, AiCreditTransaction } from '../services/aiAssistant';
 import { blockFeedbackSounds } from '../services/feedbackSounds';
+import AssistantRewardOffer from '../components/AssistantRewardOffer';
 
 const suggestions = [
   'Bu sezonki hasat ve alacak durumumu özetle.',
@@ -150,6 +151,8 @@ export default function AssistantScreen({ initialQuestion = '', messages, credit
           <Text style={[local.lowCreditLink, { color: theme.colors.error }]}>Paketler ›</Text>
         </TouchableOpacity>
       )}
+
+      <AssistantRewardOffer credits={credits} disabled={busy || transcribing || recorderState.isRecording || speakingId !== null} onOpenStore={onOpenStore} />
 
       {messages.length === 0 && (
         <CaylikSurface style={local.introCard}>

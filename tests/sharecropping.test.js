@@ -24,6 +24,7 @@ test('input rejects invalid dates, negatives, malformed numbers; ignores forged 
 
 const clone = value => value === undefined ? undefined : structuredClone(value);
 const matches = (row, query) => Object.entries(query).every(([key, value]) => {
+  if (value === null) return row[key] == null;
   if (key === '$or') return value.some(part => matches(row, part));
   if (value && typeof value === 'object' && !(value instanceof Date)) return Object.entries(value).every(([op, v]) => ({ $ne: () => row[key] !== v, $gt: () => row[key] > v, $lt: () => row[key] < v, $in: () => v.includes(row[key]) }[op])());
   return row[key] === value;
@@ -83,6 +84,20 @@ test('every endpoint authenticates; inactive account is blocked', async () => {
   const h = harness(); for (const handlers of h.routes.values()) assert.equal(handlers[0], h.requireAuth);
   assert.equal((await h.call('GET', '/api/sharecropping', null)).code, 401);
   h.db.users[0].active = false; assert.equal((await h.call('GET', '/api/sharecropping')).code, 403);
+});
+
+test('unread events are recipient-scoped and only their recipient can acknowledge them', async () => {
+  const h = harness(), id = await h.pair();
+  await h.call('POST', '/api/sharecropping/:id/deliveries', 'cropper', base, { id });
+  const eventId = h.db.events[0]._id;
+  assert.equal((await h.call('GET', '/api/sharecropping-events', 'owner')).body.unread, 1);
+  assert.equal((await h.call('GET', '/api/sharecropping-events', 'cropper')).body.unread, 0);
+  const route = '/api/sharecropping-events/:eventId/read';
+  assert.equal((await h.call('POST', route, 'outsider', {}, { eventId })).code, 404);
+  assert.equal((await h.call('POST', route, 'owner', {}, { eventId: 'bad' })).code, 400);
+  assert.equal((await h.call('POST', route, 'owner', {}, { eventId })).code, 200);
+  assert.equal((await h.call('GET', '/api/sharecropping-events', 'owner')).body.unread, 0);
+  assert.equal((await h.call('POST', route, 'owner', {}, { eventId })).code, 200);
 });
 test('invitations require explicit mutual approval and cannot be stolen or self-accepted', async () => {
   const h = harness(), invite = await h.call('POST', '/api/sharecropping/invites', 'cropper', { label: 'Test', denominator: 2 });

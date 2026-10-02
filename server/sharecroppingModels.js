@@ -22,6 +22,11 @@ module.exports = function models(mongoose) {
       userId: { type: String, required: true }, requestId: String, requestHash: String,
       amountCents: { type: Number, required: true }, date: String, note: String,
       voided: { type: Boolean, default: false }, revision: { type: Number, default: 0 },
+      history: { type: [new mongoose.Schema({
+        at: Date, action: { type: String, enum: ['update', 'delete'] },
+        before: { amountCents: Number, date: String, note: String },
+        after: { amountCents: Number, date: String, note: String },
+      }, { _id: false })], default: [] },
     }, { timestamps: true })], default: [] },
     financeSerial: { type: Number, default: 0 },
     legacyAllocation: mongoose.Schema.Types.Mixed,
@@ -37,6 +42,7 @@ module.exports = function models(mongoose) {
     nextAt: { type: Date, default: Date.now }, tickets: [mongoose.Schema.Types.Mixed], lastError: String,
   });
   event.index({ state: 1, nextAt: 1 });
+  event.index({ recipient: 1, readAt: 1 });
   const device = schema({
     _id: String, userId: { type: String, required: true, index: true },
     sessionHash: String, sessionCreatedAt: Date, expiresAt: Date,

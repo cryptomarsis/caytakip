@@ -33,11 +33,13 @@ export const parseMoney = (value: unknown) => {
 };
 
 export const grossTotalOf = (record: any) =>
-  parseMoney(record?.kg ?? record?.weight ?? 0) * parseMoney(record?.fiyat ?? 0);
+  record?.sharedDeliveryId && Number.isSafeInteger(record.sharedGrossCents) ? record.sharedGrossCents / 100
+    : parseMoney(record?.kg ?? record?.weight ?? 0) * parseMoney(record?.fiyat ?? 0);
 
 export const AGRICULTURAL_WITHHOLDING_RATE = 2;
 
 export const deductionTotalOf = (record: any) => {
+  if (record?.sharedDeliveryId && Number.isSafeInteger(record.sharedTaxCents)) return record.sharedTaxCents / 100;
   const savedDeduction = record?.kesintiTutar ?? record?.deductionAmount;
   if (savedDeduction !== undefined && savedDeduction !== null && String(savedDeduction).trim() !== '') {
     return Math.max(0, parseMoney(savedDeduction));
@@ -50,6 +52,13 @@ export const netTotalOf = (record: any) =>
   record?.sharedDeliveryId && Number.isSafeInteger(record.sharedNetCents)
     ? Math.max(0, record.sharedNetCents / 100)
     : Math.max(0, grossTotalOf(record) - deductionTotalOf(record));
+
+// Whole delivery and personal entitlement must never share one report column.
+export const saleNetTotalOf = (record: any) => record?.sharedDeliveryId && Number.isSafeInteger(record.sharedSaleNetCents)
+  ? record.sharedSaleNetCents / 100 : Math.max(0, grossTotalOf(record) - deductionTotalOf(record));
+export const shareLabelOf = (record: any) => record?.sharedDeliveryId
+  ? `${record.sharedRole === 'cropper' ? 1 : Number(record.shareDenominator) - 1}/${record.shareDenominator}` : 'Tamamı';
+export const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 export const remainingTotalOf = (record: any) =>
   Math.max(0, netTotalOf(record) - parseMoney(record?.tahsilat ?? 0));

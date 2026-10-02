@@ -19,9 +19,16 @@ export interface HarvestRecord {
   shareDenominator?: number;
   sharedNetCents?: number;
   sharedSaleNetCents?: number;
+  sharedGrossCents?: number;
+  sharedTaxCents?: number;
   legacySharedCollection?: number;
   legacyAllocation?: { proposalId: string; state: 'pending' | 'applied'; sourceCents: number; cropperCents: number; ownerCents: number };
   sharedPayments?: PaymentRecord[];
+  sharedCollectionHistory?: { paymentId: string; voided: boolean; changes: {
+    at: string; action: 'update' | 'delete';
+    before: { amountCents: number; date: string; note: string };
+    after: { amountCents: number; date: string; note: string };
+  }[] }[];
   fiyat?: number | string;
   brutTutar?: number | string;
   kesintiTutar?: number | string;

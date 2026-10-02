@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
-import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, parseMoney, remainingTotalOf } from '../utils/format';
+import { deductionTotalOf, formatTL, formatDisplayDate, grossTotalOf, netTotalOf, parseMoney, remainingTotalOf, saleNetTotalOf, shareLabelOf, escapeHtml } from '../utils/format';
 import { HarvestRecord, ExpenseRecord } from '../types';
 import { styles } from '../styles/styles';
 import { AppIcon } from '../components/app-icon';
@@ -123,10 +123,10 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
   const maxGardenKg = Math.max(...gardenHarvests.map(g => g.kg), 1);
 
   const exportCSV = async () => {
-    const esc = (v:unknown) => `"${String(v ?? '').replace(/"/g,'""')}"`;
+    const esc = (v:unknown) => `"${(typeof v === 'string' && /^[=+@\-\t\r]/.test(v) ? "'" + v : String(v ?? '')).replace(/"/g,'""')}"`;
     const rows = [
-      ['Tarih','Sürüm','Üretici','KG','Fabrika','Brüt Birim Fiyat','Brüt Satış','%2 Kesinti','Net Satış','Tahsilat','Kalan','Bahçe','Vade Tarihi'],
-      ...selected.map(h => [formatDisplayDate(h.tarih), h.surum, h.producerName || h.uretici, kgOf(h), h.firma, priceOf(h), grossOf(h), deductionOf(h), saleOf(h), paidOf(h), remainingTotalOf(h), h.garden || h.bahce, formatDisplayDate(h.vadeTarihi)])
+      ['Tarih','Sürüm','Üretici','Teslimat KG','Fabrika','Brüt Birim Fiyat','Teslimat Brüt Satış','Teslimat Kesintisi','Teslimat Net Satış','Pay Oranı','Benim Net Payım','Benim Tahsilatım','Benim Kalan Alacağım','Bahçe','Vade Tarihi','Eski Tahsilat Onayı'],
+      ...selected.map(h => [formatDisplayDate(h.tarih), h.surum, h.producerName || h.uretici, kgOf(h), h.firma, priceOf(h), grossOf(h), deductionOf(h), saleNetTotalOf(h), shareLabelOf(h), saleOf(h), paidOf(h), remainingTotalOf(h), h.garden || h.bahce, formatDisplayDate(h.vadeTarihi), h.legacySharedCollection ? 'Bekliyor; kalan tutar kesinleşmedi' : ''])
     ];
     const content = rows.map(r=>r.map(esc).join(';')).join('\n');
     const desktop = getDesktopBridge();
@@ -153,8 +153,8 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
     try {
       const rows = selected.map(h => ({
         Tarih: formatDisplayDate(h.tarih), Sürüm: h.surum || '', Üretici: h.producerName || h.uretici || '', KG: kgOf(h),
-        Fabrika: h.firma || '', 'Brüt Birim Fiyat': priceOf(h), 'Brüt Satış': grossOf(h), '%2 Kesinti': deductionOf(h), 'Net Satış': saleOf(h), Tahsilat: paidOf(h),
-        Kalan: remainingTotalOf(h), Bahçe: h.garden || h.bahce || '', 'Vade Tarihi': formatDisplayDate(h.vadeTarihi)
+        Fabrika: h.firma || '', 'Brüt Birim Fiyat': priceOf(h), 'Teslimat Brüt Satış': grossOf(h), 'Teslimat Kesintisi': deductionOf(h), 'Teslimat Net Satış': saleNetTotalOf(h), 'Pay Oranı': shareLabelOf(h), 'Benim Net Payım': saleOf(h), 'Benim Tahsilatım': paidOf(h),
+        'Benim Kalan Alacağım': remainingTotalOf(h), Bahçe: h.garden || h.bahce || '', 'Vade Tarihi': formatDisplayDate(h.vadeTarihi), 'Eski Tahsilat Onayı': h.legacySharedCollection ? 'Bekliyor; kalan tutar kesinleşmedi' : ''
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
       const gardenWs = XLSX.utils.json_to_sheet(gardenHarvests.map(g => ({
@@ -187,18 +187,19 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
 
   const exportPDF = async () => {
     try {
-      const versionRows = versions.map(v => `<tr><td>${v.name}</td><td>${v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td></tr>`).join('');
+      const reportHtml = (html: string) => html.replace(/Net Satış/g, 'Benim Net Payım').replace('</h1>', '</h1><p>KG teslimatın tamamını, parasal özet yalnızca bu hesabın payını ve kendi tahsilatlarını gösterir.</p>' + (selected.some(h => h.legacySharedCollection) ? '<p>Eski tahsilat onayı bekleyen kayıtlar var; ilgili kalan alacaklar kesinleşmemiştir.</p>' : ''));
+      const versionRows = versions.map(v => `<tr><td>${escapeHtml(v.name)}</td><td>${v.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td></tr>`).join('');
       const monthRows = monthly.map(x => `<tr><td>${months[x.month]}</td><td>${x.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(x.sales)}</td></tr>`).join('');
-      const factoryRows = factorySales.map(f => `<tr><td>${f.name}</td><td>${f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(f.sales)}</td></tr>`).join('');
-      const gardenRows = gardenHarvests.map(g => `<tr><td>${g.name}</td><td>${g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(g.sales)}</td></tr>`).join('');
+      const factoryRows = factorySales.map(f => `<tr><td>${escapeHtml(f.name)}</td><td>${f.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(f.sales)}</td></tr>`).join('');
+      const gardenRows = gardenHarvests.map(g => `<tr><td>${escapeHtml(g.name)}</td><td>${g.kg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</td><td>${formatTL(g.sales)}</td></tr>`).join('');
       const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px;color:#1b4332}h1,h2{color:#1b4332}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#e9f5ee}.cards{display:flex;flex-wrap:wrap;gap:10px}.card{border:1px solid #ddd;padding:10px;width:45%}</style></head><body><h1>Çaylık Raporu - ${year}</h1><div class="cards"><div class="card">Toplam Hasat<br><b>${totalKg.toLocaleString('tr-TR',{maximumFractionDigits:2})} KG</b></div><div class="card">Net Satış<br><b>${formatTL(totalSales)}</b></div><div class="card">Toplam Tahsilat<br><b>${formatTL(totalPaid)}</b></div><div class="card">Bekleyen Alacak<br><b>${formatTL(receivable)}</b></div><div class="card">Toplam Gider<br><b>${formatTL(totalExpenses)}</b></div></div><h2>Sürüm Bazlı Hasat</h2><table><tr><th>Sürüm</th><th>Toplam KG</th></tr>${versionRows}</table><h2>Bahçe Bazında Hasat</h2><table><tr><th>Bahçe</th><th>Toplam KG</th><th>Net Satış</th></tr>${gardenRows}</table><h2>Aylık Hasat</h2><table><tr><th>Ay</th><th>KG</th><th>Net Satış</th></tr>${monthRows}</table><h2>Fabrika Bazında Satış</h2><table><tr><th>Fabrika</th><th>KG</th><th>Net Satış</th></tr>${factoryRows}</table></body></html>`;
       const desktop = getDesktopBridge();
       if (desktop) {
-        const result = await desktop.printPdf({ defaultFileName: `Caylik_${year}.pdf`, html });
+        const result = await desktop.printPdf({ defaultFileName: `Caylik_${year}.pdf`, html: reportHtml(html) });
         if (!result.canceled) Alert.alert('PDF Hazır', 'Dosya bilgisayarınıza kaydedildi.');
         return;
       }
-      const pdf = await Print.printToFileAsync({ html, base64: true });
+      const pdf = await Print.printToFileAsync({ html: reportHtml(html), base64: true });
       if (!pdf.base64 || !FileSystem.cacheDirectory) throw new Error('PDF dosyası hazırlanamadı.');
 
       // Print modülünün geçici URL'si bazı Android cihazlarda paylaşım izni vermez.
@@ -221,6 +222,8 @@ export default function ReportsScreen({ harvests, expenses }: Props) {
 
   return <View>
     <CaylikScreenHeader icon="chart-areaspline" eyebrow="SEZON ANALİZİ" title="Raporlar" description="Hasat, satış, tahsilat ve bahçe performansınızı inceleyin." />
+    {selected.some(h => h.sharedDeliveryId) && <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 10 }}>KG teslimatın tamamıdır; satış ve alacak özetleri yalnızca sizin net payınızı içerir.</Text>}
+    {selected.some(h => h.legacySharedCollection) && <Text accessibilityRole="alert" style={{ color: theme.colors.error, marginBottom: 10 }}>Eski tahsilat onayı bekleyen kayıtlar var. İlgili kalan alacaklar kesinleşmemiştir.</Text>}
     <View style={styles.rowBtnGroup}>{years.map(y=><TouchableOpacity key={y} style={[styles.groupBtn,{backgroundColor:theme.colors.surfaceVariant,borderColor:theme.colors.outline},year===y&&styles.groupBtnActive]} onPress={()=>setYear(y)}><Text style={[styles.groupBtnText,{color:theme.colors.onSurface},year===y&&styles.groupBtnTextActive]}>{y}</Text></TouchableOpacity>)}</View>
 
     <View style={styles.statsGrid}>

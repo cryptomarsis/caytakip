@@ -157,7 +157,16 @@ module.exports = function register(app, { requireAuth, limitPublicUsage, mongoos
     res.json({ record: publicDelivery(record) });
   }));
   app.get('/api/sharecropping-events', requireAuth, run(async (req, res) => {
-    const rows = await ShareEvent.find({ recipient: req.auth.userId }).select('_id linkId message createdAt readAt').sort({ createdAt: -1 }).limit(30).lean();
-    res.json({ events: rows });
+    const before = req.query.before;
+    if (before && !/^[a-f0-9]{24}$/i.test(String(before))) throw fail(400, 'Geçersiz hareket sayfası.');
+    const rows = await ShareEvent.find({ recipient: req.auth.userId, ...(before ? { _id: { $lt: before } } : {}) }).select('_id linkId message createdAt readAt').sort({ _id: -1 }).limit(30).lean();
+    const unread = await ShareEvent.countDocuments({ recipient: req.auth.userId, readAt: null });
+    res.json({ events: rows, unread, next: rows.length === 30 ? String(rows[rows.length - 1]._id) : null });
+  }));
+  app.post('/api/sharecropping-events/:eventId/read', requireAuth, run(async (req, res) => {
+    if (!/^[a-f0-9]{24}$/i.test(String(req.params.eventId))) throw fail(400, 'Geçersiz hareket.');
+    const event = await ShareEvent.findOneAndUpdate({ _id: req.params.eventId, recipient: req.auth.userId }, { $set: { readAt: new Date() } }, { new: true });
+    if (!event) throw fail(404, 'Hareket bulunamadı.');
+    res.json({ ok: true });
   }));
 };

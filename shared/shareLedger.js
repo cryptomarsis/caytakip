@@ -23,12 +23,20 @@ function projectDelivery(row, userId, link, source) {
     surum: source?.surum || '', sharedNetCents: share, toplamTutar: share / 100,
     tahsilat: paid / 100, kalanBakiye: Math.max(0, share - paid) / 100,
     sharedSaleNetCents: row.data.netCents,
+    sharedGrossCents: row.data.grossCents, sharedTaxCents: row.data.taxCents,
     legacySharedCollection: row.legacyAllocation?.state === 'applied' ? 0 : Number(source?.tahsilat || 0),
     legacyAllocation: row.legacyAllocation ? {
       proposalId: row.legacyAllocation.proposalId, state: row.legacyAllocation.state,
       cropperCents: row.legacyAllocation.cropperCents, ownerCents: row.legacyAllocation.ownerCents,
       sourceCents: row.legacyAllocation.sourceCents,
     } : undefined,
+    sharedCollectionHistory: (row.collections || []).filter(p => p.userId === userId && (p.history?.length || p.voided)).map(p => ({
+      paymentId: String(p._id), voided: Boolean(p.voided),
+      changes: (p.history || []).map(h => ({ at: h.at, action: h.action,
+        before: { amountCents: h.before?.amountCents, date: h.before?.date, note: h.before?.note || '' },
+        after: { amountCents: h.after?.amountCents, date: h.after?.date, note: h.after?.note || '' },
+      })),
+    })),
     sharedPayments: (row.collections || []).filter(p => p.userId === userId && !p.voided).map(p => ({
       _id: String(p._id), sharedDeliveryId: String(row._id), revision: p.revision || 0,
       tarih: p.date, tutar: p.amountCents / 100, aciklama: p.note || '',

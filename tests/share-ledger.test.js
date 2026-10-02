@@ -79,6 +79,27 @@ test('independent collections are bounded by own share, exactly-once, and reject
   assert.equal(paidCents(h.db.rows[0], 'c'), 0);
   assert.equal((await h.call('POST', '', 'c', payment)).body.replayed, true); // deleted request never resurrects
 });
+
+test('collection edits keep immutable before/after audit, deletion stays visible only to its owner', async () => {
+  const h = harness(); await h.call('POST', '', 'c', payment);
+  const p = h.db.rows[0].collections[0];
+  await h.call('PUT', '', 'c', { ...payment, tutar: 150, aciklama: 'Düzeltme', revision: 0, history: ['forged'] }, p._id);
+  let audit = h.db.rows[0].collections[0].history;
+  assert.equal(audit.length, 1); assert.equal(audit[0].before.amountCents, 10000); assert.equal(audit[0].after.amountCents, 15000);
+  assert.equal(audit[0].before.note, payment.aciklama); assert.equal(audit[0].action, 'update');
+  assert.deepEqual((await h.call('GET', 'list', 'o')).body[0].sharedCollectionHistory, []);
+  h.control.failSave = true;
+  assert.equal((await h.call('DELETE', '', 'c', { revision: 1 }, p._id)).code, 500);
+  assert.equal(h.db.rows[0].collections[0].history.length, 1);
+  h.control.failSave = false;
+  await h.call('DELETE', '', 'c', { revision: 1 }, p._id);
+  const row = (await h.call('GET', 'list', 'c')).body[0];
+  assert.equal(row.tahsilat, 0); assert.equal(row.sharedPayments.length, 0);
+  assert.equal(row.sharedCollectionHistory[0].voided, true);
+  audit = row.sharedCollectionHistory[0].changes;
+  assert.equal(audit.length, 2); assert.equal(audit[1].before.amountCents, 15000); assert.equal(audit[1].after.amountCents, 0);
+  assert.equal(audit[1].action, 'delete');
+});
 test('concurrent payments cannot exceed remaining share; failures roll back both balance and idempotency', async () => {
   const h = harness(); const results = await Promise.all(['request-1111111111', 'request-2222222222'].map(key => h.call('POST', '', 'c', { ...payment, tutar: 1000 }, undefined, key)));
   assert.deepEqual(results.map(r => r.code).sort(), [201, 400]); assert.equal(paidCents(h.db.rows[0], 'c'), 100000);
